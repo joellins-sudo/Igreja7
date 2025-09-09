@@ -1,20 +1,5 @@
-# Essenciais para o sistema financeiro
-streamlit==1.37.0
-pandas==2.2.2
-sqlalchemy==2.0.32
-reportlab==4.2.2
-openpyxl==3.1.5
-
-# Segurança e autenticação
-cryptography==43.0.1
-bcrypt==4.2.0
-
-# Manipulação de datas
-python-dateutil==2.9.0
-
-# Visualização de dados (caso queira gráficos)
-matplotlib==3.9.1
-seaborn==0.13.2
-
-# Exportação e compatibilidade
-xlsxwriter==3.2.0
+streamlit
+sqlalchemy
+pandas
+st_aggrid
+reportlab
