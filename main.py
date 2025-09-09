@@ -15,6 +15,9 @@ from sqlalchemy.ext.declarative import declarative_base
 import unicodedata as ud
 import hashlib
 
+# Biblioteca para layout da pesquisa
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
+
 # PDF
 from io import BytesIO
 from reportlab.lib.pagesizes import A4
@@ -25,7 +28,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, 
 from reportlab.lib.enums import TA_CENTER
 
 # ===================== CONFIG: ADMIN =====================
-ADMIN_USERNAME = "admin"  # somente este login verá/entrará no "Cadastro"
+ADMIN_USERNAME = "admin" # somente este login verá/entrará no "Cadastro"
 
 # ===================== DB MODELS =====================
 Base = declarative_base()
@@ -37,7 +40,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String, unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String)
-    role: Mapped[str] = mapped_column(String)  # 'SEDE' ou 'TESOUREIRO'
+    role: Mapped[str] = mapped_column(String) # 'SEDE' ou 'TESOUREIRO'
     congregation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("congregations.id"))
     congregation: Mapped[Optional["Congregation"]] = relationship(back_populates="users")
 
@@ -53,14 +56,14 @@ class Category(Base):
     __tablename__ = "categories"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String, unique=True, index=True)
-    type: Mapped[str] = mapped_column(String)  # 'DOAÇÃO' ou 'SAÍDA'
+    type: Mapped[str] = mapped_column(String) # 'DOAÇÃO' ou 'SAÍDA'
     transactions: Mapped[List["Transaction"]] = relationship(back_populates="category")
 
 class Transaction(Base):
     __tablename__ = "transactions"
     id: Mapped[int] = mapped_column(primary_key=True)
     date: Mapped[date] = mapped_column(Date)
-    type: Mapped[str] = mapped_column(String)  # 'DOAÇÃO' ou 'SAÍDA'
+    type: Mapped[str] = mapped_column(String) # 'DOAÇÃO' ou 'SAÍDA'
     category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"))
     amount: Mapped[float] = mapped_column(Float)
     description: Mapped[Optional[str]] = mapped_column(String)
@@ -245,7 +248,7 @@ label, .stTextInput label, .stSelectbox label, .stNumberInput label{ color:#0f17
 }
 .stButton>button:hover{ filter:brightness(1.03); transform:translateY(-1px); }
 .btn-green button{ background: linear-gradient(180deg,#22c55e,#16a34a)!important; border-color:#16a34a!important; color:#fff!important; }
-.btn-red   button{ background: linear-gradient(180deg,#ef4444,#dc2626)!important; border-color:#dc2626!important; color:#fff!important; }
+.btn-red    button{ background: linear-gradient(180deg,#ef4444,#dc2626)!important; border-color:#dc2626!important; color:#fff!important; }
 .stDownloadButton>button{
   border:1px solid var(--ring)!important; color:#0f172a!important; background:#fff!important;
   border-radius:.7rem!important; font-weight:900!important;
@@ -546,7 +549,7 @@ def page_relatorio_entrada(user: "User"):
                     "Total": format_currency(total)
                 })
             df_summary = pd.DataFrame(rows)
-            if not df_summary.empty: st.dataframe(df_summary, use_container_width=True, hide_index=True)
+            if not df_summary.empty: st.dataframe(df_summary, use_container_width=True, hide_index=True, height=200)
             else: st.caption("Sem dízimos e ofertas para o período.")
         
         st.divider()
@@ -556,7 +559,7 @@ def page_relatorio_entrada(user: "User"):
             by_cong = defaultdict(set)
             for t in all_tz: by_cong[t.congregation.name].add(_norm(t.tither_name))
             df = pd.DataFrame([{"Congregação": k, "Qtde de dizimistas": len(v)} for k,v in sorted(by_cong.items())])
-            if not df.empty: st.dataframe(df, use_container_width=True, hide_index=True)
+            if not df.empty: st.dataframe(df, use_container_width=True, hide_index=True, height=200)
             else: st.caption("Sem dízimos.")
         else:
             names = {_norm(t.tither_name) for t in data["tithes"]}
@@ -569,7 +572,7 @@ def page_relatorio_entrada(user: "User"):
             for t in data["tx_in"]:
                 if t.category and _norm(t.category.name) == "missoes": agg[t.congregation.name] += float(t.amount)
             dfm = pd.DataFrame([{"Congregação": k, "Entradas Missões": format_currency(v)} for k,v in sorted(agg.items())])
-            if not dfm.empty: st.dataframe(dfm, use_container_width=True, hide_index=True)
+            if not dfm.empty: st.dataframe(dfm, use_container_width=True, hide_index=True, height=200)
             else: st.caption("Sem entradas de Missões.")
         else:
             val = sum(float(t.amount) for t in data["tx_in"] if t.category and _norm(t.category.name) == "missoes")
@@ -582,10 +585,10 @@ def page_relatorio_entrada(user: "User"):
         } for t in data["tx_in"]]
         csv = pd.DataFrame(rows_csv).to_csv(index=False).encode("utf-8-sig")
         st.download_button("⬇️ Baixar CSV das ENTRADAS do período", data=csv,
-                           file_name=f"entradas_{start.strftime('%Y-%m')}.csv", mime="text/csv")
+                          file_name=f"entradas_{start.strftime('%Y-%m')}.csv", mime="text/csv")
 
         # ===== Exclusões (SEDE) =====
-        if user.role == "SEDE":
+        if user.role == "SEDE" and not is_all:
             st.divider()
             st.subheader("Exclusões (SEDE)")
 
@@ -613,7 +616,7 @@ def page_relatorio_entrada(user: "User"):
                 df_tx = pd.DataFrame(base_rows)
                 if not df_tx.empty:
                     df_tx["Valor (R$)"] = df_tx["Valor (R$)"].map(format_currency)
-                    st.dataframe(df_tx, use_container_width=True, hide_index=True)
+                    st.dataframe(df_tx, use_container_width=True, hide_index=True, height=200)
                     ids = st.multiselect("IDs para excluir", df_tx["ID"].tolist())
                     conf = st.text_input("Digite EXCLUIR para confirmar", key="del_in_conf")
                     if st.button("Excluir ENTRADAS selecionadas", disabled=(not ids or conf!="EXCLUIR")):
@@ -631,7 +634,7 @@ def page_relatorio_entrada(user: "User"):
                 } for t in data["tithes"]])
                 if not df_tz.empty:
                     df_tz["Valor (R$)"] = df_tz["Valor (R$)"].map(format_currency)
-                    st.dataframe(df_tz, use_container_width=True, hide_index=True)
+                    st.dataframe(df_tz, use_container_width=True, hide_index=True, height=200)
                     ids2 = st.multiselect("IDs de dízimos para excluir", df_tz["ID"].tolist(), key="del_tithe_ids_in")
                     conf2 = st.text_input("Digite EXCLUIR para confirmar", key="del_tithe_conf_in")
                     if st.button("Excluir dízimos selecionados", disabled=(not ids2 or conf2!="EXCLUIR")):
@@ -684,7 +687,7 @@ def page_relatorio_saida(user: "User"):
             for t in txs: agg[t.congregation.name] += float(t.amount)
             df = pd.DataFrame([{"Congregação": k, "Total de saídas": format_currency(v)} for k,v in sorted(agg.items())])
             st.subheader("Resumo por congregação")
-            if not df.empty: st.dataframe(df, use_container_width=True, hide_index=True)
+            if not df.empty: st.dataframe(df, use_container_width=True, hide_index=True, height=200)
             else: st.caption("Sem saídas.")
         else:
             resumo = defaultdict(lambda: {"Quantidade":0, "Valor":0.0})
@@ -699,7 +702,7 @@ def page_relatorio_saida(user: "User"):
             if not df_res.empty:
                 df_res["Valor (R$)"] = df_res["Valor (R$)"].map(format_currency)
                 st.subheader("Resumo por tipo de saída")
-                st.dataframe(df_res, use_container_width=True, hide_index=True)
+                st.dataframe(df_res, use_container_width=True, hide_index=True, height=200)
             else:
                 st.caption("Sem saídas no período.")
 
@@ -711,7 +714,7 @@ def page_relatorio_saida(user: "User"):
             if not df_list.empty:
                 df_list["Valor (R$)"] = df_list["Valor (R$)"].map(format_currency)
                 st.subheader("Lançamentos de saída")
-                st.dataframe(df_list, use_container_width=True, hide_index=True)
+                st.dataframe(df_list, use_container_width=True, hide_index=True, height=200)
             else:
                 st.caption("Sem lançamentos para listar.")
 
@@ -723,7 +726,7 @@ def page_relatorio_saida(user: "User"):
                 if t.category and _norm(t.category.name) == "missoes":
                     agg[t.congregation.name] += float(t.amount)
             dfm = pd.DataFrame([{"Congregação": k, "Saídas Missões": format_currency(v)} for k,v in sorted(agg.items())])
-            if not dfm.empty: st.dataframe(dfm, use_container_width=True, hide_index=True)
+            if not dfm.empty: st.dataframe(dfm, use_container_width=True, hide_index=True, height=200)
             else: st.caption("Sem saídas de Missões.")
         else:
             val = sum(float(t.amount) for t in txs if t.category and _norm(t.category.name) == "missoes")
@@ -792,7 +795,7 @@ def page_relatorio_dizimistas(user: "User"):
                 by_cong[k]["valor"] += float(t.amount)
             df = pd.DataFrame([{"Congregação": k, "Qtde de dizimistas": v["qtd"], "Total (R$)": format_currency(v["valor"])}
                                for k,v in sorted(by_cong.items())])
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df, use_container_width=True, hide_index=True, height=200)
             st.info("Selecione uma congregação específica para ver a lista nominal.")
         else:
             tithes = db.scalars(select(Tithe).where(
@@ -809,7 +812,7 @@ def page_relatorio_dizimistas(user: "User"):
             cols_metrics = st.columns(max(1, len(tithes_by_payment)))
             for i, (method, data) in enumerate(tithes_by_payment.items()):
                 cols_metrics[i].metric(f"Total ({method})", format_currency(data["total"]),
-                                       f"{data['count']} dízimos")
+                                        f"{data['count']} dízimos")
 
             st.divider()
             df = pd.DataFrame([{
@@ -819,7 +822,7 @@ def page_relatorio_dizimistas(user: "User"):
                 "Forma de Pagamento": t.payment_method or "Não Informado"
             } for t in tithes])
             if not df.empty:
-                st.dataframe(df, use_container_width=True, hide_index=True)
+                st.dataframe(df, use_container_width=True, hide_index=True, height=200)
                 st.metric("Total de dízimos", format_currency(sum(float(t.amount) for t in tithes)))
             else:
                 st.caption("Sem dízimos neste período.")
@@ -887,7 +890,7 @@ def page_relatorio_dizimistas(user: "User"):
             agg[key]["total_ano"] += float(t.amount)
             agg[key]["meses"].add(t.date.month)
             if t.date < agg[key]["primeiro"]: agg[key]["primeiro"] = t.date
-            if t.date > agg[key]["ultimo"]:   agg[key]["ultimo"]   = t.date
+            if t.date > agg[key]["ultimo"]:    agg[key]["ultimo"]   = t.date
 
         rows = []
         for k, info in agg.items():
@@ -905,9 +908,21 @@ def page_relatorio_dizimistas(user: "User"):
         df_pesq = pd.DataFrame(rows)
         if not df_pesq.empty:
             df_pesq = df_pesq.sort_values(["Qtde de meses no ano","Dizimista"], ascending=[False, True])
-            df_show = df_pesq.copy()
-            df_show["Total no ano (R$)"] = df_show["Total no ano (R$)"].map(format_currency)
-            st.dataframe(df_show, use_container_width=True, hide_index=True)
+            
+            # Use AgGrid para a tabela com filtros
+            gb = GridOptionsBuilder.from_dataframe(df_pesq)
+            gb.configure_grid_options(domLayout='normal')
+            gb.configure_column("Dizimista", filter=True, floatingFilter=True)
+            gb.configure_column("Congregação", filter=True, floatingFilter=True)
+            
+            gridOptions = gb.build()
+            
+            AgGrid(df_pesq, 
+                   gridOptions=gridOptions,
+                   data_return_mode='AS_INPUT', 
+                   update_mode='MODEL_CHANGED',
+                   allow_unsafe_jscode=True, 
+                   enable_enterprise_modules=True)
 
             tot_reg = len(df_pesq)
             tot_val = float(df_pesq["Total no ano (R$)"].sum())
@@ -1212,7 +1227,7 @@ def page_visao_geral(user: "User"):
         # ===== Ranking Top 5 — apenas SEDE =====
         if user.role == "SEDE":
             df_rank = pd.DataFrame([{"Congregação": n, "Entradas (D+O + Outras)": v, "Saídas": s, "Saldo": sal, "Missões (entrada)": m}
-                                    for (n, v, s, sal, m) in agg_total])
+                                     for (n, v, s, sal, m) in agg_total])
             if not df_rank.empty:
                 df_sorted = df_rank.sort_values("Entradas (D+O + Outras)", ascending=False).reset_index(drop=True)
                 top_n = min(5, len(df_sorted))
@@ -1231,7 +1246,7 @@ def page_visao_geral(user: "User"):
                         "Saldo": df_sorted["Saldo"].map(lambda x: format_currency(float(x))),
                         "Missões (entrada)": df_sorted["Missões (entrada)"].map(lambda x: format_currency(float(x)))
                     }),
-                    use_container_width=True, hide_index=True
+                    use_container_width=True, hide_index=True, height=200
                 )
             else:
                 st.caption("Sem dados neste mês.")
@@ -1282,14 +1297,14 @@ def page_cadastro(user: "User"):
 
         congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
         users_by_cong = dict(db.execute(select(Congregation.id, func.count(User.id))
-                            .join(User, User.congregation_id == Congregation.id, isouter=True)
-                            .group_by(Congregation.id)).all())
+                                 .join(User, User.congregation_id == Congregation.id, isouter=True)
+                                 .group_by(Congregation.id)).all())
         tx_by_cong = dict(db.execute(select(Congregation.id, func.count(Transaction.id))
-                         .join(Transaction, Transaction.congregation_id == Congregation.id, isouter=True)
-                         .group_by(Congregation.id)).all())
+                              .join(Transaction, Transaction.congregation_id == Congregation.id, isouter=True)
+                              .group_by(Congregation.id)).all())
         tithes_by_cong = dict(db.execute(select(Congregation.id, func.count(Tithe.id))
-                             .join(Tithe, Tithe.congregation_id == Congregation.id, isouter=True)
-                             .group_by(Congregation.id)).all())
+                                  .join(Tithe, Tithe.congregation_id == Congregation.id, isouter=True)
+                                  .group_by(Congregation.id)).all())
 
         dfc = pd.DataFrame([{
             "ID": c.id, "Nome": c.name,
@@ -1299,7 +1314,7 @@ def page_cadastro(user: "User"):
         } for c in congs_all])
 
         if not dfc.empty:
-            st.dataframe(dfc, use_container_width=True, hide_index=True)
+            st.dataframe(dfc, use_container_width=True, hide_index=True, height=200)
             with st.expander("Excluir congregações"):
                 st.caption("Só é possível excluir congregações **sem usuários, lançamentos ou dízimos**. A congregação **Sede** não pode ser excluída.")
                 eligible_ids = []
@@ -1336,13 +1351,13 @@ def page_cadastro(user: "User"):
 
         cats = db.scalars(select(Category).order_by(Category.type, Category.name)).all()
         usage = dict(db.execute(select(Category.id, func.count(Transaction.id))
-                    .join(Transaction, Transaction.category_id == Category.id, isouter=True)
-                    .group_by(Category.id)).all())
+                     .join(Transaction, Transaction.category_id == Category.id, isouter=True)
+                     .group_by(Category.id)).all())
         dfcat = pd.DataFrame([{
             "ID": c.id, "Nome": c.name, "Tipo": c.type, "Usos em lançamentos": int(usage.get(c.id, 0))
         } for c in cats])
         if not dfcat.empty:
-            st.dataframe(dfcat, use_container_width=True, hide_index=True)
+            st.dataframe(dfcat, use_container_width=True, hide_index=True, height=200)
             with st.expander("Excluir categorias"):
                 st.caption("Só é possível excluir categorias **sem lançamentos** vinculados.")
                 ids_del = st.multiselect("IDs de categorias para excluir", dfcat.loc[dfcat["Usos em lançamentos"] == 0, "ID"].tolist())
@@ -1389,7 +1404,7 @@ def page_cadastro(user: "User"):
             "Congregação": (db.get(Congregation, u.congregation_id).name if u.congregation_id else "—")
         } for u in users])
         if not dfu.empty:
-            st.dataframe(dfu, use_container_width=True, hide_index=True)
+            st.dataframe(dfu, use_container_width=True, hide_index=True, height=200)
             with st.expander("Excluir usuários"):
                 st.caption("Não é permitido excluir o usuário atualmente logado.")
                 ids_u = st.multiselect("IDs de usuários para excluir", dfu["ID"].tolist())
