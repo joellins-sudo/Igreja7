@@ -578,44 +578,9 @@ def page_relatorio_entrada(user: "User"):
         c5.metric("Saldo", format_currency(saldo))
 
         st.divider()
-        st.subheader("Resumo por data e Congregação (Dízimo e Oferta)")
-        
-        # --- Lógica para o resumo mensal de todas as congregações
-        if is_all:
-            all_tx_in = db.scalars(select(Transaction).options(joinedload(Transaction.category), joinedload(Transaction.congregation)).where(
-                Transaction.date >= start, Transaction.date < end, Transaction.type.in_((TYPE_IN, "RECEITA"))
-            ).order_by(Transaction.date, Transaction.congregation_id)).all()
-            all_tithes = db.scalars(select(Tithe).options(joinedload(Tithe.congregation)).where(
-                Tithe.date >= start, Tithe.date < end
-            ).order_by(Tithe.date, Tithe.congregation_id)).all()
 
-            summary_data = defaultdict(lambda: defaultdict(lambda: {"dizimo": 0.0, "oferta": 0.0}))
-            for t in all_tx_in:
-                if t.category and _norm(t.category.name) in ("dizimo", "dízimo"):
-                    summary_data[t.date][t.congregation.name]["dizimo"] += float(t.amount)
-                elif t.category and _norm(t.category.name) == "oferta":
-                    summary_data[t.date][t.congregation.name]["oferta"] += float(t.amount)
-            
-            for t in all_tithes:
-                summary_data[t.date][t.congregation.name]["dizimo"] += float(t.amount)
-            
-            rows = []
-            for d, cong_totals in sorted(summary_data.items()):
-                for cong_name, totals in sorted(cong_totals.items()):
-                    total = totals["dizimo"] + totals["oferta"]
-                    rows.append({
-                        "Data do Culto": format_date(d),
-                        "Congregação": cong_name,
-                        "Dízimo": format_currency(totals["dizimo"]),
-                        "Oferta": format_currency(totals["oferta"]),
-                        "Total": format_currency(total)
-                    })
-            df_summary = pd.DataFrame(rows)
-            if not df_summary.empty:
-                st.dataframe(df_summary, use_container_width=True, hide_index=True, height=500)
-            else:
-                st.caption("Sem dízimos e ofertas para o período.")
-        else: # Escopo é uma única congregação
+        if not is_all:
+            st.subheader("Resumo por data (Dízimo e Oferta)")
             summary_by_date = defaultdict(lambda: {"dizimo": 0.0, "oferta": 0.0})
             for t in data["tx_in"]:
                 if t.category and _norm(t.category.name) in ("dizimo", "dízimo"):
@@ -639,7 +604,7 @@ def page_relatorio_entrada(user: "User"):
                 st.dataframe(df_summary, use_container_width=True, hide_index=True, height=200)
             else:
                 st.caption("Sem dízimos e ofertas para o período.")
-        # --- Fim da lógica da nova tabela ---
+
 
         st.divider()
         st.subheader("Dizimistas no período")
@@ -903,7 +868,7 @@ def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, m
     # Tabela com os dados da pesquisa
     data_table = [df.columns.tolist()] + df.values.tolist()
     total_value = float(df["Total no ano (R$)"].sum())
-    total_row = ["", "", "", "Total Geral:", format_currency(total_value), "", ""]
+    total_row = ["", "", "", "Total Geral:", total_value, "", ""]
     data_table.append(total_row)
     
     # Converta valores de moeda para o formato de texto
@@ -911,7 +876,7 @@ def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, m
         if isinstance(row[4], float):
             row[4] = format_currency(row[4])
 
-    tbl = Table(data_table, colWidths=[3.2*cm, 3.2*cm, 2.5*cm, 3.5*cm, 3.5*cm, 3.0*cm, 3.0*cm])
+    tbl = Table(data_table, colWidths=[3.5*cm, 3.5*cm, 2.0*cm, 2.5*cm, 2.5*cm, 2.0*cm, 2.0*cm])
     tbl.setStyle(table_style)
     story.append(tbl)
     
