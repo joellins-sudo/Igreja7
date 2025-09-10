@@ -855,6 +855,7 @@ def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, m
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("ALIGN", (0, 0), (-1, -1), "LEFT"),
         ("ALIGN", (4, 1), (4, -1), "RIGHT"),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"), # Adicionado para corrigir a fonte do corpo
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ])
 
