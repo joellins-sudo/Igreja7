@@ -1185,6 +1185,7 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
         ("ALIGN", (1, 0), (1, -1), "RIGHT"),
         ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#e2fbe2")),
         ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
     ]))
     story.append(summary_table)
     story.append(Spacer(1, 0.8*cm))
@@ -1340,6 +1341,17 @@ def page_visao_geral(user: "User"):
                 )
             else:
                 st.caption("Sem dados neste mês.")
+
+        # ===== Resumo da congregação (para TESOUREIRO) =====
+        if user.role != "SEDE" and agg_total:
+            st.divider()
+            st.subheader("Resumo Financeiro Mensal")
+            df_summary_cong = pd.DataFrame([{"Métricas": "Entradas (D+O + Outras)", "Valor": format_currency(agg_total[0][1])},
+                                            {"Métricas": "Saídas", "Valor": format_currency(agg_total[0][2])},
+                                            {"Métricas": "Saldo", "Valor": format_currency(agg_total[0][3])},
+                                            {"Métricas": "Missões (entrada)", "Valor": format_currency(agg_total[0][4])}])
+            st.dataframe(df_summary_cong, use_container_width=True, hide_index=True)
+
 
         # ===== PDF consolidado — apenas SEDE =====
         if user.role == "SEDE":
