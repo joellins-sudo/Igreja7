@@ -535,6 +535,46 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, is_all: bool =
             "saldo": saldo
         }
     }
+# ===================== PDF: RELATÓRIO CONSOLIDADO DE SAÍDAS (NOVO) =====================
+def build_consolidated_outputs_pdf(ref: date, saidas_por_categoria: dict) -> bytes:
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('title', parent=styles['Heading1'], alignment=TA_CENTER, fontSize=16, spaceAfter=8)
+    subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=12, textColor=colors.black, spaceAfter=12)
+    heading_style = ParagraphStyle('heading', parent=styles['Heading2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
+    table_style = TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("ALIGN", (1, 1), (1, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#f1f5f9")),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+    ])
+
+    story = []
+    story.append(Paragraph("Relatório de Saídas Consolidado", title_style))
+    story.append(Paragraph(f"Mês de Referência: {ref.strftime('%B de %Y')}", subtitle_style))
+    story.append(Spacer(1, 0.5*cm))
+
+    total_geral = sum(saidas_por_categoria.values())
+
+    table_data = [["Tipo de Saída", "Valor Total"]]
+    sorted_saidas = sorted(saidas_por_categoria.items(), key=lambda item: item[0])
+    for tipo, valor in sorted_saidas:
+        table_data.append([tipo, format_currency(valor)])
+
+    table_data.append(["TOTAL GERAL", format_currency(total_geral)])
+    
+    tbl = Table(table_data, colWidths=[9*cm, 9*cm])
+    tbl.setStyle(table_style)
+    story.append(tbl)
+    
+    doc.build(story)
+    return buf.getvalue()
 
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 def page_relatorio_entrada(user: "User"):
@@ -829,6 +869,23 @@ def page_relatorio_saida(user: "User"):
             "⬇️ Baixar CSV das SAÍDAS do período",
             data=csv, file_name=f"saidas_{start.strftime('%Y-%m')}.csv", mime="text/csv"
         )
+        
+        # NOVO BOTÃO DE PDF DE SAÍDAS CONSOLIDADAS (APENAS SEDE)
+        if user.role == "SEDE":
+            st.divider()
+            st.subheader("Relatório Consolidado de Saídas (PDF)")
+            
+            # Agrega as saídas por categoria para o PDF
+            saidas_por_categoria = defaultdict(float)
+            for t in txs:
+                saidas_por_categoria[t.category.name] += float(t.amount)
+            
+            st.download_button(
+                "⬇️ Baixar PDF das Saídas Consolidadas",
+                data=build_consolidated_outputs_pdf(ref, saidas_por_categoria),
+                file_name=f"saidas_consolidadas_{start.strftime('%Y-%m')}.pdf",
+                mime="application/pdf"
+            )
 
         if user.role == "SEDE" and not is_all:
             st.divider(); st.subheader("Excluir SAÍDAS (SEDE)")
@@ -1073,315 +1130,6 @@ def page_relatorio_dizimistas(user: "User"):
 
         else:
             st.caption("Nenhum resultado para os filtros informados.")
-
-# ===================== PDF: PRESTAÇÃO DE CONTAS =====================
-def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
-    buf = BytesIO()
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('title', parent=styles['Heading1'], alignment=TA_CENTER, fontSize=16, spaceAfter=8)
-    subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=12, textColor=colors.black, spaceAfter=12)
-    heading_style = ParagraphStyle('heading', parent=styles['Heading2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
-    table_style = TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-    ])
-    tithe_table_style = TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-        ("ALIGN", (2, 1), (2, -1), "RIGHT"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-    ])
-
-    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
-    story: List = []
-
-    with SessionLocal() as db:
-        start, end = month_bounds(ref)
-        data = _collect_month_data(db, cong_id, start, end)
-
-        entries_by_date = defaultdict(lambda: {"dizimo": 0.0, "oferta": 0.0, "missoes": 0.0, "outros": 0.0})
-        for t in data["tx_in"]:
-            if t.category and _norm(t.category.name) in ("dizimo", "dízimo"):
-                entries_by_date[t.date]["dizimo"] += float(t.amount)
-            elif t.category and _norm(t.category.name) == "oferta":
-                entries_by_date[t.date]["oferta"] += float(t.amount)
-            elif t.category and _norm(t.category.name) in ("missoes","missões"):
-                entries_by_date[t.date]["missoes"] += float(t.amount)
-            else:
-                entries_by_date[t.date]["outros"] += float(t.amount)
-        for t in data["tithes"]:
-            entries_by_date[t.date]["dizimo"] += float(t.amount)
-
-        tx_in_data = [["Data do Culto", "Dízimo", "Oferta", "Total"]]
-        for d, totals in sorted(entries_by_date.items()):
-            diz = totals["dizimo"]; ofe = totals["oferta"]; total = diz + ofe
-            tx_in_data.append([d.strftime("%d/%m/%Y"), format_currency(diz), format_currency(ofe), format_currency(total)])
-
-        tithe_data = [["Data", "Nome do Dizimista", "Valor"]]
-        tithe_data.extend([[t.date.strftime("%d/%m/%Y"), t.tither_name, format_currency(t.amount)] for t in data["tithes"]])
-
-        tx_out_data = [["Data", "Categoria", "Descrição", "Valor"]]
-        tx_out_data.extend([[t.date.strftime("%d/%m/%Y"), t.category.name, t.description or "", format_currency(t.amount)] for t in data["tx_out"]])
-
-    story.append(Paragraph("Prestação de Contas Mensal", title_style))
-    story.append(Paragraph(f"Congregação: {cong_name}", subtitle_style))
-    story.append(Paragraph(f"Referente a: {ref.strftime('%B de %Y')}", subtitle_style))
-
-    # 1. Entradas
-    story.append(Paragraph("1. Entradas (Resumo: Dízimo e Oferta)", heading_style))
-    if len(tx_in_data) > 1:
-        tbl_in = Table(tx_in_data, colWidths=[3.2*cm, 4.0*cm, 4.0*cm, 5.3*cm])
-        tbl_in.setStyle(TableStyle([
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-            ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ]))
-        story.append(tbl_in)
-    else:
-        story.append(Paragraph("Nenhuma entrada registrada.", getSampleStyleSheet()['Normal']))
-    story.append(Spacer(1, 0.5*cm))
-
-    # 2. Dizimistas
-    story.append(Paragraph("2. Dizimistas (Lançamentos Nominais)", heading_style))
-    if len(tithe_data) > 1:
-        tbl_tithe = Table(tithe_data, colWidths=[3*cm, 9.5*cm, 4.5*cm])
-        tbl_tithe.setStyle(tithe_table_style)
-        story.append(tbl_tithe)
-    else:
-        story.append(Paragraph("Nenhum dízimo registrado.", getSampleStyleSheet()['Normal']))
-    story.append(Spacer(1, 0.5*cm))
-
-    # 3. Saídas
-    story.append(Paragraph("3. Saídas", heading_style))
-    if len(tx_out_data) > 1:
-        tbl_out = Table(tx_out_data, colWidths=[2.5*cm, 4.5*cm, 7.5*cm, 3.5*cm])
-        tbl_out.setStyle(table_style)
-        story.append(tbl_out)
-    else:
-        story.append(Paragraph("Nenhuma saída registrada.", getSampleStyleSheet()['Normal']))
-    story.append(Spacer(1, 1*cm))
-
-    # 4. Resumo Financeiro do Mês
-    story.append(Paragraph("4. Resumo Financeiro do Mês", heading_style))
-    with SessionLocal() as db:
-        start, end = month_bounds(ref)
-        totals = _collect_month_data(db, cong_id, start, end)["totals"]
-    summary_data = [
-        ["Total de Dízimos", format_currency(totals["dizimos"])],
-        ["Total de Ofertas", format_currency(totals.get("ofertas", 0.0))],
-        ["Total de Entradas (caixa principal)", format_currency(totals["entradas_total_sem_missoes"])],
-        ["Total de Saídas", format_currency(totals["saidas_total"])],
-        ["Saldo do Mês", format_currency(totals["entradas_total_sem_missoes"] - totals["saidas_total"])],
-    ]
-    summary_table = Table(summary_data, colWidths=[8*cm, 8*cm])
-    summary_table.setStyle(TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#e2fbe2")),
-        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-    ]))
-    story.append(summary_table)
-    story.append(Spacer(1, 0.8*cm))
-
-    # 5. Missões (Resumo do Mês)
-    story.append(Paragraph("5. Missões (Resumo do Mês)", heading_style))
-    missions_table = Table(
-        [["Descrição", "Valor"], ["Total de Missões no Mês", format_currency(totals.get("missoes", 0.0))]],
-        colWidths=[8*cm, 8*cm]
-    )
-    missions_table.setStyle(TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("ALIGN", (1, 1), (1, -1), "RIGHT"),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-    ]))
-    story.append(missions_table)
-
-    doc.build(story)
-    return buf.getvalue()
-
-# ===================== PDF: RELATÓRIO CONSOLIDADO (Visão Geral) =====================
-def build_consolidated_pdf(agg_total: list, ref: date) -> bytes:
-    buf = BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('title', parent=styles['Heading1'], alignment=TA_CENTER, fontSize=16, spaceAfter=8)
-    subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=12, textColor=colors.black, spaceAfter=12)
-    heading_style = ParagraphStyle('heading', parent=styles['Heading2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
-    table_style_main = TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#e2fbe2")),
-        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-    ])
-    table_style_missions = TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#eef2ff")),
-        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-    ])
-
-    story: List = []
-    story.append(Paragraph("Relatório Mensal", title_style))
-    story.append(Paragraph(f"Mês de Referência: {ref.strftime('%B de %Y')}", subtitle_style))
-    story.append(Spacer(1, 1*cm))
-
-    table_data = [["Congregação", "Entradas (D+O+Outras)", "Saídas", "Saldo"]]
-    total_entradas = total_saidas = total_saldo = 0.0
-    missions_rows = []; total_missoes = 0.0
-
-    for c_name, entradas, saidas, saldo, missoes in agg_total:
-        table_data.append([c_name, format_currency(entradas), format_currency(saidas), format_currency(saldo)])
-        total_entradas += entradas; total_saidas += saidas; total_saldo += saldo
-        missions_rows.append([c_name, missoes]); total_missoes += missoes
-
-    table_data.append(["TOTAL GERAL", format_currency(total_entradas), format_currency(total_saidas), format_currency(total_saldo)])
-    tbl = Table(table_data, colWidths=[5*cm, 4*cm, 4*cm, 4*cm]); tbl.setStyle(table_style_main)
-    story.append(tbl)
-
-    story.append(Spacer(1, 0.8*cm))
-    story.append(Paragraph("Missões por Congregação (Entradas)", heading_style))
-    missions_table_data = [["Congregação", "Missões (entrada)"]]
-    for r in missions_rows:
-        missions_table_data.append([r[0], format_currency(r[1])])
-    missions_table_data.append(["TOTAL GERAL DE MISSÕES", format_currency(total_missoes)])
-    tbl_m = Table(missions_table_data, colWidths=[9*cm, 9*cm]); tbl_m.setStyle(table_style_missions)
-    story.append(tbl_m)
-
-    doc.build(story)
-    return buf.getvalue()
-
-# ===================== HELPER: STAT CARD =====================
-def render_stat_card(col, label: str, full_text: str):
-    col.markdown(
-        f"""
-        <div class="stat-card">
-          <div class="stat-label">{label}</div>
-          <div class="stat-value">{full_text}</div>
-          <div class="tooltip">{full_text}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-# ===================== PAGE: VISÃO GERAL =====================
-def page_visao_geral(user: "User"):
-    ensure_seed()
-    with SessionLocal() as db:
-        with st.sidebar:
-            if os.path.exists(LOGO_PATH):
-                st.image(LOGO_PATH, use_column_width=True)
-            st.write(f"👤 **{user.username}** — *{user.role}*")
-            if st.button("Sair"):
-                st.session_state.uid=None; st.rerun()
-
-        st.markdown("<h1 class='page-title'>Visão Geral</h1>", unsafe_allow_html=True)
-        ref = get_month_selector()
-        start, end = month_bounds(ref)
-        
-        congs = cong_options_for(user, db)
-        ordered = order_congs_sede_first(congs)
-        
-        is_all = (user.role == "SEDE")
-        if is_all:
-            st.info("Escopo: **Todas as congregações**")
-        elif congs:
-            cong_obj = congs[0]
-            st.info(f"Escopo: **{cong_obj.name}**")
-        else:
-            st.info("Sem congregação vinculada."); return
-
-        agg_total = []
-        if is_all:
-            for c in ordered:
-                totals = _collect_month_data(db, c.id, start, end)["totals"]
-                agg_total.append((c.name, totals["entradas_total_sem_missoes"], totals["saidas_total"], totals["saldo"], totals["missoes"]))
-        elif congs:
-            cong_obj = congs[0]
-            totals = _collect_month_data(db, cong_obj.id, start, end)["totals"]
-            agg_total.append((cong_obj.name, totals["entradas_total_sem_missoes"], totals["saidas_total"], totals["saldo"], totals["missoes"]))
-
-        # ===== Ranking Top 5 — apenas SEDE =====
-        if user.role == "SEDE":
-            df_rank = pd.DataFrame([{"Congregação": n, "Entradas (D+O + Outras)": v, "Saídas": s, "Saldo": sal, "Missões (entrada)": m} for (n, v, s, sal, m) in agg_total])
-            if not df_rank.empty:
-                df_sorted = df_rank.sort_values("Entradas (D+O + Outras)", ascending=False).reset_index(drop=True)
-                top_n = min(5, len(df_sorted))
-                cols = st.columns(top_n)
-                for i in range(top_n):
-                    row = df_sorted.iloc[i]
-                    label = f"{i+1}º lugar"
-                    text = f"{row['Congregação']} — {format_currency(float(row['Entradas (D+O + Outras)']))}"
-                    render_stat_card(cols[i], label, text)
-                st.divider()
-                st.dataframe(
-                    df_sorted.assign(**{
-                        "Entradas (D+O + Outras)": df_sorted["Entradas (D+O + Outras)"].map(lambda x: format_currency(float(x))),
-                        "Saídas": df_sorted["Saídas"].map(lambda x: format_currency(float(x))),
-                        "Saldo": df_sorted["Saldo"].map(lambda x: format_currency(float(x))),
-                        "Missões (entrada)": df_sorted["Missões (entrada)"].map(lambda x: format_currency(float(x)))
-                    }),
-                    use_container_width=True, hide_index=True, height=200
-                )
-            else:
-                st.caption("Sem dados neste mês.")
-
-        # ===== Resumo da congregação (para TESOUREIRO) =====
-        if user.role != "SEDE" and agg_total:
-            st.divider()
-            st.subheader("Resumo Financeiro Mensal")
-            df_summary_cong = pd.DataFrame([{"Métricas": "Entradas (D+O + Outras)", "Valor": format_currency(agg_total[0][1])},
-                                            {"Métricas": "Saídas", "Valor": format_currency(agg_total[0][2])},
-                                            {"Métricas": "Saldo", "Valor": format_currency(agg_total[0][3])},
-                                            {"Métricas": "Missões (entrada)", "Valor": format_currency(agg_total[0][4])}])
-            st.dataframe(df_summary_cong, use_container_width=True, hide_index=True)
-
-
-        # ===== PDF consolidado — apenas SEDE =====
-        if user.role == "SEDE":
-            st.divider()
-            st.subheader("Relatório Consolidado Mensal")
-            st.download_button(
-                "⬇️ Baixar PDF do Relatório Geral",
-                data=build_consolidated_pdf(agg_total, ref),
-                file_name=f"relatorio_mensal_{start.strftime('%Y-%m')}.pdf",
-                mime="application/pdf"
-            )
-
-        # ===== PDF de prestação de contas (congregação específica) =====
-        st.subheader("Prestação de contas (PDF completo)")
-        if user.role == "SEDE":
-            sel = st.selectbox("Congregação", [c.name for c in ordered], key="pc_cong_sel")
-            cong_obj = next(c for c in ordered if c.name == sel)
-        else:
-            cong_obj = ordered[0]
-        st.download_button(
-            "⬇️ Baixar PDF do mês (completo)",
-            data=build_full_statement_pdf(cong_obj.id, cong_obj.name, ref),
-            file_name=f"prestacao_{_norm(cong_obj.name)}_{start.strftime('%Y-%m')}.pdf",
-            mime="application/pdf"
-        )
 
 # ===================== PAGE: RELATÓRIO DE MISSÕES (NOVO) =====================
 
