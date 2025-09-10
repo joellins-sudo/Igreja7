@@ -1437,8 +1437,10 @@ def build_missions_report_pdf(ref: date, entradas: list, saidas: list) -> bytes:
         for t in entradas:
             entradas_cong_sum[t.congregation.name] += float(t.amount)
         
+        # Corrige a ordenação para ser por valor (do maior para o menor)
         entradas_data = [["Congregação", "Entradas (R$)"]]
-        for cong_name, total in sorted(entradas_cong_sum.items()):
+        sorted_entradas = sorted(entradas_cong_sum.items(), key=lambda item: item[1], reverse=True)
+        for cong_name, total in sorted_entradas:
             entradas_data.append([cong_name, format_currency(total)])
         
         tbl_in = Table(entradas_data, colWidths=[9*cm, 9*cm])
