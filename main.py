@@ -43,7 +43,8 @@ CSS = """
 html, body { background: var(--bg); }
 header[data-testid="stHeader"]{ background: linear-gradient(180deg,#ffffff, #f6f9ff) !important; border-bottom:1px solid var(--ring); }
 .block-container{ padding-top: .9rem !important; }
-[data-testid="stSidebar"]{ background: linear-gradient(180deg,#ffffff,#fbfdff); border-right:1px solid var(--ring); }
+[data-testid="stSidebar"]{ background: linear-gradient(180deg,#ffffff,#fbfdff); border-right:1.
+px solid var(--ring); }
 [data-testid="stSidebar"] img{ border-radius: .6rem; border:1px solid var(--ring); box-shadow: 0 4px 16px rgba(0,0,0,.06); }
 .stRadio > div { gap: .5rem; }
 .stRadio label{ padding:.32rem .56rem; border-radius:.55rem; font-weight:700; }
@@ -363,7 +364,7 @@ def page_lancamentos(user: "User"):
 
             c1,c2,c3 = st.columns([1.1,1.4,2])
             with c1:
-                st.date_input("Data", value=st.session_state["ent_data"], key="ent_data")
+                st.date_input("Data do Culto", value=st.session_state["ent_data"], key="ent_data")
             with c2:
                 cats_in = categories_for_type(db, TYPE_IN)
                 cat_names_in = [c.name for c in cats_in] or ["—"]
@@ -419,7 +420,7 @@ def page_lancamentos(user: "User"):
 
             c1,c2,c3 = st.columns([1.1,2.2,1.1])
             with c1:
-                st.date_input("Data", value=st.session_state["dz_data"], key="dz_data")
+                st.date_input("Data do Culto", value=st.session_state["dz_data"], key="dz_data")
             with c2:
                 st.text_input("Nome do dizimista", key="dz_nome")
             with c3:
@@ -578,8 +579,44 @@ def page_relatorio_entrada(user: "User"):
         c5.metric("Saldo", format_currency(saldo))
 
         st.divider()
-        if not is_all:
-            st.subheader("Resumo por data (Dízimo e Oferta)")
+        st.subheader("Resumo por data e Congregação (Dízimo e Oferta)")
+        
+        # --- Lógica da nova tabela ---
+        if is_all:
+            all_tx_in = db.scalars(select(Transaction).options(joinedload(Transaction.category), joinedload(Transaction.congregation)).where(
+                Transaction.date >= start, Transaction.date < end, Transaction.type.in_((TYPE_IN, "RECEITA"))
+            ).order_by(Transaction.date, Transaction.congregation_id)).all()
+            all_tithes = db.scalars(select(Tithe).options(joinedload(Tithe.congregation)).where(
+                Tithe.date >= start, Tithe.date < end
+            ).order_by(Tithe.date, Tithe.congregation_id)).all()
+
+            summary_data = defaultdict(lambda: defaultdict(lambda: {"dizimo": 0.0, "oferta": 0.0}))
+            for t in all_tx_in:
+                if t.category and _norm(t.category.name) in ("dizimo", "dízimo"):
+                    summary_data[t.date][t.congregation.name]["dizimo"] += float(t.amount)
+                elif t.category and _norm(t.category.name) == "oferta":
+                    summary_data[t.date][t.congregation.name]["oferta"] += float(t.amount)
+            
+            for t in all_tithes:
+                summary_data[t.date][t.congregation.name]["dizimo"] += float(t.amount)
+            
+            rows = []
+            for d, cong_totals in sorted(summary_data.items()):
+                for cong_name, totals in sorted(cong_totals.items()):
+                    total = totals["dizimo"] + totals["oferta"]
+                    rows.append({
+                        "Data do Culto": format_date(d),
+                        "Congregação": cong_name,
+                        "Dízimo": format_currency(totals["dizimo"]),
+                        "Oferta": format_currency(totals["oferta"]),
+                        "Total": format_currency(total)
+                    })
+            df_summary = pd.DataFrame(rows)
+            if not df_summary.empty:
+                st.dataframe(df_summary, use_container_width=True, hide_index=True, height=500)
+            else:
+                st.caption("Sem dízimos e ofertas para o período.")
+        else: # Escopo é uma única congregação
             summary_by_date = defaultdict(lambda: {"dizimo": 0.0, "oferta": 0.0})
             for t in data["tx_in"]:
                 if t.category and _norm(t.category.name) in ("dizimo", "dízimo"):
@@ -603,6 +640,7 @@ def page_relatorio_entrada(user: "User"):
                 st.dataframe(df_summary, use_container_width=True, hide_index=True, height=200)
             else:
                 st.caption("Sem dízimos e ofertas para o período.")
+        # --- Fim da lógica da nova tabela ---
 
         st.divider()
         st.subheader("Dizimistas no período")
@@ -1308,14 +1346,14 @@ def page_cadastro(user: "User"):
 
         congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
         users_by_cong = dict(db.execute(select(Congregation.id, func.count(User.id))
-                           .join(User, User.congregation_id == Congregation.id, isouter=True)
-                           .group_by(Congregation.id)).all())
+                               .join(User, User.congregation_id == Congregation.id, isouter=True)
+                               .group_by(Congregation.id)).all())
         tx_by_cong = dict(db.execute(select(Congregation.id, func.count(Transaction.id))
-                        .join(Transaction, Transaction.congregation_id == Congregation.id, isouter=True)
-                        .group_by(Congregation.id)).all())
+                         .join(Transaction, Transaction.congregation_id == Congregation.id, isouter=True)
+                         .group_by(Congregation.id)).all())
         tithes_by_cong = dict(db.execute(select(Congregation.id, func.count(Tithe.id))
-                            .join(Tithe, Tithe.congregation_id == Congregation.id, isouter=True)
-                            .group_by(Congregation.id)).all())
+                                 .join(Tithe, Tithe.congregation_id == Congregation.id, isouter=True)
+                                 .group_by(Congregation.id)).all())
         dfc = pd.DataFrame([{
             "ID": c.id, "Nome": c.name,
             "Usuários": int(users_by_cong.get(c.id, 0)),
@@ -1361,8 +1399,8 @@ def page_cadastro(user: "User"):
 
         cats = db.scalars(select(Category).order_by(Category.type, Category.name)).all()
         usage = dict(db.execute(select(Category.id, func.count(Transaction.id))
-                     .join(Transaction, Transaction.category_id == Category.id, isouter=True)
-                     .group_by(Category.id)).all())
+                           .join(Transaction, Transaction.category_id == Category.id, isouter=True)
+                           .group_by(Category.id)).all())
         dfcat = pd.DataFrame([{
             "ID": c.id, "Nome": c.name, "Tipo": c.type, "Usos em lançamentos": int(usage.get(c.id, 0))
         } for c in cats])
