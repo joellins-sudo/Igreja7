@@ -3343,4 +3343,983 @@ def page_relatorio_dizimistas(user: "User"):
             esc_opt = ["Todas as congregações"] + [c.name for c in ordered]
             esc = st.selectbox("Escopo", esc_opt, key="rd_escopo")
             is_all = (esc == "Todas as congregações")
-            cong_obj = None if is_all else next(c for c in ordered if c.name ==
+            cong_obj = None if is_all else next(c for c in ordered if c.name == esc)
+        else:
+            cong_obj = congs[0] if congs else None; is_all = False
+
+        if not cong_obj and not is_all:
+            st.info("Sem congregação vinculada."); return
+        if cong_obj:
+            st.info(f"Escopo: **{cong_obj.name}**")
+
+        # ===== visão mensal padrão =====
+        if is_all:
+            all_tz = db.scalars(select(Tithe).where(Tithe.date >= start, Tithe.date < end)).all()
+            by_cong = defaultdict(lambda: {"qtd":0, "valor":0.0})
+            for t in all_tz:
+                k = t.congregation.name
+                by_cong[k]["qtd"] += 1
+                by_cong[k]["valor"] += float(t.amount)
+            df = pd.DataFrame([{"Congregação": k, "Qtde de dizimistas": v["qtd"], "Total (R$)": format_currency(v["valor"])} for k,v in sorted(by_cong.items())])
+            st.dataframe(df, use_container_width=True, hide_index=True, height=200)
+            st.info("Selecione uma congregação específica para ver a lista nominal.")
+        else:
+            tithes = db.scalars(select(Tithe).where(
+                Tithe.date >= start, Tithe.date < end, Tithe.congregation_id == cong_obj.id
+            ).order_by(Tithe.date)).all()
+
+            tithes_by_payment = defaultdict(lambda: {"count": 0, "total": 0.0})
+            for tithe in tithes:
+                method = tithe.payment_method or "Não Informado"
+                tithes_by_payment[method]["count"] += 1
+                tithes_by_payment[method]["total"] += float(tithe.amount)
+
+            st.subheader("Resumo de Pagamentos de Dízimos")
+            cols_metrics = st.columns(max(1, len(tithes_by_payment)))
+            for i, (method, data) in enumerate(tithes_by_payment.items()):
+                cols_metrics[i].metric(f"Total ({method})", format_currency(data["total"]), f"{data['count']} dízimos")
+
+            st.divider()
+            df = pd.DataFrame([{
+                "Data": format_date(t.date),
+                "Dizimista": t.tither_name,
+                "Valor (R$)": format_currency(float(t.amount)),
+                "Forma de Pagamento": t.payment_method or "Não Informado"
+            } for t in tithes])
+            if not df.empty:
+                st.dataframe(df, use_container_width=True, hide_index=True, height=200)
+                st.metric("Total de dízimos", format_currency(sum(float(t.amount) for t in tithes)))
+            else:
+                st.caption("Sem dízimos neste período.")
+
+        # ===== PESQUISA AVANÇADA POR ANO =====
+        st.divider()
+        st.subheader("Pesquisa de Dizimistas (por Ano)")
+        c1, c2, c3, c4 = st.columns([1.2, 1.8, 1.4, 2.6])
+        with c1:
+            ano_pesq = st.number_input("Ano", value=date.today().year, step=1, format="%d", key="srch_year")
+        with c2:
+            if user.role == "SEDE":
+                cong_opts = ["Todas"] + [c.name for c in order_congs_sede_first(congs)]
+                cong_sel = st.selectbox("Congregação", cong_opts, key="srch_cong")
+            else:
+                cong_sel = cong_obj.name
+                st.text_input("Congregação", cong_sel, disabled=True, key="srch_cong_disabled")
+        with c3:
+            mes_opt = ["Todos"] + MONTHS
+            mes_sel = st.selectbox("Mês", mes_opt, index=0, key="srch_month")
+        with c4:
+            nome_q = st.text_input("Nome do dizimista (contém)", key="srch_name")
+
+        # Build query
+        year_start = date(int(ano_pesq), 1, 1)
+        year_end = date(int(ano_pesq)+1, 1, 1)
+        q = select(Tithe).options(joinedload(Tithe.congregation)).where(Tithe.date >= year_start, Tithe.date < year_end)
+
+        # congregação
+        if user.role == "SEDE":
+            if cong_sel != "Todas":
+                cong_id_sel = next(c.id for c in congs if c.name == cong_sel)
+                q = q.where(Tithe.congregation_id == cong_id_sel)
+        else:
+            q = q.where(Tithe.congregation_id == cong_obj.id)
+
+        # mês
+        if mes_sel != "Todos":
+            m = MONTHS.index(mes_sel) + 1
+            m_start = date(int(ano_pesq), m, 1)
+            m_end = date(ano_pesq + (m==12), (m % 12) + 1, 1)
+            q = q.where(Tithe.date >= m_start, Tithe.date < m_end)
+
+        with SessionLocal() as db2:
+            t_list = db2.scalars(q.order_by(Tithe.tither_name, Tithe.date)).all()
+
+        # filtro por nome (contém)
+        if nome_q.strip():
+            nneedle = _norm(nome_q)
+            t_list = [t for t in t_list if nneedle in _norm(t.tither_name)]
+
+        # agrega por (dizimista normalizado, congregação)
+        agg = {}
+        for t in t_list:
+            key = (_norm(t.tither_name), t.congregation_id)
+            if key not in agg:
+                agg[key] = {
+                    "nome_display": t.tither_name,
+                    "congregacao": t.congregation.name if t.congregation else "—",
+                    "total_ano": 0.0,
+                    "meses": set(),
+                    "primeiro": t.date,
+                    "ultimo": t.date,
+                }
+            agg[key]["total_ano"] += float(t.amount)
+            agg[key]["meses"].add(t.date.month)
+            if t.date < agg[key]["primeiro"]:
+                agg[key]["primeiro"] = t.date
+            if t.date > agg[key]["ultimo"]:
+                agg[key]["ultimo"] = t.date
+
+        rows = []
+        for k, info in agg.items():
+            meses_sorted = sorted(list(info["meses"]))
+            rows.append({
+                "Dizimista": info["nome_display"],
+                "Congregação": info["congregacao"],
+                "Qtde de meses no ano": len(meses_sorted),
+                "Meses": ", ".join(MONTHS_SHORT[m-1] for m in meses_sorted) if meses_sorted else "—",
+                "Total no ano (R$)": info["total_ano"],
+                "Primeiro dízimo": format_date(info["primeiro"]) if info["primeiro"] else "—",
+                "Último dízimo": format_date(info["ultimo"]) if info["ultimo"] else "—",
+            })
+
+        df_pesq = pd.DataFrame(rows)
+        if not df_pesq.empty:
+            df_pesq = df_pesq.sort_values(["Qtde de meses no ano","Dizimista"], ascending=[False, True])
+            gb = GridOptionsBuilder.from_dataframe(df_pesq)
+            gb.configure_grid_options(domLayout='normal')
+            gb.configure_column("Dizimista", filter=True, floatingFilter=True)
+            gb.configure_column("Congregação", filter=True, floatingFilter=True)
+            gridOptions = gb.build()
+            AgGrid(df_pesq, gridOptions=gridOptions, data_return_mode='AS_INPUT', update_mode='MODEL_CHANGED',
+                   allow_unsafe_jscode=True, enable_enterprise_modules=True, height=300)
+            tot_reg = len(df_pesq)
+            tot_val = float(df_pesq["Total no ano (R$)"].sum())
+            cA, cB = st.columns(2)
+            cA.metric("Dizimistas encontrados", f"{tot_reg}")
+            cB.metric("Total geral da pesquisa", format_currency(tot_val))
+            csv = df_pesq.to_csv(index=False).encode("utf-8-sig")
+            st.download_button(
+                "⬇️ Baixar CSV da pesquisa",
+                data=csv, file_name=f"pesquisa_dizimistas_{ano_pesq}.csv", mime="text/csv"
+            )
+            
+            # Novo botão para baixar PDF
+            pdf_data = build_dizimista_search_pdf(df_pesq.assign(**{"Total no ano (R$)": df_pesq["Total no ano (R$)"]}), ano_pesq, cong_sel, mes_sel, nome_q)
+            st.download_button(
+                "⬇️ Baixar PDF da pesquisa",
+                data=pdf_data, file_name=f"pesquisa_dizimistas_{ano_pesq}.pdf", mime="application/pdf"
+            )
+
+        else:
+            st.caption("Nenhum resultado para os filtros informados.")
+
+# ===================== VISÃO GERAL =====================
+def page_visao_geral(user: "User"):
+    ensure_seed()
+    with SessionLocal() as db:
+        with st.sidebar:
+            if os.path.exists(LOGO_PATH):
+                st.image(LOGO_PATH, use_column_width=True)
+            st.write(f"👤 **{user.username}** — *{user.role}*")
+            if st.button("Sair"):
+                st.session_state.uid=None; st.rerun()
+
+        st.markdown("<h1 class='page-title'>Visão Geral</h1>", unsafe_allow_html=True)
+        ref = get_month_selector()
+        start, end = month_bounds(ref)
+        
+        congs = cong_options_for(user, db)
+        ordered = order_congs_sede_first(congs)
+        
+        is_all = (user.role == "SEDE")
+        if is_all:
+            st.info("Escopo: **Todas as congregações**")
+        elif congs:
+            cong_obj = congs[0]
+            st.info(f"Escopo: **{cong_obj.name}**")
+        else:
+            st.info("Sem congregação vinculada."); return
+
+        agg_total = []
+        if is_all:
+            for c in ordered:
+                totals = _collect_month_data(db, c.id, start, end)["totals"]
+                agg_total.append((c.name, totals["entradas_total_sem_missoes"], totals["saidas_total"], totals["saldo"], totals["missoes"]))
+        elif congs:
+            cong_obj = congs[0]
+            totals = _collect_month_data(db, cong_obj.id, start, end)["totals"]
+            agg_total.append((cong_obj.name, totals["entradas_total_sem_missoes"], totals["saidas_total"], totals["saldo"], totals["missoes"]))
+
+        # ===== Ranking Top 5 — apenas SEDE =====
+        if user.role == "SEDE":
+            df_rank = pd.DataFrame([{"Congregação": n, "Entradas (D+O + Outras)": v, "Saídas": s, "Saldo": sal, "Missões (entrada)": m} for (n, v, s, sal, m) in agg_total])
+            if not df_rank.empty:
+                df_sorted = df_rank.sort_values("Entradas (D+O + Outras)", ascending=False).reset_index(drop=True)
+                top_n = min(5, len(df_sorted))
+                cols = st.columns(top_n)
+                for i in range(top_n):
+                    row = df_sorted.iloc[i]
+                    label = f"{i+1}º lugar"
+                    text = f"{row['Congregação']} — {format_currency(float(row['Entradas (D+O + Outras)']))}"
+                    render_stat_card(cols[i], label, text)
+                st.divider()
+                st.dataframe(
+                    df_sorted.assign(**{
+                        "Entradas (D+O + Outras)": df_sorted["Entradas (D+O + Outras)"].map(lambda x: format_currency(float(x))),
+                        "Saídas": df_sorted["Saídas"].map(lambda x: format_currency(float(x))),
+                        "Saldo": df_sorted["Saldo"].map(lambda x: format_currency(float(x))),
+                        "Missões (entrada)": df_sorted["Missões (entrada)"].map(lambda x: format_currency(float(x)))
+                    }),
+                    use_container_width=True, hide_index=True, height=200
+                )
+            else:
+                st.caption("Sem dados neste mês.")
+
+        # ===== Resumo da congregação (para TESOUREIRO) =====
+        if user.role != "SEDE" and agg_total:
+            st.divider()
+            st.subheader("Resumo Financeiro Mensal")
+            df_summary_cong = pd.DataFrame([{"Métricas": "Entradas (D+O + Outras)", "Valor": format_currency(agg_total[0][1])},
+                                            {"Métricas": "Saídas", "Valor": format_currency(agg_total[0][2])},
+                                            {"Métricas": "Saldo", "Valor": format_currency(agg_total[0][3])},
+                                            {"Métricas": "Missões (entrada)", "Valor": format_currency(agg_total[0][4])}])
+            st.dataframe(df_summary_cong, use_container_width=True, hide_index=True)
+
+
+        # ===== PDF consolidado — apenas SEDE =====
+        if user.role == "SEDE":
+            st.divider()
+            st.subheader("Relatório Consolidado Mensal")
+            st.download_button(
+                "⬇️ Baixar PDF do Relatório Geral",
+                data=build_consolidated_pdf(agg_total, ref),
+                file_name=f"relatorio_mensal_{start.strftime('%Y-%m')}.pdf",
+                mime="application/pdf"
+            )
+
+        st.subheader("Prestação de contas (PDF completo)")
+        if user.role == "SEDE":
+            sel = st.selectbox("Congregação", [c.name for c in ordered], key="pc_cong_sel")
+            cong_obj = next(c for c in ordered if c.name == sel)
+        else:
+            cong_obj = ordered[0]
+        st.download_button(
+            "⬇️ Baixar PDF do mês (completo)",
+            data=build_full_statement_pdf(cong_obj.id, cong_obj.name, ref),
+            file_name=f"prestacao_{_norm(cong_obj.name)}_{start.strftime('%Y-%m')}.pdf",
+            mime="application/pdf"
+        )
+
+# ===================== PAGE: RELATÓRIO DE SAÍDA =====================
+def page_relatorio_saida(user: "User"):
+    ensure_seed()
+    with SessionLocal() as db:
+        with st.sidebar:
+            if os.path.exists(LOGO_PATH):
+                st.image(LOGO_PATH, use_column_width=True)
+            st.write(f"👤 **{user.username}** — *{user.role}*")
+            if st.button("Sair"):
+                st.session_state.uid=None; st.rerun()
+
+        st.markdown("<h1 class='page-title'>Relatório de Saída</h1>", unsafe_allow_html=True)
+        ref = get_month_selector()
+        start, end = month_bounds(ref)
+
+        congs = cong_options_for(user, db)
+        if user.role == "SEDE":
+            ordered = order_congs_sede_first(congs)
+            esc_opt = ["Todas as congregações"] + [c.name for c in ordered]
+            esc = st.selectbox("Escopo", esc_opt, key="rs_escopo")
+            is_all = (esc == "Todas as congregações")
+            cong_obj = None if is_all else next(c for c in ordered if c.name == esc)
+        else:
+            cong_obj = congs[0] if congs else None; is_all = False
+
+        if not cong_obj and not is_all:
+            st.info("Sem congregação vinculada."); return
+        if cong_obj:
+            st.info(f"Escopo: **{cong_obj.name}**")
+
+        q = select(Transaction).options(joinedload(Transaction.category)).where(
+            Transaction.date >= start, Transaction.date < end, Transaction.type.in_((TYPE_OUT, "DESPESA"))
+        )
+        if not is_all:
+            q = q.where(Transaction.congregation_id == cong_obj.id)
+        txs = db.scalars(q).all()
+
+        total_saidas = sum(float(t.amount) for t in txs)
+        st.metric("Total de saídas", format_currency(total_saidas))
+
+        if is_all:
+            agg = defaultdict(float)
+            for t in txs:
+                agg[t.congregation.name] += float(t.amount)
+            df = pd.DataFrame([{"Congregação": k, "Total de saídas": format_currency(v)} for k,v in sorted(agg.items())])
+            st.subheader("Resumo por congregação")
+            if not df.empty:
+                st.dataframe(df, use_container_width=True, hide_index=True, height=200)
+            else:
+                st.caption("Sem saídas.")
+        else:
+            resumo = defaultdict(lambda: {"Quantidade":0, "Valor":0.0})
+            for t in txs:
+                if t.category:
+                    resumo[t.category.name]["Quantidade"] += 1
+                    resumo[t.category.name]["Valor"] += float(t.amount)
+            df_res = pd.DataFrame([
+                {"Tipo da saída": k, "Quantidade": v["Quantidade"], "Valor (R$)": v["Valor"]}
+                for k,v in sorted(resumo.items(), key=lambda x: x[0].lower())
+            ])
+            if not df_res.empty:
+                df_res["Valor (R$)"] = df_res["Valor (R$)"].map(format_currency)
+                st.subheader("Resumo por tipo de saída")
+                st.dataframe(df_res, use_container_width=True, hide_index=True, height=200)
+            else:
+                st.caption("Sem saídas no período.")
+
+        rows = [{
+            "ID": t.id, "Data": format_date(t.date),
+            "Tipo da saída": t.category.name, "Valor (R$)": float(t.amount),
+            "Descrição": t.description or ""
+        } for t in txs]
+        df_list = pd.DataFrame(rows)
+        if not df_list.empty:
+            df_list["Valor (R$)"] = df_list["Valor (R$)"].map(format_currency)
+            st.subheader("Lançamentos de saída")
+            st.dataframe(df_list, use_container_width=True, hide_index=True, height=200)
+        else:
+            st.caption("Sem lançamentos para listar.")
+
+        st.divider()
+        st.subheader("Missões no período (Saídas)")
+        if is_all:
+            agg = defaultdict(float)
+            for t in txs:
+                if t.category and _norm(t.category.name) in ("missoes","missões"):
+                    agg[t.congregation.name] += float(t.amount)
+            dfm = pd.DataFrame([{"Congregação": k, "Saídas Missões": format_currency(v)} for k,v in sorted(agg.items())])
+            if not dfm.empty:
+                st.dataframe(dfm, use_container_width=True, hide_index=True, height=200)
+            else:
+                st.caption("Sem saídas de Missões.")
+        else:
+            val = sum(float(t.amount) for t in txs if t.category and _norm(t.category.name) in ("missoes","missões"))
+            st.metric("Saídas Missões", format_currency(val))
+
+        st.divider()
+        rows_csv = [{
+            "Data": t.date.strftime("%Y-%m-%d"),
+            "Congregação": t.congregation.name,
+            "Tipo da saída": t.category.name,
+            "Valor": float(t.amount),
+            "Descrição": t.description or ""
+        } for t in txs]
+        csv = pd.DataFrame(rows_csv).to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            "⬇️ Baixar CSV das SAÍDAS do período",
+            data=csv, file_name=f"saidas_{start.strftime('%Y-%m')}.csv", mime="text/csv"
+        )
+        
+        # NOVO BOTÃO DE PDF DE SAÍDAS CONSOLIDADAS (APENAS SEDE)
+        if user.role == "SEDE":
+            st.divider()
+            st.subheader("Relatório Consolidado de Saídas (PDF)")
+            
+            # Agrega as saídas por categoria para o PDF
+            saidas_por_categoria = defaultdict(float)
+            for t in txs:
+                if t.category:
+                    saidas_por_categoria[t.category.name] += float(t.amount)
+            
+            # st.info("Debug: Dados agregados para o PDF de Saídas")
+            # st.write(saidas_por_categoria)
+
+            st.download_button(
+                "⬇️ Baixar PDF das Saídas Consolidadas",
+                data=build_consolidated_outputs_pdf(ref, saidas_por_categoria),
+                file_name=f"saidas_consolidadas_{start.strftime('%Y-%m')}.pdf",
+                mime="application/pdf"
+            )
+
+        if user.role == "SEDE" and not is_all:
+            st.divider(); st.subheader("Excluir SAÍDAS (SEDE)")
+            if 'df_list' in locals() and not df_list.empty:
+                ids = st.multiselect("IDs para excluir", df_list["ID"].tolist(), key="del_out_ids")
+                conf = st.text_input("Digite EXCLUIR para confirmar", key="del_out_conf")
+                btn_disabled = (not ids) or (not _confirm_ok(conf))
+                if st.button("Excluir selecionados", disabled=btn_disabled, key="del_out_btn"):
+                    with SessionLocal() as _db:
+                        _db.query(Transaction).filter(Transaction.id.in_(ids)).delete(synchronize_session=False)
+                        _db.commit()
+                    st.success(f"{len(ids)} saída(s) excluída(s).")
+                    st.rerun()
+            else:
+                st.caption("Sem saídas para exclusão neste escopo.")
+
+# ===================== PAGE: RELATÓRIO DE DIZIMISTAS =====================
+# PDF BUILDER para a pesquisa
+def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, mes_sel: str, nome_q: str) -> bytes:
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=portrait(A4), leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('title', parent=styles['Heading1'], alignment=TA_CENTER, fontSize=16, spaceAfter=8)
+    subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=12, textColor=colors.black, spaceAfter=12)
+    heading_style = ParagraphStyle('heading', parent=styles['Heading2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
+    table_style = TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("ALIGN", (4, 1), (4, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ])
+
+    story = []
+    story.append(Paragraph("Relatório de Pesquisa de Dizimistas", title_style))
+    story.append(Paragraph(f"Ano: {ano_pesq} | Congregação: {cong_sel} | Mês: {mes_sel}", subtitle_style))
+    if nome_q.strip():
+        story.append(Paragraph(f"Filtrado por: '{nome_q}'", subtitle_style))
+    story.append(Spacer(1, 0.5*cm))
+
+    # Tabela com os dados da pesquisa
+    data_table = [df.columns.tolist()] + df.values.tolist()
+    total_value = float(df["Total no ano (R$)"].sum())
+    total_row = ["", "", "", "Total Geral:", total_value, "", ""]
+    data_table.append(total_row)
+    
+    # Converta valores de moeda para o formato de texto
+    for row in data_table[1:]:
+        if isinstance(row[4], float):
+            row[4] = format_currency(row[4])
+
+    tbl = Table(data_table, colWidths=[3.5*cm, 3.5*cm, 2.0*cm, 2.5*cm, 2.5*cm, 2.0*cm, 2.0*cm])
+    tbl.setStyle(table_style)
+    story.append(tbl)
+    
+    story.append(Spacer(1, 0.5*cm))
+    story.append(Paragraph(f"Dizimistas encontrados: **{len(df)}**", styles['Normal']))
+    story.append(Paragraph(f"Total geral da pesquisa: **{format_currency(total_value)}**", styles['Normal']))
+
+    doc.build(story)
+    return buf.getvalue()
+
+
+def page_relatorio_dizimistas(user: "User"):
+    ensure_seed()
+    with SessionLocal() as db:
+        with st.sidebar:
+            if os.path.exists(LOGO_PATH):
+                st.image(LOGO_PATH, use_column_width=True)
+            st.write(f"👤 **{user.username}** — *{user.role}*")
+            if st.button("Sair"):
+                st.session_state.uid=None; st.rerun()
+
+        st.markdown("<h1 class='page-title'>Relatório de Dizimistas</h1>", unsafe_allow_html=True)
+        ref = get_month_selector()
+        start, end = month_bounds(ref)
+
+        congs = cong_options_for(user, db)
+        if user.role == "SEDE":
+            ordered = order_congs_sede_first(congs)
+            esc_opt = ["Todas as congregações"] + [c.name for c in ordered]
+            esc = st.selectbox("Escopo", esc_opt, key="rd_escopo")
+            is_all = (esc == "Todas as congregações")
+            cong_obj = None if is_all else next(c for c in ordered if c.name == esc)
+        else:
+            cong_obj = congs[0] if congs else None; is_all = False
+
+        if not cong_obj and not is_all:
+            st.info("Sem congregação vinculada."); return
+        if cong_obj:
+            st.info(f"Escopo: **{cong_obj.name}**")
+
+        # ===== visão mensal padrão =====
+        if is_all:
+            all_tz = db.scalars(select(Tithe).where(Tithe.date >= start, Tithe.date < end)).all()
+            by_cong = defaultdict(lambda: {"qtd":0, "valor":0.0})
+            for t in all_tz:
+                k = t.congregation.name
+                by_cong[k]["qtd"] += 1
+                by_cong[k]["valor"] += float(t.amount)
+            df = pd.DataFrame([{"Congregação": k, "Qtde de dizimistas": v["qtd"], "Total (R$)": format_currency(v["valor"])} for k,v in sorted(by_cong.items())])
+            st.dataframe(df, use_container_width=True, hide_index=True, height=200)
+            st.info("Selecione uma congregação específica para ver a lista nominal.")
+        else:
+            tithes = db.scalars(select(Tithe).where(
+                Tithe.date >= start, Tithe.date < end, Tithe.congregation_id == cong_obj.id
+            ).order_by(Tithe.date)).all()
+
+            tithes_by_payment = defaultdict(lambda: {"count": 0, "total": 0.0})
+            for tithe in tithes:
+                method = tithe.payment_method or "Não Informado"
+                tithes_by_payment[method]["count"] += 1
+                tithes_by_payment[method]["total"] += float(tithe.amount)
+
+            st.subheader("Resumo de Pagamentos de Dízimos")
+            cols_metrics = st.columns(max(1, len(tithes_by_payment)))
+            for i, (method, data) in enumerate(tithes_by_payment.items()):
+                cols_metrics[i].metric(f"Total ({method})", format_currency(data["total"]), f"{data['count']} dízimos")
+
+            st.divider()
+            df = pd.DataFrame([{
+                "Data": format_date(t.date),
+                "Dizimista": t.tither_name,
+                "Valor (R$)": format_currency(float(t.amount)),
+                "Forma de Pagamento": t.payment_method or "Não Informado"
+            } for t in tithes])
+            if not df.empty:
+                st.dataframe(df, use_container_width=True, hide_index=True, height=200)
+                st.metric("Total de dízimos", format_currency(sum(float(t.amount) for t in tithes)))
+            else:
+                st.caption("Sem dízimos neste período.")
+
+        # ===== PESQUISA AVANÇADA POR ANO =====
+        st.divider()
+        st.subheader("Pesquisa de Dizimistas (por Ano)")
+        c1, c2, c3, c4 = st.columns([1.2, 1.8, 1.4, 2.6])
+        with c1:
+            ano_pesq = st.number_input("Ano", value=date.today().year, step=1, format="%d", key="srch_year")
+        with c2:
+            if user.role == "SEDE":
+                cong_opts = ["Todas"] + [c.name for c in order_congs_sede_first(congs)]
+                cong_sel = st.selectbox("Congregação", cong_opts, key="srch_cong")
+            else:
+                cong_sel = cong_obj.name
+                st.text_input("Congregação", cong_sel, disabled=True, key="srch_cong_disabled")
+        with c3:
+            mes_opt = ["Todos"] + MONTHS
+            mes_sel = st.selectbox("Mês", mes_opt, index=0, key="srch_month")
+        with c4:
+            nome_q = st.text_input("Nome do dizimista (contém)", key="srch_name")
+
+        # Build query
+        year_start = date(int(ano_pesq), 1, 1)
+        year_end = date(int(ano_pesq)+1, 1, 1)
+        q = select(Tithe).options(joinedload(Tithe.congregation)).where(Tithe.date >= year_start, Tithe.date < year_end)
+
+        # congregação
+        if user.role == "SEDE":
+            if cong_sel != "Todas":
+                cong_id_sel = next(c.id for c in congs if c.name == cong_sel)
+                q = q.where(Tithe.congregation_id == cong_id_sel)
+        else:
+            q = q.where(Tithe.congregation_id == cong_obj.id)
+
+        # mês
+        if mes_sel != "Todos":
+            m = MONTHS.index(mes_sel) + 1
+            m_start = date(int(ano_pesq), m, 1)
+            m_end = date(ano_pesq + (m==12), (m % 12) + 1, 1)
+            q = q.where(Tithe.date >= m_start, Tithe.date < m_end)
+
+        with SessionLocal() as db2:
+            t_list = db2.scalars(q.order_by(Tithe.tither_name, Tithe.date)).all()
+
+        # filtro por nome (contém)
+        if nome_q.strip():
+            nneedle = _norm(nome_q)
+            t_list = [t for t in t_list if nneedle in _norm(t.tither_name)]
+
+        # agrega por (dizimista normalizado, congregação)
+        agg = {}
+        for t in t_list:
+            key = (_norm(t.tither_name), t.congregation_id)
+            if key not in agg:
+                agg[key] = {
+                    "nome_display": t.tither_name,
+                    "congregacao": t.congregation.name if t.congregation else "—",
+                    "total_ano": 0.0,
+                    "meses": set(),
+                    "primeiro": t.date,
+                    "ultimo": t.date,
+                }
+            agg[key]["total_ano"] += float(t.amount)
+            agg[key]["meses"].add(t.date.month)
+            if t.date < agg[key]["primeiro"]:
+                agg[key]["primeiro"] = t.date
+            if t.date > agg[key]["ultimo"]:
+                agg[key]["ultimo"] = t.date
+
+        rows = []
+        for k, info in agg.items():
+            meses_sorted = sorted(list(info["meses"]))
+            rows.append({
+                "Dizimista": info["nome_display"],
+                "Congregação": info["congregacao"],
+                "Qtde de meses no ano": len(meses_sorted),
+                "Meses": ", ".join(MONTHS_SHORT[m-1] for m in meses_sorted) if meses_sorted else "—",
+                "Total no ano (R$)": info["total_ano"],
+                "Primeiro dízimo": format_date(info["primeiro"]) if info["primeiro"] else "—",
+                "Último dízimo": format_date(info["ultimo"]) if info["ultimo"] else "—",
+            })
+
+        df_pesq = pd.DataFrame(rows)
+        if not df_pesq.empty:
+            df_pesq = df_pesq.sort_values(["Qtde de meses no ano","Dizimista"], ascending=[False, True])
+            gb = GridOptionsBuilder.from_dataframe(df_pesq)
+            gb.configure_grid_options(domLayout='normal')
+            gb.configure_column("Dizimista", filter=True, floatingFilter=True)
+            gb.configure_column("Congregação", filter=True, floatingFilter=True)
+            gridOptions = gb.build()
+            AgGrid(df_pesq, gridOptions=gridOptions, data_return_mode='AS_INPUT', update_mode='MODEL_CHANGED',
+                   allow_unsafe_jscode=True, enable_enterprise_modules=True, height=300)
+            tot_reg = len(df_pesq)
+            tot_val = float(df_pesq["Total no ano (R$)"].sum())
+            cA, cB = st.columns(2)
+            cA.metric("Dizimistas encontrados", f"{tot_reg}")
+            cB.metric("Total geral da pesquisa", format_currency(tot_val))
+            csv = df_pesq.to_csv(index=False).encode("utf-8-sig")
+            st.download_button(
+                "⬇️ Baixar CSV da pesquisa",
+                data=csv, file_name=f"pesquisa_dizimistas_{ano_pesq}.csv", mime="text/csv"
+            )
+            
+            # Novo botão para baixar PDF
+            pdf_data = build_dizimista_search_pdf(df_pesq.assign(**{"Total no ano (R$)": df_pesq["Total no ano (R$)"]}), ano_pesq, cong_sel, mes_sel, nome_q)
+            st.download_button(
+                "⬇️ Baixar PDF da pesquisa",
+                data=pdf_data, file_name=f"pesquisa_dizimistas_{ano_pesq}.pdf", mime="application/pdf"
+            )
+
+        else:
+            st.caption("Nenhum resultado para os filtros informados.")
+
+# ===================== VISÃO GERAL =====================
+def page_visao_geral(user: "User"):
+    ensure_seed()
+    with SessionLocal() as db:
+        with st.sidebar:
+            if os.path.exists(LOGO_PATH):
+                st.image(LOGO_PATH, use_column_width=True)
+            st.write(f"👤 **{user.username}** — *{user.role}*")
+            if st.button("Sair"):
+                st.session_state.uid=None; st.rerun()
+
+        st.markdown("<h1 class='page-title'>Visão Geral</h1>", unsafe_allow_html=True)
+        ref = get_month_selector()
+        start, end = month_bounds(ref)
+        
+        congs = cong_options_for(user, db)
+        ordered = order_congs_sede_first(congs)
+        
+        is_all = (user.role == "SEDE")
+        if is_all:
+            st.info("Escopo: **Todas as congregações**")
+        elif congs:
+            cong_obj = congs[0]
+            st.info(f"Escopo: **{cong_obj.name}**")
+        else:
+            st.info("Sem congregação vinculada."); return
+
+        agg_total = []
+        if is_all:
+            for c in ordered:
+                totals = _collect_month_data(db, c.id, start, end)["totals"]
+                agg_total.append((c.name, totals["entradas_total_sem_missoes"], totals["saidas_total"], totals["saldo"], totals["missoes"]))
+        elif congs:
+            cong_obj = congs[0]
+            totals = _collect_month_data(db, cong_obj.id, start, end)["totals"]
+            agg_total.append((cong_obj.name, totals["entradas_total_sem_missoes"], totals["saidas_total"], totals["saldo"], totals["missoes"]))
+
+        # ===== Ranking Top 5 — apenas SEDE =====
+        if user.role == "SEDE":
+            df_rank = pd.DataFrame([{"Congregação": n, "Entradas (D+O + Outras)": v, "Saídas": s, "Saldo": sal, "Missões (entrada)": m} for (n, v, s, sal, m) in agg_total])
+            if not df_rank.empty:
+                df_sorted = df_rank.sort_values("Entradas (D+O + Outras)", ascending=False).reset_index(drop=True)
+                top_n = min(5, len(df_sorted))
+                cols = st.columns(top_n)
+                for i in range(top_n):
+                    row = df_sorted.iloc[i]
+                    label = f"{i+1}º lugar"
+                    text = f"{row['Congregação']} — {format_currency(float(row['Entradas (D+O + Outras)']))}"
+                    render_stat_card(cols[i], label, text)
+                st.divider()
+                st.dataframe(
+                    df_sorted.assign(**{
+                        "Entradas (D+O + Outras)": df_sorted["Entradas (D+O + Outras)"].map(lambda x: format_currency(float(x))),
+                        "Saídas": df_sorted["Saídas"].map(lambda x: format_currency(float(x))),
+                        "Saldo": df_sorted["Saldo"].map(lambda x: format_currency(float(x))),
+                        "Missões (entrada)": df_sorted["Missões (entrada)"].map(lambda x: format_currency(float(x)))
+                    }),
+                    use_container_width=True, hide_index=True, height=200
+                )
+            else:
+                st.caption("Sem dados neste mês.")
+
+        # ===== Resumo da congregação (para TESOUREIRO) =====
+        if user.role != "SEDE" and agg_total:
+            st.divider()
+            st.subheader("Resumo Financeiro Mensal")
+            df_summary_cong = pd.DataFrame([{"Métricas": "Entradas (D+O + Outras)", "Valor": format_currency(agg_total[0][1])},
+                                            {"Métricas": "Saídas", "Valor": format_currency(agg_total[0][2])},
+                                            {"Métricas": "Saldo", "Valor": format_currency(agg_total[0][3])},
+                                            {"Métricas": "Missões (entrada)", "Valor": format_currency(agg_total[0][4])}])
+            st.dataframe(df_summary_cong, use_container_width=True, hide_index=True)
+
+
+        # ===== PDF consolidado — apenas SEDE =====
+        if user.role == "SEDE":
+            st.divider()
+            st.subheader("Relatório Consolidado Mensal")
+            st.download_button(
+                "⬇️ Baixar PDF do Relatório Geral",
+                data=build_consolidated_pdf(agg_total, ref),
+                file_name=f"relatorio_mensal_{start.strftime('%Y-%m')}.pdf",
+                mime="application/pdf"
+            )
+
+        st.subheader("Prestação de contas (PDF completo)")
+        if user.role == "SEDE":
+            sel = st.selectbox("Congregação", [c.name for c in ordered], key="pc_cong_sel")
+            cong_obj = next(c for c in ordered if c.name == sel)
+        else:
+            cong_obj = ordered[0]
+        st.download_button(
+            "⬇️ Baixar PDF do mês (completo)",
+            data=build_full_statement_pdf(cong_obj.id, cong_obj.name, ref),
+            file_name=f"prestacao_{_norm(cong_obj.name)}_{start.strftime('%Y-%m')}.pdf",
+            mime="application/pdf"
+        )
+
+# ===================== RELATÓRIO DE SAÍDA =====================
+def page_relatorio_saida(user: "User"):
+    ensure_seed()
+    with SessionLocal() as db:
+        with st.sidebar:
+            if os.path.exists(LOGO_PATH):
+                st.image(LOGO_PATH, use_column_width=True)
+            st.write(f"👤 **{user.username}** — *{user.role}*")
+            if st.button("Sair"):
+                st.session_state.uid=None; st.rerun()
+
+        st.markdown("<h1 class='page-title'>Relatório de Saída</h1>", unsafe_allow_html=True)
+        ref = get_month_selector()
+        start, end = month_bounds(ref)
+
+        congs = cong_options_for(user, db)
+        if user.role == "SEDE":
+            ordered = order_congs_sede_first(congs)
+            esc_opt = ["Todas as congregações"] + [c.name for c in ordered]
+            esc = st.selectbox("Escopo", esc_opt, key="rs_escopo")
+            is_all = (esc == "Todas as congregações")
+            cong_obj = None if is_all else next(c for c in ordered if c.name == esc)
+        else:
+            cong_obj = congs[0] if congs else None; is_all = False
+
+        if not cong_obj and not is_all:
+            st.info("Sem congregação vinculada."); return
+        if cong_obj:
+            st.info(f"Escopo: **{cong_obj.name}**")
+
+        q = select(Transaction).options(joinedload(Transaction.category)).where(
+            Transaction.date >= start, Transaction.date < end, Transaction.type.in_((TYPE_OUT, "DESPESA"))
+        )
+        if not is_all:
+            q = q.where(Transaction.congregation_id == cong_obj.id)
+        txs = db.scalars(q).all()
+
+        total_saidas = sum(float(t.amount) for t in txs)
+        st.metric("Total de saídas", format_currency(total_saidas))
+
+        if is_all:
+            agg = defaultdict(float)
+            for t in txs:
+                if t.congregation:
+                    agg[t.congregation.name] += float(t.amount)
+            df = pd.DataFrame([{"Congregação": k, "Total de saídas": format_currency(v)} for k,v in sorted(agg.items())])
+            st.subheader("Resumo por congregação")
+            if not df.empty:
+                st.dataframe(df, use_container_width=True, hide_index=True, height=200)
+            else:
+                st.caption("Sem saídas.")
+        else:
+            resumo = defaultdict(lambda: {"Quantidade":0, "Valor":0.0})
+            for t in txs:
+                if t.category:
+                    resumo[t.category.name]["Quantidade"] += 1
+                    resumo[t.category.name]["Valor"] += float(t.amount)
+            df_res = pd.DataFrame([
+                {"Tipo da saída": k, "Quantidade": v["Quantidade"], "Valor (R$)": v["Valor"]}
+                for k,v in sorted(resumo.items(), key=lambda x: x[0].lower())
+            ])
+            if not df_res.empty:
+                df_res["Valor (R$)"] = df_res["Valor (R$)"].map(format_currency)
+                st.subheader("Resumo por tipo de saída")
+                st.dataframe(df_res, use_container_width=True, hide_index=True, height=200)
+            else:
+                st.caption("Sem saídas no período.")
+
+        rows = [{
+            "ID": t.id, "Data": format_date(t.date),
+            "Tipo da saída": t.category.name, "Valor (R$)": float(t.amount),
+            "Descrição": t.description or ""
+        } for t in txs]
+        df_list = pd.DataFrame(rows)
+        if not df_list.empty:
+            df_list["Valor (R$)"] = df_list["Valor (R$)"].map(format_currency)
+            st.subheader("Lançamentos de saída")
+            st.dataframe(df_list, use_container_width=True, hide_index=True, height=200)
+        else:
+            st.caption("Sem lançamentos para listar.")
+
+        st.divider()
+        st.subheader("Missões no período (Saídas)")
+        if is_all:
+            agg = defaultdict(float)
+            for t in txs:
+                if t.category and _norm(t.category.name) in ("missoes","missões"):
+                    agg[t.congregation.name] += float(t.amount)
+            dfm = pd.DataFrame([{"Congregação": k, "Saídas Missões": format_currency(v)} for k,v in sorted(agg.items())])
+            if not dfm.empty:
+                st.dataframe(dfm, use_container_width=True, hide_index=True, height=200)
+            else:
+                st.caption("Sem saídas de Missões.")
+        else:
+            # CORREÇÃO DE SINTAXE NA LINHA 865
+            val = sum(float(t.amount) for t in txs if t.category and _norm(t.category.name) in ("missoes","missões"))
+            st.metric("Saídas Missões", format_currency(val))
+
+        st.divider()
+        rows_csv = [{
+            "Data": t.date.strftime("%Y-%m-%d"),
+            "Congregação": t.congregation.name,
+            "Tipo da saída": t.category.name,
+            "Valor": float(t.amount),
+            "Descrição": t.description or ""
+        } for t in txs]
+        csv = pd.DataFrame(rows_csv).to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            "⬇️ Baixar CSV das SAÍDAS do período",
+            data=csv, file_name=f"saidas_{start.strftime('%Y-%m')}.csv", mime="text/csv"
+        )
+        
+        # NOVO BOTÃO DE PDF DE SAÍDAS CONSOLIDADAS (APENAS SEDE)
+        if user.role == "SEDE":
+            st.divider()
+            st.subheader("Relatório Consolidado de Saídas (PDF)")
+            
+            # Agrega as saídas por categoria para o PDF
+            saidas_por_categoria = defaultdict(float)
+            for t in txs:
+                if t.category:
+                    saidas_por_categoria[t.category.name] += float(t.amount)
+            
+            # st.info("Debug: Dados agregados para o PDF de Saídas")
+            # st.write(saidas_por_categoria)
+
+            st.download_button(
+                "⬇️ Baixar PDF das Saídas Consolidadas",
+                data=build_consolidated_outputs_pdf(ref, saidas_por_categoria),
+                file_name=f"saidas_consolidadas_{start.strftime('%Y-%m')}.pdf",
+                mime="application/pdf"
+            )
+
+        if user.role == "SEDE" and not is_all:
+            st.divider(); st.subheader("Excluir SAÍDAS (SEDE)")
+            if 'df_list' in locals() and not df_list.empty:
+                ids = st.multiselect("IDs para excluir", df_list["ID"].tolist(), key="del_out_ids")
+                conf = st.text_input("Digite EXCLUIR para confirmar", key="del_out_conf")
+                btn_disabled = (not ids) or (not _confirm_ok(conf))
+                if st.button("Excluir selecionados", disabled=btn_disabled, key="del_out_btn"):
+                    with SessionLocal() as _db:
+                        _db.query(Transaction).filter(Transaction.id.in_(ids)).delete(synchronize_session=False)
+                        _db.commit()
+                    st.success(f"{len(ids)} saída(s) excluída(s).")
+                    st.rerun()
+            else:
+                st.caption("Sem saídas para exclusão neste escopo.")
+
+# ===================== RELATÓRIO DE DIZIMISTAS =====================
+# PDF BUILDER para a pesquisa
+def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, mes_sel: str, nome_q: str) -> bytes:
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=portrait(A4), leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('title', parent=styles['Heading1'], alignment=TA_CENTER, fontSize=16, spaceAfter=8)
+    subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=12, textColor=colors.black, spaceAfter=12)
+    heading_style = ParagraphStyle('heading', parent=styles['Heading2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
+    table_style = TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("ALIGN", (4, 1), (4, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ])
+
+    story = []
+    story.append(Paragraph("Relatório de Pesquisa de Dizimistas", title_style))
+    story.append(Paragraph(f"Ano: {ano_pesq} | Congregação: {cong_sel} | Mês: {mes_sel}", subtitle_style))
+    if nome_q.strip():
+        story.append(Paragraph(f"Filtrado por: '{nome_q}'", subtitle_style))
+    story.append(Spacer(1, 0.5*cm))
+
+    # Tabela com os dados da pesquisa
+    data_table = [df.columns.tolist()] + df.values.tolist()
+    total_value = float(df["Total no ano (R$)"].sum())
+    total_row = ["", "", "", "Total Geral:", total_value, "", ""]
+    data_table.append(total_row)
+    
+    # Converta valores de moeda para o formato de texto
+    for row in data_table[1:]:
+        if isinstance(row[4], float):
+            row[4] = format_currency(row[4])
+
+    tbl = Table(data_table, colWidths=[3.5*cm, 3.5*cm, 2.0*cm, 2.5*cm, 2.5*cm, 2.0*cm, 2.0*cm])
+    tbl.setStyle(table_style)
+    story.append(tbl)
+    
+    story.append(Spacer(1, 0.5*cm))
+    story.append(Paragraph(f"Dizimistas encontrados: **{len(df)}**", styles['Normal']))
+    story.append(Paragraph(f"Total geral da pesquisa: **{format_currency(total_value)}**", styles['Normal']))
+
+    doc.build(story)
+    return buf.getvalue()
+
+
+def page_relatorio_dizimistas(user: "User"):
+    ensure_seed()
+    with SessionLocal() as db:
+        with st.sidebar:
+            if os.path.exists(LOGO_PATH):
+                st.image(LOGO_PATH, use_column_width=True)
+            st.write(f"👤 **{user.username}** — *{user.role}*")
+            if st.button("Sair"):
+                st.session_state.uid=None; st.rerun()
+
+        st.markdown("<h1 class='page-title'>Relatório de Dizimistas</h1>", unsafe_allow_html=True)
+        ref = get_month_selector()
+        start, end = month_bounds(ref)
+
+        congs = cong_options_for(user, db)
+        if user.role == "SEDE":
+            ordered = order_congs_sede_first(congs)
+            esc_opt = ["Todas as congregações"] + [c.name for c in ordered]
+            esc = st.selectbox("Escopo", esc_opt, key="rd_escopo")
+            is_all = (esc == "Todas as congregações")
+            cong_obj = None if is_all else next(c for c in ordered if c.name == esc)
+        else:
+            cong_obj = congs[0] if congs else None; is_all = False
+
+        if not cong_obj and not is_all:
+            st.info("Sem congregação vinculada."); return
+        if cong_obj:
+            st.info(f"Escopo: **{cong_obj.name}**")
+
+        # ===== visão mensal padrão =====
+        if is_all:
+            all_tz = db.scalars(select(Tithe).where(Tithe.date >= start, Tithe.date < end)).all()
+            by_cong = defaultdict(lambda: {"qtd":0, "valor":0.0})
+            for t in all_tz:
+                k = t.congregation.name
+                by_cong[k]["qtd"] += 1
+                by_cong[k]["valor"] += float(t.amount)
+            df = pd.DataFrame([{"Congregação": k, "Qtde de dizimistas": v["qtd"], "Total (R$)": format_currency(v["valor"])} for k,v in sorted(by_cong.items())])
+            st.dataframe(df, use_container_width=True, hide_index=True, height=200)
+            st.info("Selecione uma congregação específica para ver a lista nominal.")
+        else:
+            tithes = db.scalars(select(Tithe).where(
+                Tithe.date >= start, Tithe.date < end, Tithe.congregation_id == cong_obj.id
+            ).order_by(Tithe.date)).all()
+
+            tithes_by_payment = defaultdict(lambda: {"count": 0, "total": 0.0})
+            for tithe in tithes:
+                method = tithe.payment_method or "Não Informado"
+                tithes_by_payment[method]["count"] += 1
+                tithes_by_payment[method]["total"] += float(tithe.amount)
+
+            st.subheader("Resumo de Pagamentos de Dízimos")
+            cols_metrics = st.columns(max(1, len(tithes_by_payment)))
+            for i, (method, data) in enumerate(tithes_by_payment
