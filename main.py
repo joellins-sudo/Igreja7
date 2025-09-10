@@ -1047,7 +1047,7 @@ def page_relatorio_dizimistas(user: "User"):
             gb.configure_column("Congregação", filter=True, floatingFilter=True)
             gridOptions = gb.build()
             AgGrid(df_pesq, gridOptions=gridOptions, data_return_mode='AS_INPUT', update_mode='MODEL_CHANGED',
-                   allow_unsafe_jscode=True, enable_enterprise_modules=True)
+                   allow_unsafe_jscode=True, enable_enterprise_modules=True, height=300)
             tot_reg = len(df_pesq)
             tot_val = float(df_pesq["Total no ano (R$)"].sum())
             cA, cB = st.columns(2)
