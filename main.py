@@ -21,7 +21,7 @@ from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
 
 # PDF
 from io import BytesIO
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, portrait
 from reportlab.lib import colors
 from reportlab.lib.units import cm
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -43,8 +43,7 @@ CSS = """
 html, body { background: var(--bg); }
 header[data-testid="stHeader"]{ background: linear-gradient(180deg,#ffffff, #f6f9ff) !important; border-bottom:1px solid var(--ring); }
 .block-container{ padding-top: .9rem !important; }
-[data-testid="stSidebar"]{ background: linear-gradient(180deg,#ffffff,#fbfdff); border-right:1.
-px solid var(--ring); }
+[data-testid="stSidebar"]{ background: linear-gradient(180deg,#ffffff,#fbfdff); border-right:1px solid var(--ring); }
 [data-testid="stSidebar"] img{ border-radius: .6rem; border:1px solid var(--ring); box-shadow: 0 4px 16px rgba(0,0,0,.06); }
 .stRadio > div { gap: .5rem; }
 .stRadio label{ padding:.32rem .56rem; border-radius:.55rem; font-weight:700; }
@@ -581,7 +580,7 @@ def page_relatorio_entrada(user: "User"):
         st.divider()
         st.subheader("Resumo por data e Congregação (Dízimo e Oferta)")
         
-        # --- Lógica da nova tabela ---
+        # --- Lógica para o resumo mensal de todas as congregações
         if is_all:
             all_tx_in = db.scalars(select(Transaction).options(joinedload(Transaction.category), joinedload(Transaction.congregation)).where(
                 Transaction.date >= start, Transaction.date < end, Transaction.type.in_((TYPE_IN, "RECEITA"))
@@ -877,6 +876,53 @@ def page_relatorio_saida(user: "User"):
                 st.caption("Sem saídas para exclusão neste escopo.")
 
 # ===================== PAGE: RELATÓRIO DE DIZIMISTAS =====================
+# PDF BUILDER para a pesquisa
+def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, mes_sel: str, nome_q: str) -> bytes:
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=portrait(A4), leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('title', parent=styles['Heading1'], alignment=TA_CENTER, fontSize=16, spaceAfter=8)
+    subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=12, textColor=colors.black, spaceAfter=12)
+    heading_style = ParagraphStyle('heading', parent=styles['Heading2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
+    table_style = TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("ALIGN", (4, 1), (4, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ])
+
+    story = []
+    story.append(Paragraph("Relatório de Pesquisa de Dizimistas", title_style))
+    story.append(Paragraph(f"Ano: {ano_pesq} | Congregação: {cong_sel} | Mês: {mes_sel}", subtitle_style))
+    if nome_q.strip():
+        story.append(Paragraph(f"Filtrado por: '{nome_q}'", subtitle_style))
+    story.append(Spacer(1, 0.5*cm))
+
+    # Tabela com os dados da pesquisa
+    data_table = [df.columns.tolist()] + df.values.tolist()
+    total_value = float(df["Total no ano (R$)"].sum())
+    total_row = ["", "", "", "Total Geral:", format_currency(total_value), "", ""]
+    data_table.append(total_row)
+    
+    # Converta valores de moeda para o formato de texto
+    for row in data_table[1:]:
+        if isinstance(row[4], float):
+            row[4] = format_currency(row[4])
+
+    tbl = Table(data_table, colWidths=[3.2*cm, 3.2*cm, 2.5*cm, 3.5*cm, 3.5*cm, 3.0*cm, 3.0*cm])
+    tbl.setStyle(table_style)
+    story.append(tbl)
+    
+    story.append(Spacer(1, 0.5*cm))
+    story.append(Paragraph(f"Dizimistas encontrados: **{len(df)}**", styles['Normal']))
+    story.append(Paragraph(f"Total geral da pesquisa: **{format_currency(total_value)}**", styles['Normal']))
+
+    doc.build(story)
+    return buf.getvalue()
+
+
 def page_relatorio_dizimistas(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1046,6 +1092,14 @@ def page_relatorio_dizimistas(user: "User"):
                 "⬇️ Baixar CSV da pesquisa",
                 data=csv, file_name=f"pesquisa_dizimistas_{ano_pesq}.csv", mime="text/csv"
             )
+            
+            # Novo botão para baixar PDF
+            pdf_data = build_dizimista_search_pdf(df_pesq.assign(**{"Total no ano (R$)": df_pesq["Total no ano (R$)"]}), ano_pesq, cong_sel, mes_sel, nome_q)
+            st.download_button(
+                "⬇️ Baixar PDF da pesquisa",
+                data=pdf_data, file_name=f"pesquisa_dizimistas_{ano_pesq}.pdf", mime="application/pdf"
+            )
+
         else:
             st.caption("Nenhum resultado para os filtros informados.")
 
