@@ -1563,8 +1563,11 @@ def page_relatorio_missoes(user: "User"):
             for t in entradas_missoes:
                 agg_entradas[t.congregation.name] += float(t.amount)
             df_entradas = pd.DataFrame([
-                {"Congregação": k, "Total no Mês (R$)": v} for k,v in sorted(agg_entradas.items())
+                {"Congregação": k, "Total no Mês (R$)": v} for k,v in agg_entradas.items()
             ])
+            # Ordena a tabela pelo valor total de entradas de forma decrescente
+            df_entradas = df_entradas.sort_values(by="Total no Mês (R$)", ascending=False)
+
             df_entradas["Total no Mês (R$)"] = df_entradas["Total no Mês (R$)"].map(format_currency)
             st.dataframe(df_entradas, use_container_width=True, hide_index=True, height=300)
         else:
