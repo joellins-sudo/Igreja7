@@ -853,9 +853,9 @@ def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, m
         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
         ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
         ("ALIGN", (0, 0), (-1, -1), "LEFT"),
         ("ALIGN", (4, 1), (4, -1), "RIGHT"),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"), # Adicionado para corrigir a fonte do corpo
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ])
 
@@ -1082,6 +1082,7 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("ALIGN", (0, 0), (-1, -1), "LEFT"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
     ])
     tithe_table_style = TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
@@ -1090,6 +1091,7 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
         ("ALIGN", (0, 0), (-1, -1), "LEFT"),
         ("ALIGN", (2, 1), (2, -1), "RIGHT"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
     ])
 
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
@@ -1135,6 +1137,7 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
             ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
             ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
             ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ]))
@@ -1197,6 +1200,7 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
         ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("ALIGN", (1, 1), (1, -1), "RIGHT"),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
     ]))
     story.append(missions_table)
 
@@ -1219,6 +1223,7 @@ def build_consolidated_pdf(agg_total: list, ref: date) -> bytes:
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#e2fbe2")),
         ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
     ])
     table_style_missions = TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
@@ -1228,6 +1233,7 @@ def build_consolidated_pdf(agg_total: list, ref: date) -> bytes:
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#eef2ff")),
         ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
     ])
 
     story: List = []
@@ -1287,14 +1293,28 @@ def page_visao_geral(user: "User"):
         st.markdown("<h1 class='page-title'>Visão Geral</h1>", unsafe_allow_html=True)
         ref = get_month_selector()
         start, end = month_bounds(ref)
-
+        
         congs = cong_options_for(user, db)
         ordered = order_congs_sede_first(congs)
+        
+        is_all = (user.role == "SEDE")
+        if is_all:
+            st.info("Escopo: **Todas as congregações**")
+        elif congs:
+            cong_obj = congs[0]
+            st.info(f"Escopo: **{cong_obj.name}**")
+        else:
+            st.info("Sem congregação vinculada."); return
 
         agg_total = []
-        for c in ordered:
-            totals = _collect_month_data(db, c.id, start, end)["totals"]
-            agg_total.append((c.name, totals["entradas_total_sem_missoes"], totals["saidas_total"], totals["saldo"], totals["missoes"]))
+        if is_all:
+            for c in ordered:
+                totals = _collect_month_data(db, c.id, start, end)["totals"]
+                agg_total.append((c.name, totals["entradas_total_sem_missoes"], totals["saidas_total"], totals["saldo"], totals["missoes"]))
+        elif congs:
+            cong_obj = congs[0]
+            totals = _collect_month_data(db, cong_obj.id, start, end)["totals"]
+            agg_total.append((cong_obj.name, totals["entradas_total_sem_missoes"], totals["saidas_total"], totals["saldo"], totals["missoes"]))
 
         # ===== Ranking Top 5 — apenas SEDE =====
         if user.role == "SEDE":
