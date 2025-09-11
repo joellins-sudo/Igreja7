@@ -1,9 +1,10 @@
-# main.py — Igreja Finance CHMS — v8.54 (Login persiste após refresh; fallback sem quebrar)
+# main.py — Igreja Finance CHMS — v8.60 (Login persistente com cookies + ordem Dízimo/Oferta/Missões e exclusões robustas)
 
 from __future__ import annotations
 
 import os
-from datetime import date, timedelta, datetime
+import datetime as dt
+from datetime import date, timedelta
 from typing import Optional, List, Tuple
 from collections import defaultdict, Counter
 import locale as _locale
@@ -16,17 +17,6 @@ from sqlalchemy.ext.declarative import declarative_base
 import unicodedata as ud
 import hashlib
 
-# ===================== TENTATIVA DE COOKIES PERSISTENTES =====================
-# Se este import falhar, o app continua funcionando (sem persistência) e mostra um aviso.
-try:
-    import extra_streamlit_components as stx  # pip install extra-streamlit-components
-    _COOKIE_OK = True
-except Exception:
-    stx = None
-    _COOKIE_OK = False
-
-import hmac, json, base64, time
-
 # Biblioteca para layout da pesquisa
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
 
@@ -38,6 +28,9 @@ from reportlab.lib.units import cm
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer
 from reportlab.lib.enums import TA_CENTER
+
+# ===== NEW: Cookies persistentes =====
+import extra_streamlit_components as stx
 
 # ===================== CONFIG: ADMIN =====================
 ADMIN_USERNAME = "admin"  # somente este login verá/entrará no "Cadastro"
@@ -96,6 +89,9 @@ st.markdown(CSS, unsafe_allow_html=True)
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
 
+# ===== Cookie Manager deve ser criado no escopo global (NÃO em cache) =====
+cookie_manager = stx.CookieManager(key="auth_cookies")
+
 # ===================== LOCALE (fallback) =====================
 def _set_locale_ptbr():
     for loc in ("pt_BR.utf8", "pt_BR.UTF-8", "pt_BR", "Portuguese_Brazil.1252"):
@@ -139,9 +135,10 @@ def get_month_selector(label: str = "Mês de referência") -> date:
     return date(int(y), int(m), 1)
 
 def _confirm_ok(val: str) -> bool:
+    """Confirmação mais tolerante para 'EXCLUIR'."""
     return str(val or "").strip().upper() == "EXCLUIR"
 
-# ===================== DB BASE & MODELS =====================
+# ===================== DB BASE & MODELS (primeiro!) =====================
 Base = declarative_base()
 
 class User(Base):
@@ -191,23 +188,23 @@ class Tithe(Base):
     payment_method: Mapped[Optional[str]] = mapped_column(String, default=None)
     congregation: Mapped["Congregation"] = relationship(back_populates="tithes")
 
-# ===================== ENGINE / SESSION =====================
+# ===================== ENGINE / SESSION (depois dos models) =====================
 @st.cache_resource
 def get_engine():
     db_url = st.secrets.get("DATABASE_URL", os.environ.get("DATABASE_URL"))
     if not db_url:
-        db_url = "sqlite:///database.db"
+        db_url = "sqlite:///database.db"  # persistente no workspace do app
     return create_engine(db_url, pool_pre_ping=True)
 
 @st.cache_resource
 def get_sessionmaker():
     engine = get_engine()
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(engine)  # garante criação após declarar os models
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 SessionLocal = get_sessionmaker()
 
-# ===================== AUTH (hash) =====================
+# ===================== AUTH (hash + cookies) =====================
 def hash_password(password: str) -> str:
     salt = os.urandom(16)
     pwdhash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, 100000)
@@ -220,81 +217,41 @@ def verify_password(password: str, stored_hash: str) -> bool:
     new_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, 100000)
     return new_hash == pwdhash
 
-# ===================== AUTH (cookie) =====================
-COOKIE_NAME = "chms_auth"
-APP_SECRET = st.secrets.get("APP_SECRET", os.environ.get("APP_SECRET", "CHANGE-ME-IN-PROD"))
+# --- Helpers de cookies (persistência 30 dias) ---
+COOKIE_UID = "uid"
+COOKIE_VH  = "vh"  # verificador (hash do password_hash para evitar fixação)
 
-def _sign_blob(blob: str) -> str:
-    return hmac.new(APP_SECRET.encode("utf-8"), blob.encode("utf-8"), hashlib.sha256).hexdigest()
+def _verifier_from_password_hash(pwd_hash: str) -> str:
+    # Pequeno verificador derivado do password_hash (não reversível)
+    return hashlib.sha256(pwd_hash.encode("utf-8")).hexdigest()
 
-def _encode_token(payload: dict) -> str:
-    data = json.dumps(payload, separators=(",", ":"), sort_keys=True)
-    sig = _sign_blob(data)
-    return base64.urlsafe_b64encode(f"{data}.{sig}".encode()).decode()
+def set_auth_cookies(user: User, days_valid: int = 30):
+    expires_at = dt.datetime.utcnow() + dt.timedelta(days=days_valid)
+    cookie_manager.set(COOKIE_UID, str(user.id), expires_at=expires_at, key="c_uid_set")
+    cookie_manager.set(COOKIE_VH, _verifier_from_password_hash(user.password_hash), expires_at=expires_at, key="c_vh_set")
 
-def _decode_token(token: str) -> Optional[dict]:
-    try:
-        raw = base64.urlsafe_b64decode(token.encode()).decode()
-        data, sig = raw.rsplit(".", 1)
-        if not hmac.compare_digest(sig, _sign_blob(data)):
-            return None
-        payload = json.loads(data)
-        if int(payload.get("exp", 0)) < int(time.time()):
-            return None
-        return payload
-    except Exception:
-        return None
-
-@st.cache_resource
-def get_cookie_manager():
-    if not _COOKIE_OK:
-        return None
-    return stx.CookieManager()
-
-def set_login_cookie(user, days: int = 90):
-    cm = get_cookie_manager()
-    if cm is None:
-        return  # fallback: sem persistência
-    payload = {"uid": int(user.id), "ph": (user.password_hash or "")[:8], "exp": int(time.time()) + 86400 * days}
-    token = _encode_token(payload)
-    cm.set(COOKIE_NAME, token, expires_at=datetime.utcnow() + timedelta(days=days), key="auth_set", path="/")
-
-def clear_login_cookie():
-    cm = get_cookie_manager()
-    if cm is None:
-        return
-    cm.delete(COOKIE_NAME, key="auth_del", path="/")
+def clear_auth_cookies():
+    cookie_manager.delete(COOKIE_UID, key="c_uid_del")
+    cookie_manager.delete(COOKIE_VH, key="c_vh_del")
 
 def bootstrap_auth_from_cookie():
-    cm = get_cookie_manager()
-    if cm is None:
-        # Mostra aviso discreto uma vez
-        if not st.session_state.get("_cookie_warn_shown"):
-            st.session_state["_cookie_warn_shown"] = True
-            st.info("⚠️ Login persistente desativado (instale `extra-streamlit-components` para ativar).")
+    """Se houver cookies válidos, popula st.session_state.uid.
+       Chamado no início do main()."""
+    if st.session_state.get("uid"):
         return
-    cookies = cm.get_all()
-    if cookies is None:
-        st.info("Carregando sua sessão…")
-        st.stop()
-    tok = cookies.get(COOKIE_NAME)
-    if tok and not st.session_state.get("uid"):
-        data = _decode_token(tok)
-        if data and "uid" in data:
-            with SessionLocal() as db:
-                user = db.get(User, int(data["uid"]))
-                if user and user.password_hash.startswith(data.get("ph", "")):
-                    st.session_state.uid = user.id
-
-def login_success(user: "User"):
-    st.session_state.uid = user.id
-    set_login_cookie(user)
-    st.rerun()
-
-def logout():
-    st.session_state.uid = None
-    clear_login_cookie()
-    st.rerun()
+    cookies = cookie_manager.get_all() or {}
+    uid = cookies.get(COOKIE_UID)
+    vh  = cookies.get(COOKIE_VH)
+    if not uid or not vh:
+        return
+    try:
+        with SessionLocal() as db:
+            u = db.get(User, int(uid))
+            if u and _verifier_from_password_hash(u.password_hash) == vh:
+                st.session_state.uid = u.id
+    except Exception:
+        # Em qualquer problema invalida cookies
+        clear_auth_cookies()
 
 # ===================== SEED =====================
 TYPE_IN = "DOAÇÃO"
@@ -315,9 +272,11 @@ CONGREGACOES_PADRAO = [
 ]
 
 def ensure_seed():
+    # Garante que as tabelas existem
     engine = get_engine()
     Base.metadata.create_all(engine)
     with SessionLocal() as db:
+        # === Categorias padrão (idempotente)
         if db.scalar(select(func.count(Category.id))) == 0:
             for nm, tp in [
                 ("Dízimo", TYPE_IN), ("Oferta", TYPE_IN), ("Missões", TYPE_IN),
@@ -326,17 +285,24 @@ def ensure_seed():
             ]:
                 if not db.scalar(select(Category).where(Category.name == nm)):
                     db.add(Category(name=nm, type=tp))
+        
+        # === Garante a categoria "Missões (Saída)" para o novo relatório
         if not db.scalar(select(Category).where(Category.name == "Missões (Saída)")):
             db.add(Category(name="Missões (Saída)", type=TYPE_OUT))
+        
+        # === Congregações padrão (idempotente)
         existentes = set(db.scalars(select(Congregation.name)).all())
         faltantes = [n for n in CONGREGACOES_PADRAO if n not in existentes]
         if faltantes:
             db.add_all(Congregation(name=n) for n in faltantes)
             db.flush()
+        # === Garante a "Sede" sem duplicar
         sede_cong = db.scalar(select(Congregation).where(Congregation.name == "Sede"))
         if sede_cong is None:
             sede_cong = Congregation(name="Sede")
-            db.add(sede_cong); db.flush()
+            db.add(sede_cong)
+            db.flush()
+        # === Admin padrão
         if db.scalar(select(User).where(User.username == ADMIN_USERNAME)) is None:
             db.add(User(
                 username=ADMIN_USERNAME,
@@ -346,7 +312,7 @@ def ensure_seed():
             ))
         db.commit()
 
-# ===================== SESSION / LOGIN UI =====================
+# ===================== SESSION / LOGIN =====================
 if "uid" not in st.session_state:
     st.session_state.uid = None
 
@@ -364,15 +330,16 @@ def login_ui():
             st.image(LOGO_PATH, use_container_width=True)
     with col_title:
         st.markdown("<h1 class='page-title'>Igreja Finance CHMS</h1>", unsafe_allow_html=True)
-    if not _COOKIE_OK:
-        st.caption("⚠️ Para manter-se logado após atualizar a página, adicione `extra-streamlit-components` no requirements.txt.")
     u = st.text_input("Usuário")
     p = st.text_input("Senha", type="password")
     if st.button("Entrar", type="primary"):
         with SessionLocal() as db:
             user = db.scalar(select(User).where(User.username == u))
             if user and verify_password(p, user.password_hash):
-                login_success(user)
+                st.session_state.uid = user.id
+                # >>> PERSISTE LOGIN (30 dias)
+                set_auth_cookies(user, days_valid=30)
+                st.rerun()
             else:
                 st.error("Usuário ou senha inválidos.")
 
@@ -408,7 +375,7 @@ def order_congs_sede_first(congs: List[Congregation]) -> List[Congregation]:
     others = sorted([c for c in congs if _norm(c.name) != "sede"], key=lambda x: _norm(x.name))
     return (sede + others) if sede else others
 
-# ===================== PÁGINAS =====================
+# ===================== PAGE: LANÇAMENTOS =====================
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -417,7 +384,9 @@ def page_lancamentos(user: "User"):
                 st.image(LOGO_PATH, use_column_width=True)
             st.write(f"👤 **{user.username}** — *{user.role}*")
             if st.button("Sair"):
-                logout()
+                clear_auth_cookies()
+                st.session_state.clear()
+                st.rerun()
 
         st.markdown("<h1 class='page-title'>Lançamentos</h1>", unsafe_allow_html=True)
 
@@ -483,7 +452,7 @@ def page_lancamentos(user: "User"):
                         payment_method=None
                     ))
                     _db.commit()
-                    st.success("Entrada registrada.")
+                    st.success("Entrada registrado.")
         st.markdown('</div>', unsafe_allow_html=True)
         st.markdown("---")
 
@@ -553,7 +522,7 @@ def page_lancamentos(user: "User"):
                     st.success("Saída registrada.")
         st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------- Coleta base ----------
+# ===================== CORE COLETA =====================
 def _collect_month_data(db, cong_id: int, start: date, end: date, is_all: bool = False):
     tx_in_query = select(Transaction).options(joinedload(Transaction.category)).where(
         Transaction.date >= start, Transaction.date < end, Transaction.type.in_((TYPE_IN, "RECEITA"))
@@ -608,7 +577,7 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, is_all: bool =
         }
     }
 
-# ---------- Relatório de Entrada ----------
+# ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 def page_relatorio_entrada(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -617,7 +586,7 @@ def page_relatorio_entrada(user: "User"):
                 st.image(LOGO_PATH, use_column_width=True)
             st.write(f"👤 **{user.username}** — *{user.role}*")
             if st.button("Sair"):
-                logout()
+                clear_auth_cookies(); st.session_state.clear(); st.rerun()
 
         st.markdown("<h1 class='page-title'>Relatório de Entrada</h1>", unsafe_allow_html=True)
         ref = get_month_selector()
@@ -724,9 +693,11 @@ def page_relatorio_entrada(user: "User"):
         csv = pd.DataFrame(rows_csv).to_csv(index=False).encode("utf-8-sig")
         st.download_button("⬇️ Baixar CSV das ENTRADAS do período", data=csv, file_name=f"entradas_{start.strftime('%Y-%m')}.csv", mime="text/csv")
 
+        # ===== Exclusões (SEDE) =====
         if user.role == "SEDE" and not is_all:
             st.divider()
             st.subheader("Exclusões (SEDE)")
+
             with st.expander("Excluir ENTRADAS (Transaction)"):
                 base_rows = [{
                     "ID": t.id,
@@ -788,7 +759,7 @@ def page_relatorio_entrada(user: "User"):
                 else:
                     st.caption("Sem dízimos no período/escopo.")
 
-# ---------- Relatório de Saída ----------
+# ===================== PAGE: RELATÓRIO DE SAÍDA =====================
 def page_relatorio_saida(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -797,7 +768,7 @@ def page_relatorio_saida(user: "User"):
                 st.image(LOGO_PATH, use_column_width=True)
             st.write(f"👤 **{user.username}** — *{user.role}*")
             if st.button("Sair"):
-                logout()
+                clear_auth_cookies(); st.session_state.clear(); st.rerun()
 
         st.markdown("<h1 class='page-title'>Relatório de Saída</h1>", unsafe_allow_html=True)
         ref = get_month_selector()
@@ -913,13 +884,14 @@ def page_relatorio_saida(user: "User"):
             else:
                 st.caption("Sem saídas para exclusão neste escopo.")
 
-# ---------- PDF: Pesquisa Dizimistas ----------
+# ===================== PAGE: RELATÓRIO DE DIZIMISTAS =====================
 def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, mes_sel: str, nome_q: str) -> bytes:
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=portrait(A4), leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle('title', parent=styles['Heading1'], alignment=TA_CENTER, fontSize=16, spaceAfter=8)
     subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=12, textColor=colors.black, spaceAfter=12)
+    heading_style = ParagraphStyle('heading', parent=styles['Heading2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
     table_style = TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
         ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
@@ -941,7 +913,6 @@ def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, m
     total_value = float(df["Total no ano (R$)"].sum())
     total_row = ["", "", "", "Total Geral:", total_value, "", ""]
     data_table.append(total_row)
-
     for row in data_table[1:]:
         if isinstance(row[4], float):
             row[4] = format_currency(row[4])
@@ -949,7 +920,6 @@ def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, m
     tbl = Table(data_table, colWidths=[3.5*cm, 3.5*cm, 2.0*cm, 2.5*cm, 2.5*cm, 2.0*cm, 2.0*cm])
     tbl.setStyle(table_style)
     story.append(tbl)
-
     story.append(Spacer(1, 0.5*cm))
     story.append(Paragraph(f"Dizimistas encontrados: **{len(df)}**", styles['Normal']))
     story.append(Paragraph(f"Total geral da pesquisa: **{format_currency(total_value)}**", styles['Normal']))
@@ -957,7 +927,6 @@ def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, m
     doc.build(story)
     return buf.getvalue()
 
-# ---------- Relatório de Dizimistas ----------
 def page_relatorio_dizimistas(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -966,7 +935,7 @@ def page_relatorio_dizimistas(user: "User"):
                 st.image(LOGO_PATH, use_column_width=True)
             st.write(f"👤 **{user.username}** — *{user.role}*")
             if st.button("Sair"):
-                logout()
+                clear_auth_cookies(); st.session_state.clear(); st.rerun()
 
         st.markdown("<h1 class='page-title'>Relatório de Dizimistas</h1>", unsafe_allow_html=True)
         ref = get_month_selector()
@@ -1026,7 +995,6 @@ def page_relatorio_dizimistas(user: "User"):
             else:
                 st.caption("Sem dízimos neste período.")
 
-        # ===== PESQUISA AVANÇADA POR ANO =====
         st.divider()
         st.subheader("Pesquisa de Dizimistas (por Ano)")
         c1, c2, c3, c4 = st.columns([1.2, 1.8, 1.4, 2.6])
@@ -1121,6 +1089,7 @@ def page_relatorio_dizimistas(user: "User"):
                 "⬇️ Baixar CSV da pesquisa",
                 data=csv, file_name=f"pesquisa_dizimistas_{ano_pesq}.csv", mime="text/csv"
             )
+            
             pdf_data = build_dizimista_search_pdf(df_pesq.assign(**{"Total no ano (R$)": df_pesq["Total no ano (R$)"]}), ano_pesq, cong_sel, mes_sel, nome_q)
             st.download_button(
                 "⬇️ Baixar PDF da pesquisa",
@@ -1129,14 +1098,13 @@ def page_relatorio_dizimistas(user: "User"):
         else:
             st.caption("Nenhum resultado para os filtros informados.")
 
-# ---------- PDF: Prestação / Consolidado ----------
+# ===================== PDF: PRESTAÇÃO DE CONTAS =====================
 def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
     buf = BytesIO()
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle('title', parent=styles['Heading1'], alignment=TA_CENTER, fontSize=16, spaceAfter=8)
     subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=12, textColor=colors.black, spaceAfter=12)
     heading_style = ParagraphStyle('heading', parent=styles['Heading2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
-
     table_style = TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
         ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
@@ -1190,6 +1158,7 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
     story.append(Paragraph(f"Congregação: {cong_name}", subtitle_style))
     story.append(Paragraph(f"Referente a: {ref.strftime('%B de %Y')}", subtitle_style))
 
+    # 1. Entradas
     story.append(Paragraph("1. Entradas (Resumo: Dízimo e Oferta)", heading_style))
     if len(tx_in_data) > 1:
         tbl_in = Table(tx_in_data, colWidths=[3.2*cm, 4.0*cm, 4.0*cm, 5.3*cm])
@@ -1206,6 +1175,7 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
         story.append(Paragraph("Nenhuma entrada registrada.", getSampleStyleSheet()['Normal']))
     story.append(Spacer(1, 0.5*cm))
 
+    # 2. Dizimistas
     story.append(Paragraph("2. Dizimistas (Lançamentos Nominais)", heading_style))
     if len(tithe_data) > 1:
         tbl_tithe = Table(tithe_data, colWidths=[3*cm, 9.5*cm, 4.5*cm])
@@ -1215,6 +1185,7 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
         story.append(Paragraph("Nenhum dízimo registrado.", getSampleStyleSheet()['Normal']))
     story.append(Spacer(1, 0.5*cm))
 
+    # 3. Saídas
     story.append(Paragraph("3. Saídas", heading_style))
     if len(tx_out_data) > 1:
         tbl_out = Table(tx_out_data, colWidths=[2.5*cm, 4.5*cm, 7.5*cm, 3.5*cm])
@@ -1224,6 +1195,7 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
         story.append(Paragraph("Nenhuma saída registrada.", getSampleStyleSheet()['Normal']))
     story.append(Spacer(1, 1*cm))
 
+    # 4. Resumo Financeiro do Mês
     story.append(Paragraph("4. Resumo Financeiro do Mês", heading_style))
     with SessionLocal() as db:
         start, end = month_bounds(ref)
@@ -1247,6 +1219,7 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
     story.append(summary_table)
     story.append(Spacer(1, 0.8*cm))
 
+    # 5. Missões (Resumo do Mês)
     story.append(Paragraph("5. Missões (Resumo do Mês)", heading_style))
     missions_table = Table(
         [["Descrição", "Valor"], ["Total de Missões no Mês", format_currency(totals.get("missoes", 0.0))]],
@@ -1264,65 +1237,7 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
     doc.build(story)
     return buf.getvalue()
 
-def build_consolidated_pdf(agg_total: list, ref: date) -> bytes:
-    buf = BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('title', parent=styles['Heading1'], alignment=TA_CENTER, fontSize=16, spaceAfter=8)
-    subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=12, textColor=colors.black, spaceAfter=12)
-    heading_style = ParagraphStyle('heading', parent=styles['Heading2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
-    table_style_main = TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#e2fbe2")),
-        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-    ])
-    table_style_missions = TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#eef2ff")),
-        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-    ])
-
-    story: List = []
-    story.append(Paragraph("Relatório Mensal", title_style))
-    story.append(Paragraph(f"Mês de Referência: {ref.strftime('%B de %Y')}", subtitle_style))
-    story.append(Spacer(1, 1*cm))
-
-    table_data = [["Congregação", "Entradas (D+O+Outras)", "Saídas", "Saldo"]]
-    total_entradas = total_saidas = total_saldo = 0.0
-    missions_rows = []; total_missoes = 0.0
-
-    for c_name, entradas, saidas, saldo, missoes in agg_total:
-        table_data.append([c_name, format_currency(entradas), format_currency(saidas), format_currency(saldo)])
-        total_entradas += entradas; total_saidas += saidas; total_saldo += saldo
-        missions_rows.append([c_name, missoes]); total_missoes += missoes
-
-    table_data.append(["TOTAL GERAL", format_currency(total_entradas), format_currency(total_saidas), format_currency(total_saldo)])
-    tbl = Table(table_data, colWidths=[5*cm, 4*cm, 4*cm, 4*cm]); tbl.setStyle(table_style_main)
-    story.append(tbl)
-
-    story.append(Spacer(1, 0.8*cm))
-    story.append(Paragraph("Missões por Congregação (Entradas)", heading_style))
-    missions_table_data = [["Congregação", "Missões (entrada)"]]
-    for r in missions_rows:
-        missions_table_data.append([r[0], format_currency(r[1])])
-    missions_table_data.append(["TOTAL GERAL DE MISSÕES", format_currency(total_missoes)])
-    tbl_m = Table(missions_table_data, colWidths=[9*cm, 9*cm]); tbl_m.setStyle(table_style_missions)
-    story.append(tbl_m)
-
-    doc.build(story)
-    return buf.getvalue()
-
-# ---------- Relatório de Missões ----------
+# ===================== RELATÓRIO DE MISSÕES (ENTRADA/SAÍDA GERAL) =====================
 def _collect_missions_data(db: Session, start: date, end: date):
     q_in = select(Transaction).options(joinedload(Transaction.congregation)).where(
         Transaction.date >= start,
@@ -1331,7 +1246,7 @@ def _collect_missions_data(db: Session, start: date, end: date):
         Transaction.category.has(Category.name.in_(("Missões", "missões")))
     ).order_by(Transaction.date)
     entradas_missoes = db.scalars(q_in).all()
-
+    
     q_out = select(Transaction).options(joinedload(Transaction.congregation)).where(
         Transaction.date >= start,
         Transaction.date < end,
@@ -1339,7 +1254,7 @@ def _collect_missions_data(db: Session, start: date, end: date):
         Transaction.category.has(Category.name.in_(("Missões (Saída)", "missões (saída)")))
     ).order_by(Transaction.date)
     saidas_missoes = db.scalars(q_out).all()
-
+    
     return entradas_missoes, saidas_missoes
 
 def build_missions_report_pdf(ref: date, entradas: list, saidas: list) -> bytes:
@@ -1372,31 +1287,29 @@ def build_missions_report_pdf(ref: date, entradas: list, saidas: list) -> bytes:
         entradas_data = [["Congregação", "Entradas (R$)"]]
         for cong_name, total in sorted(entradas_cong_sum.items()):
             entradas_data.append([cong_name, format_currency(total)])
-        tbl_in = Table(entradas_data, colWidths=[9*cm, 9*cm])
-        tbl_in.setStyle(table_style)
+        tbl_in = Table(entradas_data, colWidths=[9*cm, 9*cm]); tbl_in.setStyle(table_style)
         story.append(tbl_in)
     else:
         story.append(Paragraph("Nenhuma entrada de missões registrada.", styles['Normal']))
 
     story.append(Spacer(1, 0.8*cm))
-
+    
     story.append(Paragraph("Saídas de Missões", heading_style))
     if saidas:
         saidas_data = [["Data", "Descrição", "Valor (R$)"]]
         for t in saidas:
             saidas_data.append([t.date.strftime("%d/%m/%Y"), t.description or "—", format_currency(float(t.amount))])
-        tbl_out = Table(saidas_data, colWidths=[3*cm, 10*cm, 5*cm])
-        tbl_out.setStyle(table_style)
+        tbl_out = Table(saidas_data, colWidths=[3*cm, 10*cm, 5*cm]); tbl_out.setStyle(table_style)
         story.append(tbl_out)
     else:
         story.append(Paragraph("Nenhuma saída de missões registrada.", styles['Normal']))
 
     story.append(Spacer(1, 1*cm))
-
+    
     total_entradas_missions = sum(float(t.amount) for t in entradas)
     total_saidas_missions = sum(float(t.amount) for t in saidas)
     saldo_missions = total_entradas_missions - total_saidas_missions
-
+    
     story.append(Paragraph("Resumo Financeiro de Missões", heading_style))
     summary_data = [
         ["Total de Entradas de Missões", format_currency(total_entradas_missions)],
@@ -1420,7 +1333,7 @@ def page_relatorio_missoes(user: "User"):
     if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
         st.warning(f"🔒 Acesso negado. Apenas usuários `SEDE` ou `TESOUREIRO MISSIONÁRIO` podem acessar este relatório.")
         return
-
+    
     ensure_seed()
     with SessionLocal() as db:
         with st.sidebar:
@@ -1428,14 +1341,14 @@ def page_relatorio_missoes(user: "User"):
                 st.image(LOGO_PATH, use_column_width=True)
             st.write(f"👤 **{user.username}** — *{user.role}*")
             if st.button("Sair"):
-                logout()
+                clear_auth_cookies(); st.session_state.clear(); st.rerun()
 
         st.markdown("<h1 class='page-title'>Relatório de Missões</h1>", unsafe_allow_html=True)
         ref = get_month_selector()
         start, end = month_bounds(ref)
 
         st.info("Escopo: **Todas as congregações**")
-
+        
         entradas_missoes, saidas_missoes = _collect_missions_data(db, start, end)
 
         total_entradas = sum(float(t.amount) for t in entradas_missoes)
@@ -1446,7 +1359,7 @@ def page_relatorio_missoes(user: "User"):
         c1.metric("Total de Entradas", format_currency(total_entradas))
         c2.metric("Total de Saídas", format_currency(total_saidas))
         c3.metric("Saldo do Mês", format_currency(saldo_missoes))
-
+        
         st.divider()
 
         st.subheader("Lançar Entrada de Missões")
@@ -1454,17 +1367,17 @@ def page_relatorio_missoes(user: "User"):
             congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
             cong_names = [c.name for c in order_congs_sede_first(congs_all)]
             cong_sel = st.selectbox("Selecione a congregação", cong_names, key="mis_ent_cong_sel")
-
+            
             ent_data = st.date_input("Data do Culto", value=date.today(), key="mis_ent_data")
             ent_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="mis_ent_valor")
             ent_desc = st.text_input("Descrição (opcional)", key="mis_ent_desc")
-
+            
             if st.form_submit_button("Salvar ENTRADA de Missões", type="primary"):
                 with SessionLocal() as _db:
                     cong_obj = next(c for c in congs_all if c.name == cong_sel)
                     cat_obj = _db.scalar(select(Category).where(Category.name == "Missões"))
                     if not cat_obj:
-                        st.error("Categoria 'Missões' não encontrada. Contate o administrador."); return
+                        st.error("Categoria 'Missões' não encontrado."); return
                     _db.add(Transaction(
                         date=ent_data,
                         type=TYPE_IN,
@@ -1477,7 +1390,7 @@ def page_relatorio_missoes(user: "User"):
                     _db.commit()
                     st.success(f"Entrada de missões para '{cong_sel}' registrada.")
                     st.rerun()
-
+        
         st.divider()
 
         st.subheader("Entradas de Missões por Congregação")
@@ -1494,21 +1407,22 @@ def page_relatorio_missoes(user: "User"):
             st.caption("Nenhuma entrada de missões registrada neste período.")
 
         st.divider()
-
+        
         st.subheader("Lançar Saída de Missões")
         with st.form("form_saida_missoes", clear_on_submit=True):
             sai_data = st.date_input("Data", value=date.today())
             sai_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f")
             sai_desc = st.text_input("Descrição")
-
+            
             if st.form_submit_button("Salvar SAÍDA", type="primary"):
                 with SessionLocal() as _db:
                     cat_obj = _db.scalar(select(Category).where(Category.name == "Missões (Saída)"))
                     if not cat_obj:
-                        st.error("Categoria 'Missões (Saída)' não encontrada. Contate o administrador."); return
+                        st.error("Categoria 'Missões (Saída)' não encontrada."); return
                     sede_cong = _db.scalar(select(Congregation).where(Congregation.name == "Sede"))
                     if not sede_cong:
-                        st.error("Congregação 'Sede' não encontrada."); return
+                         st.error("Congregação 'Sede' não encontrada."); return
+
                     _db.add(Transaction(
                         date=sai_data, type=TYPE_OUT, category_id=cat_obj.id,
                         amount=sai_valor, description=(sai_desc or None),
@@ -1529,7 +1443,7 @@ def page_relatorio_missoes(user: "User"):
             st.dataframe(df_saidas, use_container_width=True, hide_index=True)
         else:
             st.caption("Nenhuma saída de missões registrada neste período.")
-
+        
         st.divider()
         st.subheader("Gerar Relatório em PDF")
         if st.download_button(
@@ -1540,7 +1454,7 @@ def page_relatorio_missoes(user: "User"):
         ):
             st.success("Relatório de missões gerado com sucesso!")
 
-# ---------- Cadastro ----------
+# ===================== PAGE: CADASTRO (ADMIN) =====================
 def page_cadastro(user: "User"):
     if not is_admin_general(user):
         st.warning("🔒 Apenas o **administrador geral** (admin) pode acessar o Cadastro.")
@@ -1551,7 +1465,7 @@ def page_cadastro(user: "User"):
                 st.image(LOGO_PATH, use_column_width=True)
             st.write(f"👤 **{user.username}** — *{user.role}*")
             if st.button("Sair"):
-                logout()
+                clear_auth_cookies(); st.session_state.clear(); st.rerun()
 
         st.markdown("<h1 class='page-title'>Cadastro</h1>", unsafe_allow_html=True)
 
@@ -1647,7 +1561,7 @@ def page_cadastro(user: "User"):
         u_role = st.selectbox("Perfil", ["SEDE", "TESOUREIRO", "TESOUREIRO MISSIONÁRIO"], key="cad_user_role")
         all_congs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
         cong_options = ["—"] + [c.name for c in all_congs]
-
+        
         cong_sel_key = "cad_user_cong"
         if u_role == "TESOUREIRO MISSIONÁRIO":
             try:
@@ -1670,7 +1584,8 @@ def page_cadastro(user: "User"):
                         st.error("Selecione a congregação."); return
                     cong_id = next(c.id for c in all_congs if c.name == u_cong_name)
                 elif u_role == "TESOUREIRO MISSIONÁRIO":
-                    cong_id = db.scalar(select(Congregation.id).where(Congregation.name == "Sede"))
+                     cong_id = db.scalar(select(Congregation.id).where(Congregation.name == "Sede"))
+                
                 db.add(User(username=u_user.strip(), password_hash=hash_password(u_pwd.strip()), role=u_role, congregation_id=cong_id))
                 db.commit()
                 st.success("Usuário criado."); st.rerun()
@@ -1695,7 +1610,7 @@ def page_cadastro(user: "User"):
                     _db.commit()
                 st.success(f"{len(ids_u)} usuário(s) excluído(s)."); st.rerun()
 
-# ---------- Visão Geral ----------
+# ===================== PAGE: VISÃO GERAL =====================
 def render_stat_card(col, label: str, full_text: str):
     col.markdown(
         f"""
@@ -1708,6 +1623,64 @@ def render_stat_card(col, label: str, full_text: str):
         unsafe_allow_html=True,
     )
 
+def build_consolidated_pdf(agg_total: list, ref: date) -> bytes:
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('title', parent=styles['Heading1'], alignment=TA_CENTER, fontSize=16, spaceAfter=8)
+    subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=12, textColor=colors.black, spaceAfter=12)
+    heading_style = ParagraphStyle('heading', parent=styles['Heading2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
+    table_style_main = TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#e2fbe2")),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+    ])
+    table_style_missions = TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#eef2ff")),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+    ])
+
+    story: List = []
+    story.append(Paragraph("Relatório Mensal", title_style))
+    story.append(Paragraph(f"Mês de Referência: {ref.strftime('%B de %Y')}", subtitle_style))
+    story.append(Spacer(1, 1*cm))
+
+    table_data = [["Congregação", "Entradas (D+O+Outras)", "Saídas", "Saldo"]]
+    total_entradas = total_saidas = total_saldo = 0.0
+    missions_rows = []; total_missoes = 0.0
+
+    for c_name, entradas, saidas, saldo, missoes in agg_total:
+        table_data.append([c_name, format_currency(entradas), format_currency(saidas), format_currency(saldo)])
+        total_entradas += entradas; total_saidas += saidas; total_saldo += saldo
+        missions_rows.append([c_name, missoes]); total_missoes += missoes
+
+    table_data.append(["TOTAL GERAL", format_currency(total_entradas), format_currency(total_saidas), format_currency(total_saldo)])
+    tbl = Table(table_data, colWidths=[5*cm, 4*cm, 4*cm, 4*cm]); tbl.setStyle(table_style_main)
+    story.append(tbl)
+
+    story.append(Spacer(1, 0.8*cm))
+    story.append(Paragraph("Missões por Congregação (Entradas)", heading_style))
+    missions_table_data = [["Congregação", "Missões (entrada)"]]
+    for r in missions_rows:
+        missions_table_data.append([r[0], format_currency(r[1])])
+    missions_table_data.append(["TOTAL GERAL DE MISSÕES", format_currency(total_missoes)])
+    tbl_m = Table(missions_table_data, colWidths=[9*cm, 9*cm]); tbl_m.setStyle(table_style_missions)
+    story.append(tbl_m)
+
+    doc.build(story)
+    return buf.getvalue()
+
 def page_visao_geral(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1716,15 +1689,15 @@ def page_visao_geral(user: "User"):
                 st.image(LOGO_PATH, use_column_width=True)
             st.write(f"👤 **{user.username}** — *{user.role}*")
             if st.button("Sair"):
-                logout()
+                clear_auth_cookies(); st.session_state.clear(); st.rerun()
 
         st.markdown("<h1 class='page-title'>Visão Geral</h1>", unsafe_allow_html=True)
         ref = get_month_selector()
         start, end = month_bounds(ref)
-
+        
         congs = cong_options_for(user, db)
         ordered = order_congs_sede_first(congs)
-
+        
         is_all = (user.role == "SEDE")
         if is_all:
             st.info("Escopo: **Todas as congregações**")
@@ -1805,7 +1778,7 @@ def main():
     try:
         ensure_seed()
 
-        # Restaura sessão a partir do cookie (se disponível)
+        # >>> Tenta recuperar autenticação pelos cookies ANTES de checar sessão
         bootstrap_auth_from_cookie()
 
         user = current_user()
@@ -1821,7 +1794,6 @@ def main():
                 menu_options = ["Relatório de Missões"]
             else:
                 menu_options = ["Visão Geral"]
-
             page = st.radio("Menu", options=menu_options, index=0, key="main_menu")
 
         if page == "Lançamentos":
