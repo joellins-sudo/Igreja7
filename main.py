@@ -1,4 +1,4 @@
-# main.py — Igreja Finance CHMS — v8.60 (Login persistente, scroll mobile fix, ranking OK)
+# main.py — AD Relatório Financeiro — v8.61 (Login persistente, scroll mobile fix, ranking OK)
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ from reportlab.lib.enums import TA_CENTER
 ADMIN_USERNAME = "admin"  # somente este login verá/entrará no "Cadastro"
 
 # ===================== ST CONFIG / THEME =====================
-st.set_page_config(page_title="Igreja Finance CHMS", page_icon="⛪", layout="wide")
+st.set_page_config(page_title="AD Relatório Financeiro", page_icon="⛪", layout="wide")
 
 CSS = """
 <style>
@@ -275,7 +275,6 @@ APP_SECRET = st.secrets.get("APP_SECRET", os.environ.get("APP_SECRET", "dev-secr
 
 def make_token(user: "User") -> str:
     data = f"{user.id}:{user.password_hash}:{APP_SECRET}"
-    # token curto para URL
     return hashlib.sha256(data.encode()).hexdigest()[:32]
 
 def _set_auth_query_params(uid: int, token: str):
@@ -314,9 +313,12 @@ def _clear_auth_query_params():
 
 def hydrate_auth_from_query():
     """Hidrata sessão a partir dos query params (persistência entre refresh/navegação)."""
-    params = st.experimental_get_query_params() or {}
-    uid_str = (params.get("uid") or [None])[0]
-    tok = (params.get("t") or [None])[0]
+    try:
+        params = dict(st.query_params)  # NOVO: substitui experimental_get_query_params
+    except Exception:
+        params = {}
+    uid_str = params.get("uid")
+    tok = params.get("t")
     if uid_str and tok and not st.session_state.get("uid"):
         try:
             uid = int(uid_str)
@@ -412,7 +414,7 @@ def login_ui():
         with col_logo:
             st.image(logo_path, use_container_width=True)
     with col_title:
-        st.markdown("<h1 class='page-title'>Igreja Finance CHMS</h1>", unsafe_allow_html=True)
+        st.markdown("<h1 class='page-title'>AD Relatório Financeiro</h1>", unsafe_allow_html=True)
 
     u = st.text_input("Usuário")
     p = st.text_input("Senha", type="password")
@@ -1362,7 +1364,6 @@ def build_consolidated_pdf(agg_total: list, ref: date) -> bytes:
 
 # ===================== HELPER: STAT CARD =====================
 def render_stat_card(col, label: str, full_text: str):
-    # tooltip foi mantido, mas oculto por CSS para evitar duplicação visual
     col.markdown(
         f"""
         <div class="stat-card">
