@@ -1,4 +1,4 @@
-# main.py — Igreja Finance CHMS — v8.60 (login persistente + logout correto)
+# main.py — Igreja Finance CHMS — v8.61 (logout correto, persistência de login, correção UnboundLocalError, sem banner)
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ from reportlab.lib.enums import TA_CENTER
 
 
 # ===================== CONFIG: ADMIN =====================
-ADMIN_USERNAME = "admin"  # somente este login verá/entrará no "Cadastro"
+ADMIN_USERNAME = "admin"
 
 # ===================== AUTH PERSISTENTE (COOKIE + URL) =====================
 AUTH_COOKIE = "chms_auth"
@@ -54,15 +54,12 @@ def _parse_token(token: str) -> Optional[Tuple[int, str]]:
         return None
 
 def set_auth(user: "User"):
-    """Salva sessão, cookie e parâmetro na URL (para sobreviver a refresh e novo worker)."""
     st.session_state.uid = user.id
     token = _hmac_token(user.id, user.password_hash)
-    # cookie
     try:
         cookie_manager.set(AUTH_COOKIE, token, expires_days=AUTH_TTL_DAYS, same_site="Lax", path="/")
     except Exception:
         pass
-    # URL (?auth=)
     try:
         if getattr(st, "query_params", None) is not None:
             st.query_params["auth"] = token
@@ -78,12 +75,9 @@ def clear_auth_cookies():
         pass
 
 def bootstrap_auth_from_url_or_cookie(get_user_by_id):
-    """Se não houver uid na sessão, tenta restaurar via ?auth ou cookie."""
     if st.session_state.get("uid"):
         return
-
     token = None
-    # 1) URL
     try:
         if getattr(st, "query_params", None) is not None:
             qp = st.query_params
@@ -93,31 +87,23 @@ def bootstrap_auth_from_url_or_cookie(get_user_by_id):
             token = (qp.get("auth")[0] if qp.get("auth") else None)
     except Exception:
         token = None
-
-    # 2) Cookie
     if not token:
         try:
             token = cookie_manager.get(AUTH_COOKIE)
         except Exception:
             token = None
-
     if not token:
         return
-
     parsed = _parse_token(token)
     if not parsed:
         return
-
     user_id, _sig = parsed
     user = get_user_by_id(user_id)
     if not user:
         return
-
-    # valida HMAC
     if token == _hmac_token(user.id, user.password_hash):
         st.session_state.uid = user.id
     else:
-        # token inválido → limpa
         clear_auth_cookies()
         try:
             if getattr(st, "query_params", None) is not None:
@@ -131,7 +117,6 @@ def bootstrap_auth_from_url_or_cookie(get_user_by_id):
 
 def do_logout():
     clear_auth_cookies()
-    # remove ?auth da URL
     try:
         if getattr(st, "query_params", None) is not None:
             qp = st.query_params
@@ -253,7 +238,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String, unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String)
-    role: Mapped[str] = mapped_column(String)  # 'SEDE', 'TESOUREIRO', 'TESOUREIRO MISSIONÁRIO'
+    role: Mapped[str] = mapped_column(String)
     congregation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("congregations.id"))
     congregation: Mapped[Optional["Congregation"]] = relationship(back_populates="users")
 
@@ -354,10 +339,8 @@ def ensure_seed():
             ]:
                 if not db.scalar(select(Category).where(Category.name == nm)):
                     db.add(Category(name=nm, type=tp))
-
         if not db.scalar(select(Category).where(Category.name == "Missões (Saída)")):
             db.add(Category(name="Missões (Saída)", type=TYPE_OUT))
-
         existentes = set(db.scalars(select(Congregation.name)).all())
         faltantes = [n for n in CONGREGACOES_PADRAO if n not in existentes]
         if faltantes:
@@ -755,7 +738,6 @@ def page_relatorio_entrada(user: "User"):
         csv = pd.DataFrame(rows_csv).to_csv(index=False).encode("utf-8-sig")
         st.download_button("⬇️ Baixar CSV das ENTRADAS do período", data=csv, file_name=f"entradas_{start.strftime('%Y-%m')}.csv", mime="text/csv")
 
-        # Exclusões (SEDE)
         if user.role == "SEDE" and not is_all:
             st.divider(); st.subheader("Exclusões (SEDE)")
             with st.expander("Excluir ENTRADAS (Transaction)"):
@@ -1215,7 +1197,6 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
 
     story.append(Paragraph("1. Entradas (Resumo: Dízimo e Oferta)", heading_style))
     if len(tx_in_data) > 1:
-        from reportlab.platypus import Table
         tbl_in = Table(tx_in_data, colWidths=[3.2*cm, 4.0*cm, 4.0*cm, 5.3*cm])
         tbl_in.setStyle(TableStyle([
             ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
@@ -1245,7 +1226,7 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
         tbl_out.setStyle(table_style)
         story.append(tbl_out)
     else:
-        story.append(Paragraph("Nenhuma saída registrada.", getSampleStyleSheet()['Normal']))
+        story.append(Paragraph("Nenhuma saída registrado.", getSampleStyleSheet()['Normal']))
     story.append(Spacer(1, 1*cm))
 
     story.append(Paragraph("4. Resumo Financeiro do Mês", heading_style))
@@ -1332,7 +1313,6 @@ def build_consolidated_pdf(agg_total: list, ref: date) -> bytes:
         missions_rows.append([c_name, missoes]); total_missoes += missoes
 
     table_data.append(["TOTAL GERAL", format_currency(total_entradas), format_currency(total_saidas), format_currency(total_saldo)])
-    from reportlab.platypus import Table
     tbl = Table(table_data, colWidths=[5*cm, 4*cm, 4*cm, 4*cm]); tbl.setStyle(table_style_main)
     story.append(tbl)
 
@@ -1393,7 +1373,6 @@ def build_missions_report_pdf(ref: date, entradas: list, saidas: list) -> bytes:
         entradas_data = [["Congregação", "Entradas (R$)"]]
         for cong_name, total in sorted(entradas_cong_sum.items()):
             entradas_data.append([cong_name, format_currency(total)])
-        from reportlab.platypus import Table
         tbl_in = Table(entradas_data, colWidths=[9*cm, 9*cm]); tbl_in.setStyle(table_style)
         story.append(tbl_in)
     else:
@@ -1806,22 +1785,17 @@ def page_cadastro(user: "User"):
 def main():
     ensure_seed()
 
-    # monta o componente de cookies (necessário para ler/escrever)
     try:
         cookie_manager.get_all()
     except Exception:
         pass
 
-    # restaura auth se necessário
     bootstrap_auth_from_url_or_cookie(get_user_by_id)
 
     user = current_user()
     if not user:
         login_ui()
         return
-
-    # Banner rápido para sinalizar persistência
-    st.success("Autenticado e persistente. Atualize a página — você continuará logado. ✅")
 
     with st.sidebar:
         if user.role == "SEDE":
