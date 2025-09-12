@@ -1,4 +1,4 @@
-# main.py — Igreja Finance CHMS — v9.0
+# main.py — Igreja Finance CHMS — v9.0.1 (fix SyntaxError de ')')
 # Login persistente + PDFs estáveis + fix scroll Android/WebView + botão Sair sólido
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from sqlalchemy import select, func, String, Date, Float, ForeignKey, create_eng
 from sqlalchemy.orm import relationship, Mapped, mapped_column, sessionmaker, joinedload, Session
 from sqlalchemy.ext.declarative import declarative_base
 
-# cookies (persistência do login)
+# cookies
 import extra_streamlit_components as stx
 
 # AgGrid
@@ -144,7 +144,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String, unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String)
-    role: Mapped[str] = mapped_column(String)  # 'SEDE', 'TESOUREIRO', 'TESOUREIRO MISSIONÁRIO'
+    role: Mapped[str] = mapped_column(String)
     congregation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("congregations.id"))
     congregation: Mapped[Optional["Congregation"]] = relationship(back_populates="users")
 
@@ -217,8 +217,9 @@ def verify_password(password: str, stored_hash: str) -> bool:
     return new_hash == pwdhash
 
 def _hmac_token(user_id: int, pwd_hash: str) -> str:
+    import hashlib as _hashlib
     msg = f"{user_id}:{pwd_hash}".encode("utf-8")
-    sig = hmac.new(APP_SECRET.encode("utf-8"), msg, hashlib.sha256).hexdigest()
+    sig = hmac.new(APP_SECRET.encode("utf-8"), msg, _hashlib.sha256).hexdigest()
     return f"{user_id}.{sig[:32]}"
 
 def _parse_token(token: str) -> Optional[Tuple[int, str]]:
@@ -715,8 +716,6 @@ def page_relatorio_entrada(user: "User"):
         csv = pd.DataFrame(rows_csv).to_csv(index=False).encode("utf-8-sig")
         st.download_button("⬇️ Baixar CSV das ENTRADAS do período", data=csv, file_name=f"entradas_{start.strftime('%Y-%m')}.csv", mime="text/csv")
 
-        # Exclusões (SEDE) – (igual ao seu original, pode manter se precisar)
-
 # ===================== RELATÓRIO DE SAÍDA =====================
 def page_relatorio_saida(user: "User"):
     ensure_seed()
@@ -824,7 +823,7 @@ def page_relatorio_saida(user: "User"):
         csv = pd.DataFrame(rows_csv).to_csv(index=False).encode("utf-8-sig")
         st.download_button("⬇️ Baixar CSV das SAÍDAS do período", data=csv, file_name=f"saidas_{start.strftime('%Y-%m')}.csv", mime="text/csv")
 
-# ===================== RELATÓRIO DE DIZIMISTAS (com PDF de pesquisa) =====================
+# ===================== RELATÓRIO DE DIZIMISTAS (com PDF) =====================
 def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, mes_sel: str, nome_q: str) -> bytes:
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=portrait(A4), leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
@@ -1094,6 +1093,7 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
     story.append(Paragraph("1. Entradas (Resumo: Dízimo e Oferta)", heading_style))
     if len(tx_in_data) > 1:
         tbl_in = RLTable(tx_in_data, colWidths=[3.2*cm, 4.0*cm, 4.0*cm, 5.3*cm])
+        # >>> FIX: apenas dois parênteses de fechamento <<<
         tbl_in.setStyle(RLTableStyle([
             ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
             ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
@@ -1101,7 +1101,7 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
             ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
             ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ])))
+        ]))
         story.append(tbl_in)
     else:
         story.append(Paragraph("Nenhuma entrada registrada.", getSampleStyleSheet()['Normal']))
