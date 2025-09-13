@@ -1419,7 +1419,6 @@ if _has_edited and not edited.empty:
         mime="text/csv"
     )
 
-
 # ===================== PAGE: RELATÓRIO DE SAÍDA =====================
 def page_relatorio_saida(user: "User"):
     ensure_seed()
