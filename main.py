@@ -269,8 +269,6 @@ def migrate_database():
         print("MIGRATION: Verificação do banco de dados concluída.")
     except Exception as e:
         print(f"ERRO DURANTE MIGRAÇÃO: {e}")
-        # Não lança exceção para não quebrar o app se a migração falhar,
-        # mas o erro ainda ocorrerá nas consultas.
         pass
 
 SessionLocal = get_sessionmaker()
@@ -1269,7 +1267,6 @@ def page_relatorio_saida(user: "User"):
             "⬇️ Baixar CSV das SAÍDAS do período",
             data=csv, file_name=f"saidas_{start.strftime('%Y-%m')}.csv", mime="text/csv"
         )
-
 
 # ===================== PAGE: RELATÓRIO DE DIZIMISTAS =====================
 def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, mes_sel: str, nome_q: str) -> bytes:
