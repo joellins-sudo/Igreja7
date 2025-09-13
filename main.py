@@ -4,6 +4,9 @@
 # 2) Tesoureiro Missionário pode lançar SAÍDAS de Missões para QUALQUER congregação
 #    (editor agora tem coluna "Congregação"); Entradas continuam no editor agregado.
 # 3) Nova aba "Relatório de Missões" para TESOUREIRO (congregações) ver apenas seus lançamentos.
+# 4) [EQUIVALÊNCIA DE DÍZIMOS] Dízimos lançados em "Entrada (Doação)" e por "Dizimista"
+#    agora são tratados como equivalentes (NÃO são somados). Em resumos por data e totais mensais,
+#    usa-se o MAIOR entre (soma de Tithes) e (soma de Transactions categoria "Dízimo").
 #
 # Obs.: Todo o restante do seu código foi preservado. Itens que você pediu antes
 # (ex.: esconder "ajuste" na ENTRADA, relatórios agregados editáveis da SEDE, etc.) continuam iguais.
@@ -606,6 +609,7 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
 
 # ===================== RELATÓRIO DE ENTRADA — TABELA ÚNICA (EDIT SUMÁRIO) =====================
 def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date) -> pd.DataFrame:
+    # [EQ FIX]: separar somatórios de Dízimo (tithes) e Dízimo (transactions), e usar o MAIOR por data.
     tithes = db.execute(
         select(Tithe.date, func.sum(Tithe.amount))
         .where(and_(Tithe.congregation_id == cong_id, Tithe.date >= start, Tithe.date < end))
@@ -634,16 +638,17 @@ def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date) -> pd
         .group_by(Transaction.date)
     ).all()
 
-    by_date_diz = defaultdict(float)
-    for d, s in tithes: by_date_diz[d] += float(s or 0.0)
-    for d, s in diz_trans: by_date_diz[d] += float(s or 0.0)
+    by_date_diz_tit = defaultdict(float)
+    for d, s in tithes: by_date_diz_tit[d] += float(s or 0.0)
+    by_date_diz_tx = defaultdict(float)
+    for d, s in diz_trans: by_date_diz_tx[d] += float(s or 0.0)
     by_date_ofe = defaultdict(float)
     for d, s in oferta_trans: by_date_ofe[d] += float(s or 0.0)
 
-    all_dates = sorted(set(list(by_date_diz.keys()) + list(by_date_ofe.keys())))
+    all_dates = sorted(set(list(by_date_diz_tit.keys()) + list(by_date_diz_tx.keys()) + list(by_date_ofe.keys())))
     rows = []
     for d in all_dates:
-        dz = float(by_date_diz.get(d, 0.0))
+        dz = max(float(by_date_diz_tit.get(d, 0.0)), float(by_date_diz_tx.get(d, 0.0)))  # [EQ FIX]
         ofe = float(by_date_ofe.get(d, 0.0))
         rows.append({"Data do Culto": d, "Dízimo": dz, "Oferta": ofe, "Total": dz + ofe})
     return pd.DataFrame(rows)
@@ -672,7 +677,12 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
             cur_dz, cur_of = baseline.get(d, (0.0, 0.0))
             want_dz, want_of = wanted.get(d, (0.0, 0.0))
 
-            sum_dz_others = float(db.scalar(
+            # [EQ FIX]: equivalência → base de "outros" do dízimo é o MAIOR entre (tithes do dia) e (doações 'Dízimo' do dia, exceto ajustes)
+            sum_dz_tithes = float(db.scalar(
+                select(func.coalesce(func.sum(Tithe.amount), 0.0))
+                .where(and_(Tithe.congregation_id == cong_id, Tithe.date == d))
+            ) or 0.0)
+            sum_dz_tx_no_adj = float(db.scalar(
                 select(func.coalesce(func.sum(Transaction.amount), 0.0))
                 .where(and_(
                     Transaction.congregation_id == cong_id,
@@ -681,10 +691,8 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
                     Transaction.category_id == cat_diz.id,
                     func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
                 ))
-            ) or 0.0) + float(db.scalar(
-                select(func.coalesce(func.sum(Tithe.amount), 0.0))
-                .where(and_(Tithe.congregation_id == cong_id, Tithe.date == d))
             ) or 0.0)
+            sum_dz_others = max(sum_dz_tithes, sum_dz_tx_no_adj)  # [EQ FIX]
 
             sum_of_others = float(db.scalar(
                 select(func.coalesce(func.sum(Transaction.amount), 0.0))
@@ -988,11 +996,12 @@ def _editor_entradas_agg_all(congs_all: List["Congregation"], start: date, end: 
                 st.error("Categoria 'Oferta' não encontrada."); return
 
             def base_others_total(cid: int) -> float:
+                # [EQ FIX]: equivalência de dízimos no total mensal
                 tithe_sum = float(db.scalar(
                     select(func.coalesce(func.sum(Tithe.amount), 0.0))
                     .where(and_(Tithe.congregation_id == cid, Tithe.date >= start, Tithe.date < end))
                 ) or 0.0)
-                donations_sum = float(db.scalar(
+                donations_sum_ex_adj = float(db.scalar(  # todas doações (exceto ajustes agregados)
                     select(func.coalesce(func.sum(Transaction.amount), 0.0))
                     .join(Category, Transaction.category_id == Category.id)
                     .where(
@@ -1013,7 +1022,20 @@ def _editor_entradas_agg_all(congs_all: List["Congregation"], start: date, end: 
                         func.coalesce(Transaction.description, "") != ADJ_ENTRY_AGG_DESC
                     )
                 ) or 0.0)
-                return tithe_sum + (donations_sum - donations_missoes)
+                dizimo_tx_sum = float(db.scalar(
+                    select(func.coalesce(func.sum(Transaction.amount), 0.0))
+                    .join(Category, Transaction.category_id == Category.id)
+                    .where(
+                        Transaction.congregation_id == cid,
+                        Transaction.date >= start, Transaction.date < end,
+                        Transaction.type.in_((TYPE_IN, "RECEITA")),
+                        func.lower(Category.name).in_(("dízimo","dizimo")),
+                        func.coalesce(Transaction.description, "") != ADJ_ENTRY_AGG_DESC
+                    )
+                ) or 0.0)
+                non_diz_non_miss = donations_sum_ex_adj - donations_missoes - dizimo_tx_sum
+                diz_final = max(tithe_sum, dizimo_tx_sum)  # [EQ FIX]
+                return diz_final + non_diz_non_miss
 
             existing_adj = {(t.congregation_id): t for t in db.scalars(
                 select(Transaction).where(
@@ -1157,7 +1179,7 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, is_all: bool =
 
     total_dizimos_tithe = sum(float(t.amount) for t in tithes)
     total_dizimos_trans = sum(float(t.amount) for t in tx_in if _is_dizimo_tx(t))
-    total_dizimos_final = max(total_dizimos_tithe, total_dizimos_trans)
+    total_dizimos_final = max(total_dizimos_tithe, total_dizimos_trans)  # [EQ FIX] já existia essa lógica global
 
     total_ofertas = sum(float(t.amount) for t in tx_in if _is_oferta_tx(t))
     total_missoes = sum(float(t.amount) for t in tx_in if _is_mission_entry(t))
@@ -1623,19 +1645,25 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
         start, end = month_bounds(ref)
         data = _collect_month_data(db, cong_id, start, end)
 
-        entries_by_date = defaultdict(lambda: {"dizimo": 0.0, "oferta": 0.0})
-        for t in data["tx_in"]:
-            if t.category and _norm(t.category.name) in ("dizimo", "dízimo"):
-                entries_by_date[t.date]["dizimo"] += float(t.amount)
-            elif t.category and _norm(t.category.name) == "oferta":
-                entries_by_date[t.date]["oferta"] += float(t.amount)
+        # [EQ FIX]: calcular Dízimo por data usando equivalência (max entre tithes e tx 'Dízimo'), e Oferta somada normalmente
+        tithe_by_date = defaultdict(float)
         for t in data["tithes"]:
-            entries_by_date[t.date]["dizimo"] += float(t.amount)
+            tithe_by_date[t.date] += float(t.amount)
 
+        diz_tx_by_date = defaultdict(float)
+        oferta_by_date = defaultdict(float)
+        for t in data["tx_in"]:
+            if t.category and _norm(t.category.name) in ("dizimo","dízimo"):
+                diz_tx_by_date[t.date] += float(t.amount)
+            elif t.category and _norm(t.category.name) == "oferta":
+                oferta_by_date[t.date] += float(t.amount)
+
+        all_dates = sorted(set(list(tithe_by_date.keys()) + list(diz_tx_by_date.keys()) + list(oferta_by_date.keys())))
         tx_in_data = [["Data do Culto", "Dízimo", "Oferta", "Total"]]
-        for d, totals in sorted(entries_by_date.items()):
-            diz = totals["dizimo"]; ofe = totals["oferta"]; total = diz + ofe
-            tx_in_data.append([d.strftime("%d/%m/%Y"), format_currency(diz), format_currency(ofe), format_currency(total)])
+        for d in all_dates:
+            dz = max(float(tithe_by_date.get(d, 0.0)), float(diz_tx_by_date.get(d, 0.0)))  # [EQ FIX]
+            ofe = float(oferta_by_date.get(d, 0.0))
+            tx_in_data.append([d.strftime("%d/%m/%Y"), format_currency(dz), format_currency(ofe), format_currency(dz + ofe)])
 
         tx_out_data = [["Data", "Categoria", "Descrição", "Valor"]]
         tx_out_data.extend([[t.date.strftime("%d/%m/%Y"), t.category.name, t.description or "", format_currency(t.amount)] for t in data["tx_out"]])
@@ -1673,7 +1701,7 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
         ]))
         story.append(tbl_out)
     else:
-        story.append(Paragraph("Nenhuma saída registrada.", styles['Normal']))
+        story.append(Paragraph("Nenhuma saída registrado.", styles['Normal']))
     story.append(Spacer(1, 1*cm))
 
     story.append(Paragraph("3. Resumo Financeiro do Mês", heading_style))
