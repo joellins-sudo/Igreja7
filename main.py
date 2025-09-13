@@ -1,9 +1,9 @@
-# main.py — AD Relatório Financeiro — v11.1 (edição inline na célula com AgGrid)
+# main.py — AD Relatório Financeiro — v11.0 (edição inline com st.data_editor)
 from __future__ import annotations
 
 import os
 from datetime import date, timedelta, datetime
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict, Any
 from collections import defaultdict, Counter
 import locale as _locale
 import pandas as pd
@@ -15,9 +15,6 @@ from sqlalchemy.ext.declarative import declarative_base
 import unicodedata as ud
 import hashlib
 import json, base64, hmac, time
-
-# Tabelas interativas
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode, JsCode
 
 # PDF
 from io import BytesIO
@@ -142,6 +139,35 @@ def get_month_selector(label: str = "Mês de referência") -> date:
 def _confirm_ok(val: str) -> bool:
     return str(val or "").strip().upper() == "EXCLUIR"
 
+# Conversões auxiliares para o editor
+def _to_date(obj: Any) -> date:
+    if isinstance(obj, date):
+        return obj
+    s = str(obj or "").strip()
+    if not s:
+        return today_bahia()
+    # tenta DD/MM/YYYY
+    try:
+        if "/" in s:
+            return datetime.strptime(s, "%d/%m/%Y").date()
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except Exception:
+        return today_bahia()
+
+def _to_float_brl(x: Any) -> float:
+    if x is None:
+        return 0.0
+    if isinstance(x, (int, float)):
+        return float(x)
+    s = str(x)
+    s = s.replace("R$", "").replace(" ", "")
+    # remove separador de milhar, troca vírgula por ponto
+    s = s.replace(".", "").replace(",", ".")
+    try:
+        return float(s)
+    except Exception:
+        return 0.0
+
 # ===================== DB BASE & MODELS =====================
 Base = declarative_base()
 
@@ -251,6 +277,7 @@ def _read_token(tok: str | None) -> Optional[dict]:
         return None
     return data
 
+# >>> CookieManager fora de função cacheada
 def get_cookie_manager():
     import extra_streamlit_components as stx
     if "cookie_mgr" not in st.session_state:
@@ -415,229 +442,265 @@ def sidebar_common(user: "User"):
         if st.button("Sair"):
             logout()
 
-# ===== AgGrid helper (seleção simples — usada nos resumos)
-def _render_selectable_table(df: pd.DataFrame, height: int = 220, selectable: str = "single"):
-    if df.empty:
-        st.caption("Sem dados para o período.")
-        return df, []
-    gb = GridOptionsBuilder.from_dataframe(df)
-    gb.configure_grid_options(domLayout='normal')
-    gb.configure_selection(selection_mode=selectable, use_checkbox=False)
-    gridOptions = gb.build()
-    grid = AgGrid(
-        df,
-        gridOptions=gridOptions,
-        data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
-        update_mode=GridUpdateMode.SELECTION_CHANGED,
-        allow_unsafe_jscode=True,
-        enable_enterprise_modules=True,
-        height=height
-    )
-    return df, grid.get('selected_rows', [])
+# ===================== EDITORES INLINE (st.data_editor) =====================
 
-# ===================== JS p/ moeda (AgGrid) =====================
-JS_CURRENCY_FORMATTER = JsCode("""
-function(params){
-  if (params.value === null || params.value === undefined) { return ''; }
-  let v = Number(params.value);
-  if (isNaN(v)) { return ''; }
-  return 'R$ ' + v.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
-}
-""")
+def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: str, default_cong_id: Optional[int]):
+    """Persiste diferenças de transações (Transaction) no banco."""
+    # Normaliza tipos
+    def norm_df(df: pd.DataFrame) -> pd.DataFrame:
+        d = df.copy()
+        if "ID" in d.columns:
+            pass
+        if "Valor" in d.columns:
+            d["Valor"] = d["Valor"].map(_to_float_brl)
+        if "Data" in d.columns:
+            d["Data"] = d["Data"].map(_to_date)
+        if "Categoria" in d.columns:
+            d["Categoria"] = d["Categoria"].astype(str).fillna("")
+        if "Descrição" in d.columns:
+            d["Descrição"] = d["Descrição"].astype(str).fillna("")
+        return d
 
-JS_NUMBER_VALUE_PARSER = JsCode("""
-function(params){
-  if (params.newValue === null || params.newValue === undefined) { return params.oldValue; }
-  if (typeof params.newValue === 'number') { return params.newValue; }
-  let s = String(params.newValue);
-  s = s.replace(/[R$\\s]/g,'').replace(/\\./g,'').replace(',', '.');
-  let f = parseFloat(s);
-  if (isNaN(f)) { return params.oldValue; }
-  return f;
-}
-""")
+    o = norm_df(orig_df)
+    n = norm_df(edited_df)
 
-def _mark_to_delete_flag(v) -> bool:
-    if isinstance(v, bool):
-        return v
-    s = str(v or "").strip().lower()
-    return s in ("sim", "yes", "true", "1")
+    old_ids = set(int(x) for x in o["ID"].tolist() if pd.notna(x))
+    new_ids = set(int(x) for x in n["ID"].tolist() if pd.notna(x) and int(x) > 0)
 
-def _diff_rows(original_df: pd.DataFrame, new_df: pd.DataFrame, editable_cols: List[str], id_col: str = "ID", del_col: str = "Excluir?"):
-    """Compara DataFrames por ID e retorna (alteracoes, exclusoes)."""
-    if del_col not in new_df.columns:
-        new_df[del_col] = "Não"
-    orig_map = {int(r[id_col]): r for r in original_df.to_dict("records")}
-    changed = []
-    to_delete = []
-    for row in new_df.to_dict("records"):
-        rid = int(row[id_col])
-        if _mark_to_delete_flag(row.get(del_col, False)):
-            to_delete.append(rid)
-            continue
-        base = orig_map.get(rid, {})
-        changes = {}
-        for col in editable_cols:
-            if col == del_col:
+    to_delete = list(old_ids - new_ids)
+
+    # Map ID -> row
+    old_map = {int(r["ID"]): r for _, r in o.iterrows()}
+    # --- DB ops
+    with SessionLocal() as db:
+        # categorias válidas do tipo
+        cats = categories_for_type(db, tx_type)
+        cat_by_name = {c.name: c for c in cats}
+        # Deletes
+        if to_delete:
+            db.query(Transaction).filter(Transaction.id.in_(to_delete)).delete(synchronize_session=False)
+
+        # Updates
+        for rid in sorted(new_ids & old_ids):
+            old = old_map[rid]
+            new = n.loc[n["ID"] == rid].iloc[0]
+            changed = False
+            t = db.get(Transaction, rid)
+            if not t:
                 continue
-            nv = row.get(col, None)
-            ov = base.get(col, None)
-            # normalizar moeda
-            if col.lower().startswith("valor"):
-                try: nv = round(float(nv or 0.0), 2)
-                except Exception: nv = 0.0
-                try: ov = round(float(ov or 0.0), 2)
-                except Exception: ov = 0.0
-            if (nv or "") != (ov or ""):
-                changes[col] = nv
-        if changes:
-            changed.append({"id": rid, "changes": changes})
-    return changed, to_delete
+            # Data
+            if old["Data"] != new["Data"]:
+                t.date = _to_date(new["Data"]); changed = True
+            # Categoria
+            if str(old["Categoria"]) != str(new["Categoria"]):
+                cat = cat_by_name.get(str(new["Categoria"]))
+                if cat:
+                    t.category_id = cat.id; changed = True
+            # Valor
+            if float(old["Valor"]) != float(new["Valor"]):
+                t.amount = float(new["Valor"]); changed = True
+            # Descrição
+            if (old.get("Descrição","") or "") != (new.get("Descrição","") or ""):
+                t.description = (new.get("Descrição","") or None); changed = True
+            if changed:
+                db.add(t)
 
-def _aggrid_inline(df: pd.DataFrame, key: str, edit_setup: dict, height: int = 280):
-    """
-    df: DataFrame com colunas exibidas.
-    edit_setup:
-        {
-          "editable_cols": ["Valor (R$)", "Descrição", "Excluir?"],
-          "select_payment": False/True,  # quando há "Forma de Pagamento"
-        }
-    """
-    df = df.copy()
-    if "Excluir?" not in df.columns:
-        df["Excluir?"] = "Não"
+        # Inserts (linhas sem ID)
+        for _, row in n.iterrows():
+            rid = row.get("ID", None)
+            is_new = pd.isna(rid) or int(rid) <= 0 or int(rid) not in old_ids
+            if not is_new:
+                continue
+            data = _to_date(row.get("Data"))
+            cat_name = str(row.get("Categoria","")).strip()
+            amount = _to_float_brl(row.get("Valor"))
+            desc = str(row.get("Descrição","")).strip() or None
+            if not cat_name:
+                continue
+            cat = cat_by_name.get(cat_name)
+            if not cat:
+                continue
+            # congregation id
+            cong_id = default_cong_id
+            if cong_id is None:
+                # tenta pegar de alguma linha existente do editor original
+                if not o.empty:
+                    cong_id = int(o.iloc[0].get("_cong_id", 0)) or None
+            if cong_id is None:
+                # sem congregação definida, não insere
+                continue
+            db.add(Transaction(
+                date=data, type=tx_type, category_id=cat.id, amount=float(amount),
+                description=desc, congregation_id=int(cong_id)
+            ))
+        db.commit()
 
-    gb = GridOptionsBuilder.from_dataframe(df)
-    gb.configure_grid_options(
-        domLayout='normal',
-        singleClickEdit=True,
-        stopEditingWhenCellsLoseFocus=True
-    )
-    gb.configure_default_column(editable=False, filter=True, sortable=True, resizable=True)
+def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default_cong_id: Optional[int]):
+    """Persiste diferenças de dízimos (Tithe) no banco."""
+    def norm_df(df: pd.DataFrame) -> pd.DataFrame:
+        d = df.copy()
+        if "Valor" in d.columns:
+            d["Valor"] = d["Valor"].map(_to_float_brl)
+        if "Data" in d.columns:
+            d["Data"] = d["Data"].map(_to_date)
+        for c in ("Dizimista","Forma de Pagamento"):
+            if c in d.columns:
+                d[c] = d[c].astype(str).fillna("")
+        return d
 
-    # Não editáveis
-    for col in [c for c in ["ID","Data","Categoria","Dizimista","Congregação","Tipo da saída"] if c in df.columns]:
-        gb.configure_column(col, editable=False)
+    o = norm_df(orig_df)
+    n = norm_df(edited_df)
 
-    # Valor
-    if "Valor (R$)" in df.columns:
-        gb.configure_column(
-            "Valor (R$)",
-            editable=True,
-            type=["rightAligned","numericColumn"],
-            valueParser=JS_NUMBER_VALUE_PARSER,
-            valueFormatter=JS_CURRENCY_FORMATTER,
-            headerName="Valor (R$)"
-        )
+    old_ids = set(int(x) for x in o["ID"].tolist() if pd.notna(x))
+    new_ids = set(int(x) for x in n["ID"].tolist() if pd.notna(x) and int(x) > 0)
 
-    # Descrição
-    if "Descrição" in df.columns:
-        gb.configure_column("Descrição", editable=True, wrapText=True, autoHeight=True)
+    to_delete = list(old_ids - new_ids)
+    old_map = {int(r["ID"]): r for _, r in o.iterrows()}
 
-    # Forma de Pagamento (select)
-    if "Forma de Pagamento" in df.columns:
-        gb.configure_column(
-            "Forma de Pagamento",
-            editable=True,
-            cellEditor="agSelectCellEditor",
-            cellEditorParams={"values": ["Não Informado","Dinheiro","PIX","Cartão"]},
-        )
+    with SessionLocal() as db:
+        # Deletes
+        if to_delete:
+            db.query(Tithe).filter(Tithe.id.in_(to_delete)).delete(synchronize_session=False)
 
-    # Excluir?
-    gb.configure_column(
-        "Excluir?",
-        editable=True,
-        cellEditor="agSelectCellEditor",
-        cellEditorParams={"values": ["Não","Sim"]},
-        width=110
-    )
+        # Updates
+        for rid in sorted(new_ids & old_ids):
+            old = old_map[rid]
+            new = n.loc[n["ID"] == rid].iloc[0]
+            changed = False
+            t = db.get(Tithe, rid)
+            if not t:
+                continue
+            if old["Data"] != new["Data"]:
+                t.date = _to_date(new["Data"]); changed = True
+            if (old["Dizimista"] or "") != (new["Dizimista"] or ""):
+                t.tither_name = (new["Dizimista"] or ""); changed = True
+            if float(old["Valor"]) != float(new["Valor"]):
+                t.amount = float(new["Valor"]); changed = True
+            if (old["Forma de Pagamento"] or "") != (new["Forma de Pagamento"] or ""):
+                t.payment_method = (new["Forma de Pagamento"] or None); changed = True
+            if changed:
+                db.add(t)
 
-    gridOptions = gb.build()
-    grid = AgGrid(
-        df,
-        gridOptions=gridOptions,
-        data_return_mode=DataReturnMode.AS_INPUT,
-        update_mode=GridUpdateMode.VALUE_CHANGED,
-        allow_unsafe_jscode=True,
-        enable_enterprise_modules=True,
-        height=height
-    )
-    new_df = pd.DataFrame(grid["data"])
-    changed, to_delete = _diff_rows(df, new_df, edit_setup.get("editable_cols", ["Valor (R$)","Descrição","Forma de Pagamento","Excluir?"]))
-    apply_now = st.button("💾 Aplicar alterações desta grade", key=f"{key}_apply", type="primary")
-    return changed, to_delete, apply_now
+        # Inserts
+        for _, row in n.iterrows():
+            rid = row.get("ID", None)
+            is_new = pd.isna(rid) or int(rid) <= 0 or int(rid) not in old_ids
+            if not is_new:
+                continue
+            data = _to_date(row.get("Data"))
+            nome = str(row.get("Dizimista","")).strip()
+            amount = _to_float_brl(row.get("Valor"))
+            forma = str(row.get("Forma de Pagamento","")).strip() or None
+            if not nome:
+                continue
+            cong_id = default_cong_id
+            if cong_id is None and not o.empty:
+                cong_id = int(o.iloc[0].get("_cong_id", 0)) or None
+            if cong_id is None:
+                continue
+            db.add(Tithe(
+                date=data, tither_name=nome, amount=float(amount),
+                congregation_id=int(cong_id), payment_method=forma
+            ))
+        db.commit()
 
-# ===================== Inline editors específicos =====================
-def _inline_editor_transactions(transactions: List["Transaction"], titulo: str, grid_key: str):
+def _editor_lancamentos(transactions: List["Transaction"], titulo: str, tx_type_hint: Optional[str] = None):
+    """Editor inline de transações com st.data_editor."""
     if not transactions:
-        st.caption("— Não há lançamentos para editar nesse filtro.")
+        st.caption("— Não há lançamentos para esse filtro.")
         return
-    base_rows = [{
-        "ID": t.id,
-        "Data": format_date(t.date),
-        "Categoria": (t.category.name if t.category else "—"),
-        "Valor (R$)": float(t.amount),
-        "Descrição": t.description or ""
-    } for t in transactions]
-    df_tx = pd.DataFrame(base_rows)
 
-    st.markdown(f"**{titulo}** *(clique no valor/descrição para editar; marque “Excluir?” para remover)*")
-    changed, to_delete, apply_now = _aggrid_inline(
-        df_tx,
-        key=f"tx_{grid_key}",
-        edit_setup={"editable_cols": ["Valor (R$)","Descrição","Excluir?"]},
-        height=300
+    # define cong padrão e tipo
+    cong_ids = {int(t.congregation_id) for t in transactions if t.congregation_id}
+    default_cong_id = list(cong_ids)[0] if len(cong_ids) == 1 else None
+    tx_type = tx_type_hint or (transactions[0].type if transactions else TYPE_IN)
+
+    rows = []
+    for t in transactions:
+        rows.append({
+            "ID": t.id,
+            "Data": t.date,
+            "Categoria": (t.category.name if t.category else ""),
+            "Valor": float(t.amount),
+            "Descrição": t.description or "",
+            "_cong_id": int(t.congregation_id or 0),
+        })
+    df = pd.DataFrame(rows)
+
+    with SessionLocal() as db:
+        cats = categories_for_type(db, tx_type)
+        cat_names = [c.name for c in cats] or ["—"]
+
+    st.markdown(f"**{titulo}**")
+    allow_add = default_cong_id is not None  # só habilita Add row quando sabemos a congregação
+    edited = st.data_editor(
+        df.drop(columns=["_cong_id"]),
+        use_container_width=True,
+        hide_index=True,
+        num_rows=("dynamic" if allow_add else "fixed"),
+        column_config={
+            "ID": st.column_config.Column("ID", disabled=True),
+            "Data": st.column_config.DateColumn("Data", required=True),
+            "Categoria": st.column_config.SelectboxColumn("Categoria", options=cat_names, required=True),
+            "Valor": st.column_config.NumberColumn("Valor (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
+            "Descrição": st.column_config.TextColumn("Descrição", max_chars=200),
+        },
+        key=f"tx_editor_{titulo}",
     )
-    if apply_now:
-        with SessionLocal() as db:
-            if to_delete:
-                db.query(Transaction).filter(Transaction.id.in_(to_delete)).delete(synchronize_session=False)
-            for ch in changed:
-                t: Transaction = db.get(Transaction, int(ch["id"]))
-                if not t: continue
-                if "Valor (R$)" in ch["changes"]:
-                    t.amount = round(float(ch["changes"]["Valor (R$)"] or 0.0), 2)
-                if "Descrição" in ch["changes"]:
-                    t.description = (ch["changes"]["Descrição"] or None)
-            db.commit()
-        st.success("Alterações aplicadas.")
-        st.rerun()
 
-def _inline_editor_tithes(tithes: List["Tithe"], titulo: str, grid_key: str):
+    if st.button("💾 Salvar mudanças", type="primary", key=f"save_{titulo}"):
+        try:
+            _apply_tx_changes(df, edited, tx_type, default_cong_id)
+            st.success("Alterações salvas.")
+            st.rerun()
+        except Exception as e:
+            st.error("Erro ao salvar alterações nos lançamentos.")
+            st.exception(e)
+
+def _editor_dizimos(tithes: List["Tithe"], titulo: str):
+    """Editor inline de dízimos com st.data_editor."""
     if not tithes:
         st.caption("— Não há dízimos neste período.")
         return
+
+    cong_ids = {int(t.congregation_id) for t in tithes if t.congregation_id}
+    default_cong_id = list(cong_ids)[0] if len(cong_ids) == 1 else None
+
     rows = [{
         "ID": t.id,
-        "Data": format_date(t.date),
+        "Data": t.date,
         "Dizimista": t.tither_name,
-        "Valor (R$)": float(t.amount),
-        "Forma de Pagamento": t.payment_method or "Não Informado"
+        "Valor": float(t.amount),
+        "Forma de Pagamento": t.payment_method or "",
+        "_cong_id": int(t.congregation_id or 0),
     } for t in tithes]
     df = pd.DataFrame(rows)
 
-    st.markdown(f"**{titulo}** *(clique no valor/forma para editar; marque “Excluir?” para remover)*")
-    changed, to_delete, apply_now = _aggrid_inline(
-        df,
-        key=f"ti_{grid_key}",
-        edit_setup={"editable_cols": ["Valor (R$)","Forma de Pagamento","Excluir?"]},
-        height=300
+    st.markdown(f"**{titulo}**")
+    allow_add = default_cong_id is not None
+    edited = st.data_editor(
+        df.drop(columns=["_cong_id"]),
+        use_container_width=True,
+        hide_index=True,
+        num_rows=("dynamic" if allow_add else "fixed"),
+        column_config={
+            "ID": st.column_config.Column("ID", disabled=True),
+            "Data": st.column_config.DateColumn("Data", required=True),
+            "Dizimista": st.column_config.TextColumn("Dizimista", max_chars=120, required=True),
+            "Valor": st.column_config.NumberColumn("Valor (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
+            "Forma de Pagamento": st.column_config.SelectboxColumn("Forma de Pagamento", options=["Dinheiro","PIX","Cartão","Transferência",""], required=False),
+        },
+        key=f"tithe_editor_{titulo}",
     )
-    if apply_now:
-        with SessionLocal() as db:
-            if to_delete:
-                db.query(Tithe).filter(Tithe.id.in_(to_delete)).delete(synchronize_session=False)
-            for ch in changed:
-                t: Tithe = db.get(Tithe, int(ch["id"]))
-                if not t: continue
-                if "Valor (R$)" in ch["changes"]:
-                    t.amount = round(float(ch["changes"]["Valor (R$)"] or 0.0), 2)
-                if "Forma de Pagamento" in ch["changes"]:
-                    val = ch["changes"]["Forma de Pagamento"]
-                    t.payment_method = None if (str(val).strip() in ["", "Não Informado"]) else str(val).strip()
-            db.commit()
-        st.success("Alterações aplicadas.")
-        st.rerun()
+
+    if st.button("💾 Salvar mudanças", type="primary", key=f"save_tithe_{titulo}"):
+        try:
+            _apply_tithe_changes(df, edited, default_cong_id)
+            st.success("Dízimos atualizados.")
+            st.rerun()
+        except Exception as e:
+            st.error("Erro ao salvar alterações de dízimos.")
+            st.exception(e)
 
 # ===================== CORE COLETA =====================
 def _collect_month_data(db, cong_id: int, start: date, end: date, is_all: bool = False):
@@ -881,11 +944,11 @@ def page_relatorio_entrada(user: "User"):
             doac = data['totals']['dizimos_doacoes']
             nomi = data['totals']['dizimos_nominais']
             if abs(float(doac) - float(nomi)) > 0.009:
-                st.error("⚠️ valores dos dízimos não conferem com os valores dos dizimistas. Verifique.")
+                st.error("⚠️ valores dos dízimos não conferem com os valores nominais; favor verificar.")
 
         st.divider()
 
-        # Resumo por data + editor inline por dia
+        # Resumo por data (somente exibição)
         if not is_all:
             st.subheader("Resumo por data (Dízimo e Oferta)")
             summary_by_date = defaultdict(lambda: {"dizimo": 0.0, "oferta": 0.0})
@@ -905,25 +968,15 @@ def page_relatorio_entrada(user: "User"):
                     "Dízimo": format_currency(totals["dizimo"]),
                     "Oferta": format_currency(totals["oferta"]),
                     "Total": format_currency(total),
-                    "_date_key": d.isoformat()
                 })
             df_summary = pd.DataFrame(rows)
             if df_summary.empty:
                 st.caption("Sem dízimos e ofertas para o período.")
             else:
-                display_df = df_summary[["Data do Culto","Dízimo","Oferta","Total"]]
-                _, selected = _render_selectable_table(display_df, height=240, selectable="single")
-                if selected:
-                    d_str = selected[0]["Data do Culto"]
-                    sel_row = df_summary[df_summary["Data do Culto"] == d_str].iloc[0]
-                    d_obj = datetime.fromisoformat(sel_row["_date_key"]).date()
-                    st.divider()
-                    st.markdown(f"### Lançamentos do dia **{format_date(d_obj)}** (edição inline)")
-                    tx_dia = [t for t in data["tx_in"] if t.date == d_obj and t.category and _norm(t.category.name) in ("dizimo","dízimo","oferta")]
-                    _inline_editor_transactions(tx_dia, "Editar entradas do dia selecionado", f"in_day_{d_obj.isoformat()}")
+                st.dataframe(df_summary, use_container_width=True, hide_index=True, height=220)
 
         st.divider()
-        st.subheader("Dizimistas no período (edição inline)")
+        # Editor inline de dízimos (nominais)
         if is_all:
             all_tz = db.scalars(select(Tithe).where(Tithe.date >= start, Tithe.date < end)).all()
             by_cong = defaultdict(set)
@@ -934,12 +987,18 @@ def page_relatorio_entrada(user: "User"):
                 st.dataframe(df, use_container_width=True, hide_index=True, height=200)
             else:
                 st.caption("Sem dízimos.")
-            st.info("Selecione uma congregação específica para editar nominalmente.")
         else:
             tithes_list = db.scalars(select(Tithe).where(
                 Tithe.date >= start, Tithe.date < end, Tithe.congregation_id == cong_obj.id
             ).order_by(Tithe.date)).all()
-            _inline_editor_tithes(tithes_list, "Editar dízimos do período", f"ti_{cong_obj.id}_{start.strftime('%Y%m')}")
+            _editor_dizimos(tithes_list, "Dízimos do período (editar na tabela)")
+
+        st.divider()
+        # Editor inline de ENTRADAS (todas as categorias de DOAÇÃO)
+        if is_all:
+            st.info("Edição inline de entradas habilitada ao escolher uma congregação específica.")
+        else:
+            _editor_lancamentos(data["tx_in"], "Entradas do período (editar na tabela)", tx_type_hint=TYPE_IN)
 
         st.divider()
         st.subheader("Missões no período (Entradas)")
@@ -1003,7 +1062,7 @@ def page_relatorio_saida(user: "User"):
         total_saidas = sum(float(t.amount) for t in txs)
         st.metric("Total de saídas", format_currency(total_saidas))
 
-        # Resumo por categoria + editor inline filtrado
+        # Resumo por categoria (tabela simples)
         if is_all:
             agg = defaultdict(float)
             for t in txs:
@@ -1028,27 +1087,25 @@ def page_relatorio_saida(user: "User"):
             if df_res.empty:
                 st.caption("Sem saídas no período.")
             else:
-                _, selected = _render_selectable_table(df_res, height=240, selectable="single")
-                if selected:
-                    categoria_escolhida = selected[0]["Tipo da saída"]
-                    st.divider()
-                    st.markdown(f"### Saídas da categoria **{categoria_escolhida}** (edição inline)")
-                    tx_cat = [t for t in txs if t.category and t.category.name == categoria_escolhida]
-                    _inline_editor_transactions(tx_cat, "Editar saídas da categoria selecionada", f"out_cat_{categoria_escolhida}")
+                st.dataframe(df_res, use_container_width=True, hide_index=True, height=220)
+
+        st.divider()
+        # Editor inline de SAÍDAS
+        if is_all:
+            st.info("Edição inline de saídas habilitada ao escolher uma congregação específica.")
+        else:
+            _editor_lancamentos(txs, "Saídas do período (editar na tabela)", tx_type_hint=TYPE_OUT)
 
         st.divider()
         st.subheader("Lançamentos de saída (lista)")
         rows = [{
             "ID": t.id, "Data": format_date(t.date),
-            "Tipo da saída": t.category.name, "Valor (R$)": float(t.amount),
+            "Tipo da saída": t.category.name, "Valor (R$)": format_currency(float(t.amount)),
             "Descrição": t.description or ""
         } for t in txs]
         df_list = pd.DataFrame(rows)
         if not df_list.empty:
-            df_list_fmt = df_list.copy()
-            df_list_fmt["Valor (R$)"] = df_list_fmt["Valor (R$)"].map(format_currency)
-            st.dataframe(df_list_fmt, use_container_width=True, hide_index=True, height=200)
-            st.caption("Dica: edite inline pelo resumo por categoria acima.")
+            st.dataframe(df_list, use_container_width=True, hide_index=True, height=200)
         else:
             st.caption("Sem lançamentos para listar.")
 
@@ -1074,16 +1131,6 @@ def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, m
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle('title', parent=styles['Heading1'], alignment=TA_CENTER, fontSize=16, spaceAfter=8)
     subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=12, textColor=colors.black, spaceAfter=12)
-    heading_style = ParagraphStyle('heading', parent=styles['Heading2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
-    table_style = TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-        ("ALIGN", (4, 1), (4, -1), "RIGHT"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-    ])
 
     story = []
     story.append(Paragraph("Relatório de Pesquisa de Dizimistas", title_style))
@@ -1101,7 +1148,15 @@ def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, m
             row[4] = format_currency(row[4])
 
     tbl = Table(data_table, colWidths=[3.5*cm, 3.5*cm, 2.0*cm, 2.5*cm, 2.5*cm, 2.0*cm, 2.0*cm])
-    tbl.setStyle(table_style)
+    tbl.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("ALIGN", (4, 1), (4, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
     story.append(tbl)
     story.append(Spacer(1, 0.5*cm))
     story.append(Paragraph(f"Dizimistas encontrados: **{len(df)}**", styles['Normal']))
@@ -1158,13 +1213,14 @@ def page_relatorio_dizimistas(user: "User"):
 
             st.subheader("Resumo de Pagamentos de Dízimos")
             cols_metrics = st.columns(max(1, len(tithes_by_payment)))
-            for i, (method, data) in enumerate(tithes_by_payment.items()):
-                cols_metrics[i].metric(f"Total ({method})", format_currency(data["total"]), f"{data['count']} dízimos")
+            for i, (method, datax) in enumerate(tithes_by_payment.items()):
+                cols_metrics[i].metric(f"Total ({method})", format_currency(datax["total"]), f"{datax['count']} dízimos")
 
             st.divider()
-            _inline_editor_tithes(tithes, "Editar dízimos do período", f"ti_list_{cong_obj.id}_{start.strftime('%Y%m')}")
+            # Editor inline
+            _editor_dizimos(tithes, "Dizimistas do período (editar na tabela)")
 
-        # Pesquisa Anual (igual à sua, sem edição)
+        # Pesquisa Anual — somente exibição/CSV/PDF
         st.divider()
         st.subheader("Pesquisa de Dizimistas (por Ano)")
         c1, c2, c3, c4 = st.columns([1.2, 1.8, 1.4, 2.6])
@@ -1242,13 +1298,10 @@ def page_relatorio_dizimistas(user: "User"):
         df_pesq = pd.DataFrame(rows)
         if not df_pesq.empty:
             df_pesq = df_pesq.sort_values(["Qtde de meses no ano","Dizimista"], ascending=[False, True])
-            gb = GridOptionsBuilder.from_dataframe(df_pesq)
-            gb.configure_grid_options(domLayout='normal')
-            gb.configure_column("Dizimista", filter=True, floatingFilter=True)
-            gb.configure_column("Congregação", filter=True, floatingFilter=True)
-            gridOptions = gb.build()
-            AgGrid(df_pesq, gridOptions=gridOptions, data_return_mode='AS_INPUT', update_mode='MODEL_CHANGED',
-                   allow_unsafe_jscode=True, enable_enterprise_modules=True, height=300)
+            st.dataframe(
+                df_pesq.assign(**{"Total no ano (R$)": df_pesq["Total no ano (R$)"].map(lambda x: format_currency(float(x)))}),
+                use_container_width=True, hide_index=True, height=320
+            )
             tot_reg = len(df_pesq)
             tot_val = float(df_pesq["Total no ano (R$)"].sum())
             cA, cB = st.columns(2)
@@ -1270,7 +1323,7 @@ def page_relatorio_dizimistas(user: "User"):
         else:
             st.caption("Nenhum resultado para os filtros informados.")
 
-# ===================== PDFs (prestação e consolidado) =====================
+# ===================== PDFs (prestação e consolidado) — preservados =====================
 def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
     buf = BytesIO()
     styles = getSampleStyleSheet()
@@ -1747,15 +1800,16 @@ def page_relatorio_missoes(user: "User"):
                     st.rerun()
 
         st.divider()
-        st.subheader("Entradas de Missões no Período (edição inline)")
+        # Editores inline (atualizar/excluir existentes; sem Add row global)
+        st.subheader("Entradas de Missões no Período (editar na tabela)")
         if entradas_missoes:
-            _inline_editor_transactions(entradas_missoes, "Editar Entradas de Missões", "missions_in")
+            _editor_lancamentos(entradas_missoes, "Missões — Entradas (todas as congregações)", tx_type_hint=TYPE_IN)
         else:
             st.caption("Nenhuma entrada de missões registrada neste período.")
 
-        st.subheader("Saídas de Missões no Período (edição inline)")
+        st.subheader("Saídas de Missões no Período (editar na tabela)")
         if saidas_missoes:
-            _inline_editor_transactions(saidas_missoes, "Editar Saídas de Missões", "missions_out")
+            _editor_lancamentos(saidas_missoes, "Missões — Saídas (todas as congregações)", tx_type_hint=TYPE_OUT)
         else:
             st.caption("Nenhuma saída de missões registrada neste período.")
 
