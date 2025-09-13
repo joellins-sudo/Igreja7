@@ -1350,37 +1350,53 @@ def page_relatorio_entrada(user: "User"):
         view_df = base_df.copy()
 
         edited = st.data_editor(
-            view_df,
-            use_container_width=True,
-            hide_index=True,
-            num_rows="dynamic",
-            column_config={
-                "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
-                "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", min_value=-999999999.0, step=1.0, format="R$ %.2f"),
-                "Oferta": st.column_config.NumberColumn("Oferta (R$)", min_value=-999999999.0, step=1.0, format="R$ %.2f"),
-                "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
-            },
-            key="re_entrada_sum_editor",
-        )
+    view_df,
+    use_container_width=True,
+    hide_index=True,
+    num_rows="dynamic",
+    column_config={
+        "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
+        "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", min_value=-999999999.0, step=1.0, format="R$ %.2f"),
+        "Oferta": st.column_config.NumberColumn("Oferta (R$)", min_value=-999999999.0, step=1.0, format="R$ %.2f"),
+        "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
+    },
+    key="re_entrada_sum_editor",
+)
 
-        if not edited.empty:
-            try:
-                edited["Total"] = edited["Dízimo"].map(_to_float_brl) + edited["Oferta"].map(_to_float_brl)
-            except Exception:
-                pass
+if not edited.empty:
+    try:
+        edited["Total"] = edited["Dízimo"].map(_to_float_brl) + edited["Oferta"].map(_to_float_brl)
+    except Exception:
+        pass
 
-        def _save_sum():
-            _apply_entrada_summary_changes(cong_obj.id, start, end, edited)
-            st.toast("💾 Alterações salvas.", icon="✅")
-            st.rerun()
+# >>> BLOCO A (TOTAL EM DESTAQUE) – COLAR AQUI <<<
+try:
+    _edited_calc = edited.copy()
+    _edited_calc["Dízimo"] = _edited_calc["Dízimo"].map(_to_float_brl)
+    _edited_calc["Oferta"] = _edited_calc["Oferta"].map(_to_float_brl)
+    _edited_calc["Total"]  = _edited_calc["Dízimo"] + _edited_calc["Oferta"]
+    total_mes_entrada = float(_edited_calc["Total"].sum())
+except Exception:
+    total_mes_entrada = 0.0
 
-        _save_btn(_save_sum, "entrada_sum")
+st.metric(
+    "Total de Entradas (Dízimo + Oferta) no mês",
+    format_currency(total_mes_entrada)
+)
+# <<< FIM DO BLOCO A
 
-        st.divider()
-        csv = edited.assign(**{
-            "Data do Culto": edited["Data do Culto"].map(lambda d: _to_date(d).strftime("%Y-%m-%d")),
-        }).to_csv(index=False).encode("utf-8-sig")
-        st.download_button("⬇️ Baixar CSV (Entradas do período)", data=csv, file_name=f"entradas_resumo_{start.strftime('%Y-%m')}.csv", mime="text/csv")
+def _save_sum():
+    _apply_entrada_summary_changes(cong_obj.id, start, end, edited)
+    st.toast("💾 Alterações salvas.", icon="✅")
+    st.rerun()
+
+_save_btn(_save_sum, "entrada_sum")
+
+st.divider()
+csv = edited.assign(**{
+    "Data do Culto": edited["Data do Culto"].map(lambda d: _to_date(d).strftime("%Y-%m-%d")),
+}).to_csv(index=False).encode("utf-8-sig")
+st.download_button("⬇️ Baixar CSV (Entradas do período)", data=csv, file_name=f"entradas_resumo_{start.strftime('%Y-%m')}.csv", mime="text/csv")
 
 # ===================== PAGE: RELATÓRIO DE SAÍDA =====================
 def page_relatorio_saida(user: "User"):
