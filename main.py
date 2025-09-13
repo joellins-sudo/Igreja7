@@ -1375,47 +1375,47 @@ def page_relatorio_entrada(user: "User"):
             st.rerun()
 
         _save_btn(_save_sum, "entrada_sum")
-# === [BLOCO: Apagar linhas do resumo de entrada] — COLE AQUI ===
-if isinstance(edited, pd.DataFrame) and not edited.empty and ("Data do Culto" in edited.columns):
-    try:
-        # Converte todas as datas da coluna para date e cria rótulos "dd/mm/aaaa"
-        _datas_ord = sorted({_to_date(d) for d in edited["Data do Culto"].tolist() if pd.notna(d)})
-        _label_map = {format_date(d): d for d in _datas_ord}  # "dd/mm/aaaa" -> date
-        _rotulos = list(_label_map.keys())
-    except Exception:
-        _rotulos = []
-        _label_map = {}
+        # === [BLOCO: Apagar linhas do resumo de entrada] — COLE AQUI (mesmo nível de _save_btn) ===
+        if isinstance(edited, pd.DataFrame) and not edited.empty and ("Data do Culto" in edited.columns):
+            try:
+                # Converte as datas e cria rótulos "dd/mm/aaaa"
+                _datas_ord = sorted({_to_date(d) for d in edited["Data do Culto"].tolist() if pd.notna(d)})
+                _label_map = {format_date(d): d for d in _datas_ord}  # "dd/mm/aaaa" -> date
+                _rotulos = list(_label_map.keys())
+            except Exception:
+                _rotulos = []
+                _label_map = {}
 
-    _sel_del = st.multiselect(
-        "Selecione as datas que deseja APAGAR desta tabela-resumo",
-        options=_rotulos,
-        key="re_entrada_sum_del_dates"
-    )
+            _sel_del = st.multiselect(
+                "Selecione as datas que deseja APAGAR desta tabela-resumo",
+                options=_rotulos,
+                key="re_entrada_sum_del_dates"
+            )
 
-    def _delete_selected_rows():
-        if not _sel_del:
-            st.warning("Selecione ao menos uma data para apagar.")
-            return
+            def _delete_selected_rows():
+                if not _sel_del:
+                    st.warning("Selecione ao menos uma data para apagar.")
+                    return
 
-        # Datas selecionadas (tipo date)
-        to_drop = {_label_map[x] for x in _sel_del if x in _label_map}
+                # Datas selecionadas (tipo date)
+                to_drop = {_label_map[x] for x in _sel_del if x in _label_map}
 
-        # Remove linhas com essas datas e salva
-        edited_clean = edited.copy()
-        edited_clean["Data do Culto"] = edited_clean["Data do Culto"].map(_to_date)
-        edited_clean = edited_clean[~edited_clean["Data do Culto"].isin(to_drop)]
+                # Remove linhas com essas datas e salva
+                edited_clean = edited.copy()
+                edited_clean["Data do Culto"] = edited_clean["Data do Culto"].map(_to_date)
+                edited_clean = edited_clean[~edited_clean["Data do Culto"].isin(to_drop)]
 
-        _apply_entrada_summary_changes(cong_obj.id, start, end, edited_clean)
-        st.toast("🗑️ Linhas apagadas com sucesso.", icon="✅")
-        st.rerun()
+                _apply_entrada_summary_changes(cong_obj.id, start, end, edited_clean)
+                st.toast("🗑️ Linhas apagadas com sucesso.", icon="✅")
+                st.rerun()
 
-    st.button(
-        "🗑️ Apagar linhas selecionadas",
-        type="secondary",
-        on_click=_delete_selected_rows,
-        key="btn_del_entrada_sum"
-    )
-# === [FIM DO BLOCO] ===
+            st.button(
+                "🗑️ Apagar linhas selecionadas",
+                type="secondary",
+                on_click=_delete_selected_rows,
+                key="btn_del_entrada_sum"
+            )
+        # === [FIM DO BLOCO] ===
 
         st.divider()
         csv = edited.assign(**{
