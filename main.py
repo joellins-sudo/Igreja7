@@ -914,6 +914,22 @@ def _editor_missions_entries_agg(congs_all: List["Congregation"], start: date, e
         key=f"missoes_in_agg_{titulo}",
     )
 
+    # === [BLOCO 3: Total de ENTRADAS de Missões (mês corrente) em destaque] ===
+    try:
+        _total_in_missions = 0.0
+        if isinstance(edited_view, pd.DataFrame) and not edited_view.empty and ("Valor" in edited_view.columns):
+            _ev = edited_view.copy()
+            _ev["Valor"] = _ev["Valor"].map(_to_float_brl)
+            _total_in_missions = float(_ev["Valor"].sum())
+    except Exception:
+        _total_in_missions = 0.0
+
+    st.metric(
+        "Total de ENTRADAS de Missões (mês corrente)",
+        format_currency(_total_in_missions)
+    )
+    # === [FIM DO BLOCO 3] ===
+
     def _save():
         with SessionLocal() as db:
             by_name = {c.name: c.id for c in congs_all}
@@ -958,7 +974,8 @@ def _editor_missions_entries_agg(congs_all: List["Congregation"], start: date, e
                 if abs(new_adj) < 0.0001:
                     if exist: db.delete(exist)
                 else:
-                    if exist: exist.amount = float(new_adj); db.add(exist)
+                    if exist: 
+                        exist.amount = float(new_adj); db.add(exist)
                     else:
                         db.add(Transaction(
                             date=start, type=TYPE_IN, category_id=cat_miss.id, amount=float(new_adj),
@@ -969,6 +986,7 @@ def _editor_missions_entries_agg(congs_all: List["Congregation"], start: date, e
         st.rerun()
 
     _save_btn(_save, f"missoes_in_{titulo}")
+
 
 # ====== EDITORES AGREGADOS (TODAS AS CONGREGAÇÕES) — ENTRADAS / SAÍDAS ======
 def _editor_entradas_agg_all(congs_all: List["Congregation"], start: date, end: date):
