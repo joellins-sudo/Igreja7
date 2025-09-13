@@ -1335,20 +1335,35 @@ def page_relatorio_entrada(user: "User"):
             is_all = False
             cong_obj = congs[0] if congs else None
 
+        # === SEDE: modo "Todas as congregações" ===
         if is_all:
             st.info("Escopo: **Todas as congregações** — edite o total de entradas mensal por congregação abaixo.")
             _editor_entradas_agg_all(ordered, start, end)
+
+            # TOTAL GERAL EM DESTAQUE (todas as congregações)
+            with SessionLocal() as _db_tot_in:
+                total_geral_in = 0.0
+                for _c in ordered:
+                    _t = _collect_month_data(_db_tot_in, _c.id, start, end)["totals"]
+                    total_geral_in += float(_t["entradas_total_sem_missoes"])
+            st.metric("Total geral de entradas (todas as congregações)", format_currency(total_geral_in))
             return
 
+        # === Congregação específica ===
         if not cong_obj:
-            st.info("Selecione uma congregação."); return
+            st.info("Selecione uma congregação.")
+            return
+
         st.info(f"Escopo: **{cong_obj.name}**")
 
+        # Base (Dízimo, Oferta, Total por data)
         base_df = _entrada_summary_df(db, cong_obj.id, start, end)
-        if base_df.empty:
-            base_df = pd.DataFrame(columns=["Data do Culto","Dízimo","Oferta","Total"])
+        if base_df is None or base_df.empty:
+            base_df = pd.DataFrame(columns=["Data do Culto", "Dízimo", "Oferta", "Total"])
+
         view_df = base_df.copy()
 
+        # Editor da tabela-resumo
         edited = st.data_editor(
             view_df,
             use_container_width=True,
@@ -1363,12 +1378,29 @@ def page_relatorio_entrada(user: "User"):
             key="re_entrada_sum_editor",
         )
 
+        # Recalcula a coluna Total (visual)
         if not edited.empty:
             try:
                 edited["Total"] = edited["Dízimo"].map(_to_float_brl) + edited["Oferta"].map(_to_float_brl)
             except Exception:
                 pass
 
+        # === TOTAL DO MÊS EM DESTAQUE (logo abaixo da tabela) ===
+        try:
+            _edited_calc = edited.copy()
+            _edited_calc["Dízimo"] = _edited_calc["Dízimo"].map(_to_float_brl)
+            _edited_calc["Oferta"] = _edited_calc["Oferta"].map(_to_float_brl)
+            _edited_calc["Total"] = _edited_calc["Dízimo"] + _edited_calc["Oferta"]
+            total_mes_entrada = float(_edited_calc["Total"].sum())
+        except Exception:
+            total_mes_entrada = 0.0
+
+        st.metric(
+            "Total de Entradas (Dízimo + Oferta) no mês",
+            format_currency(total_mes_entrada)
+        )
+
+        # Botão Salvar (persiste no banco via _apply_entrada_summary_changes)
         def _save_sum():
             _apply_entrada_summary_changes(cong_obj.id, start, end, edited)
             st.toast("💾 Alterações salvas.", icon="✅")
@@ -1376,73 +1408,50 @@ def page_relatorio_entrada(user: "User"):
 
         _save_btn(_save_sum, "entrada_sum")
 
+        # === APAGAR LINHAS (abaixo do botão Salvar alterações) ===
+        if not edited.empty:
+            # Lista de datas presentes na grade (ordenadas)
+            try:
+                _datas_ord = sorted({_to_date(d) for d in edited["Data do Culto"].tolist()})
+                _rotulos = [d.strftime("%d/%m/%Y") for d in _datas_ord]
+            except Exception:
+                _rotulos = []
+
+            _sel_del = st.multiselect(
+                "Selecione as datas que deseja APAGAR desta tabela-resumo",
+                options=_rotulos,
+                key="re_entrada_sum_del_dates"
+            )
+
+            def _delete_selected_rows():
+                if not _sel_del:
+                    st.warning("Selecione ao menos uma data para apagar.")
+                    return
+                to_drop = {datetime.strptime(x, "%d/%m/%Y").date() for x in _sel_del}
+                edited_clean = edited[~edited["Data do Culto"].map(_to_date).isin(to_drop)]
+                _apply_entrada_summary_changes(cong_obj.id, start, end, edited_clean)
+                st.toast("🗑️ Linhas apagadas com sucesso.", icon="✅")
+                st.rerun()
+
+            st.button(
+                "🗑️ Apagar linhas selecionadas",
+                type="secondary",
+                on_click=_delete_selected_rows,
+                key="btn_del_entrada_sum"
+            )
+
         st.divider()
+
+        # Download CSV do período
         csv = edited.assign(**{
             "Data do Culto": edited["Data do Culto"].map(lambda d: _to_date(d).strftime("%Y-%m-%d")),
         }).to_csv(index=False).encode("utf-8-sig")
-        st.download_button("⬇️ Baixar CSV (Entradas do período)", data=csv, file_name=f"entradas_resumo_{start.strftime('%Y-%m')}.csv", mime="text/csv")
 
-# ===================== PAGE: RELATÓRIO DE SAÍDA =====================
-def page_relatorio_saida(user: "User"):
-    ensure_seed()
-    with SessionLocal() as db:
-        sidebar_common(user)
-
-        st.markdown("<h1 class='page-title'>Relatório de Saída</h1>", unsafe_allow_html=True)
-        ref = get_month_selector()
-        start, end = month_bounds(ref)
-
-        congs = cong_options_for(user, db)
-        if user.role == "SEDE":
-            ordered = order_congs_sede_first(congs)
-            esc_opt = ["Todas as congregações"] + [c.name for c in ordered]
-            esc = st.selectbox("Escopo", esc_opt, key="rs_escopo")
-            is_all = (esc == "Todas as congregações")
-            cong_obj = None if is_all else next(c for c in ordered if c.name == esc)
-        else:
-            cong_obj = congs[0] if congs else None; is_all = False
-
-        if is_all:
-            st.info("Escopo: **Todas as congregações** — edite o total mensal de saídas por congregação abaixo.")
-            _editor_saidas_agg_all(ordered, start, end)
-            st.divider()
-            with SessionLocal() as db2:
-                rows = []
-                for c in ordered:
-                    total = _collect_month_data(db2, c.id, start, end)["totals"]["saidas_total"]
-                    rows.append({"Congregação": c.name, "Total Saídas (R$)": float(total)})
-            csv = pd.DataFrame(rows).to_csv(index=False).encode("utf-8-sig")
-            st.download_button("⬇️ Baixar CSV (Saídas por congregação)", data=csv, file_name=f"saidas_congregacoes_{start.strftime('%Y-%m')}.csv", mime="text/csv")
-            return
-
-        if not cong_obj:
-            st.info("Sem congregação vinculada."); return
-        st.info(f"Escopo: **{cong_obj.name}**")
-
-        q = select(Transaction).options(joinedload(Transaction.category)).where(
-            Transaction.date >= start, Transaction.date < end, Transaction.type.in_(("SAÍDA", "DESPESA")),
-            Transaction.congregation_id == cong_obj.id
-        )
-        txs = db.scalars(q).all()
-
-        total_saidas = sum(float(t.amount) for t in txs)
-        st.metric("Total de saídas", format_currency(total_saidas))
-
-        st.divider()
-        _editor_lancamentos(txs, "Saídas do período (editar na tabela)", tx_type_hint=TYPE_OUT)
-
-        st.divider()
-        rows_csv = [{
-            "Data": t.date.strftime("%Y-%m-%d"),
-            "Congregação": t.congregation.name,
-            "Tipo da saída": t.category.name,
-            "Valor": float(t.amount),
-            "Descrição": t.description or ""
-        } for t in txs]
-        csv = pd.DataFrame(rows_csv).to_csv(index=False).encode("utf-8-sig")
         st.download_button(
-            "⬇️ Baixar CSV das SAÍDAS do período",
-            data=csv, file_name=f"saidas_{start.strftime('%Y-%m')}.csv", mime="text/csv"
+            "⬇️ Baixar CSV (Entradas do período)",
+            data=csv,
+            file_name=f"entradas_resumo_{start.strftime('%Y-%m')}.csv",
+            mime="text/csv"
         )
 
 # ===================== PAGE: RELATÓRIO DE DIZIMISTAS =====================
