@@ -848,7 +848,14 @@ def _editor_missions_outflows(saidas: List["Transaction"], titulo: str, congs_al
                 "_cong_id": int(t.congregation_id or 0),
             })
     else:
-        rows = [{"ID": None, "Data": today_bahia(), "Congregação": names_order[0] if names_order else "", "Descrição": "", "Valor": 0.0, "_cong_id": (by_name.get(names_order[0]) if names_order else 0)}]
+        rows = [{
+            "ID": None,
+            "Data": today_bahia(),
+            "Congregação": names_order[0] if names_order else "",
+            "Descrição": "",
+            "Valor": 0.0,
+            "_cong_id": (by_name.get(names_order[0]) if names_order else 0),
+        }]
 
     df_full = pd.DataFrame(rows)
     df_view = df_full.drop(columns=["_cong_id"])
@@ -868,6 +875,22 @@ def _editor_missions_outflows(saidas: List["Transaction"], titulo: str, congs_al
         key=f"missoes_out_{titulo}",
     )
 
+    # === [BLOCO 4: Total de SAÍDAS de Missões (mês corrente) em destaque] ===
+    try:
+        _total_out_missions = 0.0
+        if isinstance(edited_view, pd.DataFrame) and not edited_view.empty and ("Valor" in edited_view.columns):
+            _ev = edited_view.copy()
+            _ev["Valor"] = _ev["Valor"].map(_to_float_brl)
+            _total_out_missions = float(_ev["Valor"].sum())
+    except Exception:
+        _total_out_missions = 0.0
+
+    st.metric(
+        "Total de SAÍDAS de Missões (mês corrente)",
+        format_currency(_total_out_missions)
+    )
+    # === [FIM DO BLOCO 4] ===
+
     def _save():
         # mapear 'Congregação' -> _cong_id para persistir corretamente
         with_id = edited_view.copy()
@@ -882,6 +905,7 @@ def _editor_missions_outflows(saidas: List["Transaction"], titulo: str, congs_al
         st.rerun()
 
     _save_btn(_save, f"missoes_out_{titulo}")
+
 
 def _editor_missions_entries_agg(congs_all: List["Congregation"], start: date, end: date, titulo: str):
     with SessionLocal() as db:
