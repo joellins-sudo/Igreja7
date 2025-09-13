@@ -1962,13 +1962,31 @@ def page_visao_geral(user: "User"):
             else:
                 st.caption("Sem dados neste mês.")
 
+        # === [BLOCO 8: Resumo Financeiro Mensal (5 colunas) — substitui o bloco antigo do tesoureiro] ===
         if user.role != "SEDE" and agg_total:
             st.divider()
             st.subheader("Resumo Financeiro Mensal")
-            df_summary_cong = pd.DataFrame([{"Métricas": "Entradas (D+O + Outras)", "Valor": format_currency(agg_total[0][1])},
-                                            {"Métricas": "Saídas", "Valor": format_currency(agg_total[0][2])},
-                                            {"Métricas": "Saldo", "Valor": format_currency(agg_total[0][3])}])
-            st.dataframe(df_summary_cong, use_container_width=True, hide_index=True)
+
+            # Busca totais detalhados para a congregação do usuário (dízimos e ofertas separadas)
+            with SessionLocal() as _db_vg:
+                _tot = _collect_month_data(_db_vg, cong_obj.id, start, end)["totals"]
+
+            _dz = float(_tot.get("dizimos", 0.0))
+            _of = float(_tot.get("ofertas", 0.0))
+            _dz_of = _dz + _of
+            _sa = float(_tot.get("saidas_total", 0.0))
+            _saldo = float(_tot.get("saldo", 0.0))
+
+            df_summary_5 = pd.DataFrame([{
+                "Dízimos Total": format_currency(_dz),
+                "Ofertas Total": format_currency(_of),
+                "Dízimos + Ofertas": format_currency(_dz_of),
+                "Total Saídas": format_currency(_sa),
+                "Saldo": format_currency(_saldo),
+            }])
+
+            st.dataframe(df_summary_5, use_container_width=True, hide_index=True)
+        # === [FIM BLOCO 8] ===
 
         if user.role == "SEDE":
             st.divider()
