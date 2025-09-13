@@ -1524,6 +1524,16 @@ def page_relatorio_saida(user: "User"):
         if is_all:
             st.info("Escopo: **Todas as congregações** — edite o total mensal de saídas por congregação abaixo.")
             _editor_saidas_agg_all(ordered, start, end)
+
+            # === [BLOCO 7: Total geral de SAÍDAS (todas as congregações)] ===
+            with SessionLocal() as _db_tot_out:
+                total_geral_out = 0.0
+                for _c in ordered:
+                    _t = _collect_month_data(_db_tot_out, _c.id, start, end)["totals"]
+                    total_geral_out += float(_t["saidas_total"])
+            st.metric("Total geral de SAÍDAS (todas as congregações)", format_currency(total_geral_out))
+            # === [FIM DO BLOCO 7] ===
+
             st.divider()
             with SessionLocal() as db2:
                 rows = []
