@@ -1335,13 +1335,25 @@ def page_relatorio_entrada(user: "User"):
             is_all = False
             cong_obj = congs[0] if congs else None
 
+        # === MODO SEDE: TODAS AS CONGREGAÇÕES ===
         if is_all:
             st.info("Escopo: **Todas as congregações** — edite o total de entradas mensal por congregação abaixo.")
             _editor_entradas_agg_all(ordered, start, end)
+
+            # Total geral de ENTRADAS (todas as congregações) em destaque
+            with SessionLocal() as _db_tot_in:
+                total_geral_in = 0.0
+                for _c in ordered:
+                    _t = _collect_month_data(_db_tot_in, _c.id, start, end)["totals"]
+                    total_geral_in += float(_t["entradas_total_sem_missoes"])
+            st.metric("Total geral de entradas (todas as congregações)", format_currency(total_geral_in))
             return
 
+        # === CONGREGAÇÃO ESPECÍFICA ===
         if not cong_obj:
-            st.info("Selecione uma congregação."); return
+            st.info("Selecione uma congregação."); 
+            return
+
         st.info(f"Escopo: **{cong_obj.name}**")
 
         base_df = _entrada_summary_df(db, cong_obj.id, start, end)
@@ -1363,20 +1375,36 @@ def page_relatorio_entrada(user: "User"):
             key="re_entrada_sum_editor",
         )
 
+        # Recalcula a coluna Total (visual)
         if not edited.empty:
             try:
                 edited["Total"] = edited["Dízimo"].map(_to_float_brl) + edited["Oferta"].map(_to_float_brl)
             except Exception:
                 pass
-            
-        
+
+        # === TOTAL DO MÊS EM DESTAQUE (abaixo da tabela) ===
+        try:
+            _sum_total_mes = 0.0
+            if isinstance(edited, pd.DataFrame) and not edited.empty and {"Dízimo","Oferta"}.issubset(set(edited.columns)):
+                _calc = edited.copy()
+                _calc["Dízimo"] = _calc["Dízimo"].map(_to_float_brl)
+                _calc["Oferta"] = _calc["Oferta"].map(_to_float_brl)
+                _calc["Total"]  = _calc["Dízimo"] + _calc["Oferta"]
+                _sum_total_mes = float(_calc["Total"].sum())
+        except Exception:
+            _sum_total_mes = 0.0
+
+        st.metric("Total de Entradas (Dízimo + Oferta) no mês", format_currency(_sum_total_mes))
+
+        # Botão Salvar (persiste no banco via _apply_entrada_summary_changes)
         def _save_sum():
             _apply_entrada_summary_changes(cong_obj.id, start, end, edited)
             st.toast("💾 Alterações salvas.", icon="✅")
             st.rerun()
 
         _save_btn(_save_sum, "entrada_sum")
-        # === [BLOCO: Apagar linhas do resumo de entrada] — COLE AQUI (mesmo nível de _save_btn) ===
+
+        # === [BLOCO: Apagar linhas do resumo de entrada] — logo após o botão Salvar ===
         if isinstance(edited, pd.DataFrame) and not edited.empty and ("Data do Culto" in edited.columns):
             try:
                 # Converte as datas e cria rótulos "dd/mm/aaaa"
@@ -1416,13 +1444,20 @@ def page_relatorio_entrada(user: "User"):
                 on_click=_delete_selected_rows,
                 key="btn_del_entrada_sum"
             )
-        # === [FIM DO BLOCO] ===
+        # === [FIM: Apagar linhas] ===
 
         st.divider()
+
+        # Download CSV do período
         csv = edited.assign(**{
             "Data do Culto": edited["Data do Culto"].map(lambda d: _to_date(d).strftime("%Y-%m-%d")),
         }).to_csv(index=False).encode("utf-8-sig")
-        st.download_button("⬇️ Baixar CSV (Entradas do período)", data=csv, file_name=f"entradas_resumo_{start.strftime('%Y-%m')}.csv", mime="text/csv")
+        st.download_button(
+            "⬇️ Baixar CSV (Entradas do período)",
+            data=csv,
+            file_name=f"entradas_resumo_{start.strftime('%Y-%m')}.csv",
+            mime="text/csv"
+        )
 
 # ===================== PAGE: RELATÓRIO DE SAÍDA =====================
 def page_relatorio_saida(user: "User"):
