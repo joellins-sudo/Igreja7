@@ -1,12 +1,13 @@
-# main.py — AD Relatório Financeiro — v13.3
-# Melhorias deste commit (apenas estas):
-# 1) Adicionado botão "Salvar alterações" abaixo de TODAS as tabelas editáveis.
-# 2) Tesoureiro Missionário pode lançar SAÍDAS de Missões para QUALQUER congregação
-#    (editor agora tem coluna "Congregação"); Entradas continuam no editor agregado.
-# 3) Nova aba "Relatório de Missões" para TESOUREIRO (congregações) ver apenas seus lançamentos.
-#
-# Obs.: Todo o restante do seu código foi preservado. Itens que você pediu antes
-# (ex.: esconder "ajuste" na ENTRADA, relatórios agregados editáveis da SEDE, etc.) continuam iguais.
+# main.py — AD Relatório Financeiro — v13.0
+# Atende aos pedidos:
+# - Relatório de Entrada: 1 tabela editável (Data do Culto, Dízimo, Oferta, Total) com auto-save.
+# - Removida a “pesquisa de dizimistas para as congregações” da aba de Entradas.
+# - PDF mensal: ordem = Entradas (resumo por culto) -> Saídas -> Resumo Financeiro (sem Dizimistas e sem Missões).
+# - Sessão permanece ativa em refresh; inatividade: 20min.
+# - Datas formato dia/mês/ano.
+# - Relatório de Missões (Tesoureiro Missionário): tabela de Entrada (Congregação, Valor) e tabela de Saída (Data, Descrição, Valor), ambas editáveis; removida tabela “Entradas de Missões por Congregação”.
+# - Aba Dizimista: na pesquisa anual, opção para saber quantos e quais foram via PIX (filtro + lista).
+# - Cadastro: adicionar congregações em massa (uma por linha).
 
 from __future__ import annotations
 
@@ -44,8 +45,6 @@ except Exception:
 APP_NAME = "AD Relatório Financeiro"
 ADJ_ENTRY_DESC = "[Ajuste via relatório de entrada]"
 ADJ_MISS_IN_DESC = "[Ajuste Missões por Congregação]"
-ADJ_ENTRY_AGG_DESC = "[Ajuste total de entradas (mês, sede)]"
-ADJ_OUT_AGG_DESC   = "[Ajuste total de saídas (mês, sede)]"
 
 # ===================== ST CONFIG / THEME =====================
 st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
@@ -78,8 +77,10 @@ label, .stTextInput label, .stSelectbox label, .stNumberInput label{ color:#0f17
 .stTextInput input, .stNumberInput input, .stDateInput input{ border:1px solid var(--ring)!important; border-radius:.65rem!important; background:#fff!important; }
 .stSelectbox [data-baseweb="select"]>div{ border:1px solid var(--ring)!important; border-radius:.65rem!important; background:#fff!important; }
 .stTextInput input:focus, .stNumberInput input:focus, .stDateInput input:focus{ outline:none!important; border-color:#93c5fd!important; box-shadow:0 0 0 4px rgba(37,99,235,.18)!important; }
-.stButton>button{ border:1px solid var(--ring)!important; color:#fff!important; background: linear-gradient(180deg,#3b82f6,#2563eb)!important; font-weight:900!important; border-radius:.7rem!important; padding:.52rem .95rem!important; box-shadow:0 2px 6px rgba(37,99,235,.25)!important; }
+.stButton>button{ border:1px solid #2563eb!important; color:#fff!important; background: linear-gradient(180deg,#3b82f6,#2563eb)!important; font-weight:900!important; border-radius:.7rem!important; padding:.52rem .95rem!important; box-shadow:0 2px 6px rgba(37,99,235,.25)!important; }
 .stButton>button:hover{ filter:brightness(1.03); transform:translateY(-1px); }
+.btn-green button{ background: linear-gradient(180deg,#22c55e,#16a34a)!important; border-color:#16a34a!important; color:#fff!important; }
+.btn-red button{ background: linear-gradient(180deg,#ef4444,#dc2626)!important; border-color:#dc2626!important; color:#fff!important; }
 .stDownloadButton>button{ border:1px solid var(--ring)!important; color:#0f172a!important; background:#fff!important; border-radius:.7rem!important; font-weight:900!important; }
 [data-testid="stDataFrame"]{ border:1px solid var(--ring); border-radius:.9rem; overflow:hidden; box-shadow:0 1px 2px rgba(0,0,0,.04); }
 [data-testid="stDataFrame"] thead tr th{ position:sticky; top:0; z-index:2; background:#f1f5f9!important; font-weight:900!important; color:#0f172a!important; border-bottom:1px solid var(--ring)!important; }
@@ -448,9 +449,16 @@ def sidebar_common(user: "User"):
         if st.button("Sair"):
             logout()
 
-# ======= NOVO: helper padrão para botões 'Salvar alterações' =======
-def _save_btn(on_click, key_suffix: str):
-    st.button("Salvar alterações", type="primary", key=f"btn_save_{key_suffix}", on_click=on_click)
+# ===================== AUTO-SAVE CORE =====================
+def _auto_save_if_changed(orig_df_view: pd.DataFrame, edited_df_view: pd.DataFrame, save_fn, *save_args):
+    try:
+        changed = not edited_df_view.equals(orig_df_view)
+    except Exception:
+        changed = True
+    if changed:
+        save_fn(*save_args)
+        st.toast("💾 Alterações salvas.", icon="✅")
+        st.rerun()
 
 # ===================== APPLY CHANGES — LANÇAMENTOS / DÍZIMOS =====================
 def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: str, default_cong_id: Optional[int]):
@@ -497,12 +505,6 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
                 t.amount = float(new["Valor"]); changed = True
             if (old.get("Descrição","") or "") != (new.get("Descrição","") or ""):
                 t.description = (new.get("Descrição","") or None); changed = True
-            # NOVO: permitir mudar congregação no editor (quando houver _cong_id)
-            if "_cong_id" in n.columns:
-                old_cid = int(old.get("_cong_id", 0) or 0)
-                new_cid = int(new.get("_cong_id", 0) or 0)
-                if new_cid and new_cid != old_cid:
-                    t.congregation_id = new_cid; changed = True
             if changed:
                 db.add(t)
 
@@ -526,9 +528,7 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
                 cat = db.scalar(select(Category).where(Category.name == "Missões (Saída)"))
                 if not cat:
                     continue
-            # NOVO: pegar congregação do próprio row (quando existir)
-            row_cid = int(row.get("_cong_id", 0) or 0)
-            cong_id = row_cid or default_cong_id
+            cong_id = default_cong_id
             if cong_id is None:
                 if not o.empty:
                     cong_id = int(o.iloc[0].get("_cong_id", 0)) or None
@@ -606,6 +606,8 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
 
 # ===================== RELATÓRIO DE ENTRADA — TABELA ÚNICA (EDIT SUMÁRIO) =====================
 def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date) -> pd.DataFrame:
+    # Sum Dízimo = Tithe + Transactions(Dízimo); Oferta = Transactions(Oferta)
+    # Agrupado por Data
     tithes = db.execute(
         select(Tithe.date, func.sum(Tithe.amount))
         .where(and_(Tithe.congregation_id == cong_id, Tithe.date >= start, Tithe.date < end))
@@ -645,10 +647,16 @@ def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date) -> pd
     for d in all_dates:
         dz = float(by_date_diz.get(d, 0.0))
         ofe = float(by_date_ofe.get(d, 0.0))
-        rows.append({"Data do Culto": d, "Dízimo": dz, "Oferta": ofe, "Total": dz + ofe})
+        rows.append({
+            "Data do Culto": d,
+            "Dízimo": dz,
+            "Oferta": ofe,
+            "Total": dz + ofe
+        })
     return pd.DataFrame(rows)
 
 def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_df: pd.DataFrame):
+    # Para cada data: ajusta com um lançamento de ajuste (descrição ADJ_ENTRY_DESC) para Dízimo e Oferta.
     with SessionLocal() as db:
         cats_in = categories_for_type(db, TYPE_IN)
         cat_diz = next((c for c in cats_in if _norm(c.name) in ("dizimo","dízimo")), None)
@@ -672,6 +680,7 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
             cur_dz, cur_of = baseline.get(d, (0.0, 0.0))
             want_dz, want_of = wanted.get(d, (0.0, 0.0))
 
+            # Totais atuais EXCLUINDO ajustes:
             sum_dz_others = float(db.scalar(
                 select(func.coalesce(func.sum(Transaction.amount), 0.0))
                 .where(and_(
@@ -683,7 +692,10 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
                 ))
             ) or 0.0) + float(db.scalar(
                 select(func.coalesce(func.sum(Tithe.amount), 0.0))
-                .where(and_(Tithe.congregation_id == cong_id, Tithe.date == d))
+                .where(and_(
+                    Tithe.congregation_id == cong_id,
+                    Tithe.date == d
+                ))
             ) or 0.0)
 
             sum_of_others = float(db.scalar(
@@ -697,9 +709,11 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
                 ))
             ) or 0.0)
 
+            # Ajuste desejado = alvo - outros
             adj_dz_new = want_dz - sum_dz_others
             adj_of_new = want_of - sum_of_others
 
+            # Encontrar (ou criar / excluir) ajustes existentes:
             adj_dz = db.scalar(select(Transaction).where(
                 Transaction.congregation_id == cong_id, Transaction.date == d,
                 Transaction.type.in_((TYPE_IN, "RECEITA")), Transaction.category_id == cat_diz.id,
@@ -711,26 +725,35 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
                 func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC
             ))
 
+            # Dízimo
             if abs(adj_dz_new) < 0.0001:
-                if adj_dz: db.delete(adj_dz)
+                if adj_dz:
+                    db.delete(adj_dz)
             else:
-                if adj_dz: adj_dz.amount = float(adj_dz_new); db.add(adj_dz)
+                if adj_dz:
+                    adj_dz.amount = float(adj_dz_new); db.add(adj_dz)
                 else:
-                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id,
-                                       amount=float(adj_dz_new), description=ADJ_ENTRY_DESC,
-                                       congregation_id=cong_id))
+                    db.add(Transaction(
+                        date=d, type=TYPE_IN, category_id=cat_diz.id, amount=float(adj_dz_new),
+                        description=ADJ_ENTRY_DESC, congregation_id=cong_id
+                    ))
 
+            # Oferta
             if abs(adj_of_new) < 0.0001:
-                if adj_of: db.delete(adj_of)
+                if adj_of:
+                    db.delete(adj_of)
             else:
-                if adj_of: adj_of.amount = float(adj_of_new); db.add(adj_of)
+                if adj_of:
+                    adj_of.amount = float(adj_of_new); db.add(adj_of)
                 else:
-                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id,
-                                       amount=float(adj_of_new), description=ADJ_ENTRY_DESC,
-                                       congregation_id=cong_id))
+                    db.add(Transaction(
+                        date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=float(adj_of_new),
+                        description=ADJ_ENTRY_DESC, congregation_id=cong_id
+                    ))
+
         db.commit()
 
-# ===================== EDITORES INLINE REUTILIZÁVEIS (com botão Salvar) =====================
+# ===================== EDITORES INLINE REUTILIZÁVEIS =====================
 def _editor_lancamentos(transactions: List["Transaction"], titulo: str, tx_type_hint: Optional[str] = None):
     if not transactions:
         st.caption("— Não há lançamentos para esse filtro.")
@@ -755,17 +778,14 @@ def _editor_lancamentos(transactions: List["Transaction"], titulo: str, tx_type_
 
     with SessionLocal() as db:
         cats = categories_for_type(db, tx_type)
-        if tx_type == TYPE_IN:
-            cats = [c for c in cats if "ajuste" not in _norm(c.name)]  # mantém sua regra
         cat_names = [c.name for c in cats] or ["—"]
 
     st.markdown(f"**{titulo}**")
-    allow_add = default_cong_id is not None
     edited_view = st.data_editor(
         df_view,
         use_container_width=True,
         hide_index=True,
-        num_rows=("dynamic" if allow_add else "fixed"),
+        num_rows="dynamic",  # permite adicionar e EXCLUIR linhas
         column_config={
             "ID": st.column_config.Column("ID", disabled=True),
             "Data": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
@@ -776,12 +796,10 @@ def _editor_lancamentos(transactions: List["Transaction"], titulo: str, tx_type_
         key=f"tx_editor_{titulo}",
     )
 
-    def _save():
-        _apply_tx_changes(df_full, edited_view, tx_type, default_cong_id)
-        st.toast("💾 Alterações salvas.", icon="✅")
-        st.rerun()
-
-    _save_btn(_save, f"tx_{titulo}")
+    _auto_save_if_changed(
+        df_view, edited_view,
+        lambda: _apply_tx_changes(df_full, edited_view, tx_type, default_cong_id)
+    )
 
 def _editor_dizimos(tithes: List["Tithe"], titulo: str):
     if not tithes:
@@ -792,20 +810,22 @@ def _editor_dizimos(tithes: List["Tithe"], titulo: str):
     default_cong_id = list(cong_ids)[0] if len(cong_ids) == 1 else None
 
     rows = [{
-        "ID": t.id, "Data": t.date, "Dizimista": t.tither_name,
-        "Valor": float(t.amount), "Forma de Pagamento": t.payment_method or "",
+        "ID": t.id,
+        "Data": t.date,
+        "Dizimista": t.tither_name,
+        "Valor": float(t.amount),
+        "Forma de Pagamento": t.payment_method or "",
         "_cong_id": int(t.congregation_id or 0),
     } for t in tithes]
     df_full = pd.DataFrame(rows)
     df_view = df_full.drop(columns=["_cong_id"])
 
     st.markdown(f"**{titulo}**")
-    allow_add = default_cong_id is not None
     edited_view = st.data_editor(
         df_view,
         use_container_width=True,
         hide_index=True,
-        num_rows=("dynamic" if allow_add else "fixed"),
+        num_rows="dynamic",  # permite adicionar e EXCLUIR linhas
         column_config={
             "ID": st.column_config.Column("ID", disabled=True),
             "Data": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
@@ -816,32 +836,23 @@ def _editor_dizimos(tithes: List["Tithe"], titulo: str):
         key=f"tithe_editor_{titulo}",
     )
 
-    def _save():
-        _apply_tithe_changes(df_full, edited_view, default_cong_id)
-        st.toast("💾 Alterações salvas.", icon="✅")
-        st.rerun()
-
-    _save_btn(_save, f"tithe_{titulo}")
+    _auto_save_if_changed(
+        df_view, edited_view,
+        lambda: _apply_tithe_changes(df_full, edited_view, default_cong_id)
+    )
 
 # ===== MISSÕES: Editores específicos =====
-def _editor_missions_outflows(saidas: List["Transaction"], titulo: str, congs_all: List["Congregation"]):
-    by_name = {c.name: c.id for c in congs_all}
-    names_order = [c.name for c in order_congs_sede_first(congs_all)]
-
-    rows = []
-    if saidas:
-        for t in saidas:
-            rows.append({
-                "ID": t.id,
-                "Data": t.date,
-                "Congregação": t.congregation.name if t.congregation else "Sede",
-                "Descrição": (t.description or ""),
-                "Valor": float(t.amount),
-                "_cong_id": int(t.congregation_id or 0),
-            })
-    else:
-        rows = [{"ID": None, "Data": today_bahia(), "Congregação": names_order[0] if names_order else "", "Descrição": "", "Valor": 0.0, "_cong_id": (by_name.get(names_order[0]) if names_order else 0)}]
-
+def _editor_missions_outflows(saidas: List["Transaction"], titulo: str):
+    if not saidas:
+        st.caption("— Não há saídas de missões no período.")
+        return
+    rows = [{
+        "ID": t.id,
+        "Data": t.date,
+        "Descrição": t.description or "",
+        "Valor": float(t.amount),
+        "_cong_id": int(t.congregation_id or 0),
+    } for t in saidas]
     df_full = pd.DataFrame(rows)
     df_view = df_full.drop(columns=["_cong_id"])
 
@@ -853,29 +864,27 @@ def _editor_missions_outflows(saidas: List["Transaction"], titulo: str, congs_al
         column_config={
             "ID": st.column_config.Column("ID", disabled=True),
             "Data": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
-            "Congregação": st.column_config.SelectboxColumn("Congregação", options=names_order, required=True),
             "Descrição": st.column_config.TextColumn("Descrição", max_chars=200),
             "Valor": st.column_config.NumberColumn("Valor (R$)", min_value=-999999999.0, step=1.0, format="R$ %.2f"),
         },
         key=f"missoes_out_{titulo}",
     )
 
+    # Aplicar mapeando categoria fixa "Missões (Saída)" e congregação = Sede
     def _save():
-        # mapear 'Congregação' -> _cong_id para persistir corretamente
-        with_id = edited_view.copy()
-        with_id["_cong_id"] = with_id["Congregação"].map(lambda x: int(by_name.get(str(x).strip(), 0)))
+        with SessionLocal() as db:
+            sede_id = db.scalar(select(Congregation.id).where(Congregation.name == "Sede"))
         _apply_tx_changes(
-            df_full.assign(**{"Categoria": "Missões (Saída)"}),
-            with_id.assign(**{"Categoria": "Missões (Saída)"}),
+            df_full.assign(**{"Categoria": "Missões (Saída)"}),  # orig com cat fixa
+            edited_view.assign(**{"Categoria": "Missões (Saída)"}),  # edited idem
             TYPE_OUT,
-            default_cong_id=None  # agora a congregação vem da coluna
+            default_cong_id=sede_id
         )
-        st.toast("💾 Alterações salvas.", icon="✅")
-        st.rerun()
 
-    _save_btn(_save, f"missoes_out_{titulo}")
+    _auto_save_if_changed(df_view, edited_view, _save)
 
 def _editor_missions_entries_agg(congs_all: List["Congregation"], start: date, end: date, titulo: str):
+    # Dataframe com (Congregação, Valor) agregado no mês
     with SessionLocal() as db:
         q = select(Transaction.congregation_id, func.sum(Transaction.amount))\
             .join(Category, Transaction.category_id == Category.id)\
@@ -908,12 +917,14 @@ def _editor_missions_entries_agg(congs_all: List["Congregation"], start: date, e
 
     def _save():
         with SessionLocal() as db:
+            # Map name->id
             by_name = {c.name: c.id for c in congs_all}
             cats_in = categories_for_type(db, TYPE_IN)
             cat_miss = next((c for c in cats_in if _norm(c.name) in ("missoes","missões")), None)
             if not cat_miss:
                 st.error("Categoria 'Missões' não encontrada."); return
 
+            # baseline: totais por congregação EXCLUINDO ajustes
             q_others = select(Transaction.congregation_id, func.coalesce(func.sum(Transaction.amount),0.0))\
                 .join(Category, Transaction.category_id == Category.id)\
                 .where(
@@ -924,6 +935,7 @@ def _editor_missions_entries_agg(congs_all: List["Congregation"], start: date, e
                 ).group_by(Transaction.congregation_id)
             base_others = dict((int(cid), float(v)) for cid, v in db.execute(q_others).all())
 
+            # ajustes existentes (um por mês/igreja na data do 1º dia do mês)
             q_adj = select(Transaction).where(
                 Transaction.date == start,
                 Transaction.type == TYPE_IN,
@@ -933,12 +945,15 @@ def _editor_missions_entries_agg(congs_all: List["Congregation"], start: date, e
             adjs = db.scalars(q_adj).all()
             adj_map = {(a.congregation_id): a for a in adjs}
 
+            # desejado:
             desired = {}
             for _, r in edited_view.iterrows():
                 name = str(r.get("Congregação","")).strip()
-                if not name: continue
+                if not name:
+                    continue
                 cid = by_name.get(name)
-                if not cid: continue
+                if not cid:
+                    continue
                 desired[cid] = float(_to_float_brl(r.get("Valor", 0.0)))
 
             all_cids = set(list(base_others.keys()) + list(desired.keys()))
@@ -948,184 +963,19 @@ def _editor_missions_entries_agg(congs_all: List["Congregation"], start: date, e
                 new_adj = want - others
                 exist = adj_map.get(cid)
                 if abs(new_adj) < 0.0001:
-                    if exist: db.delete(exist)
+                    if exist:
+                        db.delete(exist)
                 else:
-                    if exist: exist.amount = float(new_adj); db.add(exist)
+                    if exist:
+                        exist.amount = float(new_adj); db.add(exist)
                     else:
                         db.add(Transaction(
                             date=start, type=TYPE_IN, category_id=cat_miss.id, amount=float(new_adj),
                             description=ADJ_MISS_IN_DESC, congregation_id=int(cid)
                         ))
             db.commit()
-        st.toast("💾 Alterações salvas.", icon="✅")
-        st.rerun()
 
-    _save_btn(_save, f"missoes_in_{titulo}")
-
-# ====== EDITORES AGREGADOS (TODAS AS CONGREGAÇÕES) — ENTRADAS / SAÍDAS ======
-def _editor_entradas_agg_all(congs_all: List["Congregation"], start: date, end: date):
-    with SessionLocal() as db:
-        rows = []
-        for c in congs_all:
-            totals = _collect_month_data(db, c.id, start, end)["totals"]
-            rows.append({"Congregação": c.name, "Total (R$)": float(totals["entradas_total_sem_missoes"])})
-        df_view = pd.DataFrame(rows).sort_values("Total (R$)", ascending=False).reset_index(drop=True)
-
-    edited = st.data_editor(
-        df_view, use_container_width=True, hide_index=True, num_rows="dynamic",
-        column_config={
-            "Congregação": st.column_config.SelectboxColumn("Congregação", options=[c.name for c in order_congs_sede_first(congs_all)], required=True),
-            "Total (R$)": st.column_config.NumberColumn("Total (R$)", min_value=-999999999.0, step=1.0, format="R$ %.2f"),
-        },
-        key="agg_in_all_editor",
-    )
-
-    def _save():
-        with SessionLocal() as db:
-            by_name = {c.name: c.id for c in congs_all}
-            cat_oferta = db.scalar(select(Category).where(func.lower(Category.name) == "oferta"))
-            if not cat_oferta:
-                st.error("Categoria 'Oferta' não encontrada."); return
-
-            def base_others_total(cid: int) -> float:
-                tithe_sum = float(db.scalar(
-                    select(func.coalesce(func.sum(Tithe.amount), 0.0))
-                    .where(and_(Tithe.congregation_id == cid, Tithe.date >= start, Tithe.date < end))
-                ) or 0.0)
-                donations_sum = float(db.scalar(
-                    select(func.coalesce(func.sum(Transaction.amount), 0.0))
-                    .join(Category, Transaction.category_id == Category.id)
-                    .where(
-                        Transaction.congregation_id == cid,
-                        Transaction.date >= start, Transaction.date < end,
-                        Transaction.type.in_((TYPE_IN, "RECEITA")),
-                        func.coalesce(Transaction.description, "") != ADJ_ENTRY_AGG_DESC
-                    )
-                ) or 0.0)
-                donations_missoes = float(db.scalar(
-                    select(func.coalesce(func.sum(Transaction.amount), 0.0))
-                    .join(Category, Transaction.category_id == Category.id)
-                    .where(
-                        Transaction.congregation_id == cid,
-                        Transaction.date >= start, Transaction.date < end,
-                        Transaction.type.in_((TYPE_IN, "RECEITA")),
-                        func.lower(Category.name).in_(("missões","missoes")),
-                        func.coalesce(Transaction.description, "") != ADJ_ENTRY_AGG_DESC
-                    )
-                ) or 0.0)
-                return tithe_sum + (donations_sum - donations_missoes)
-
-            existing_adj = {(t.congregation_id): t for t in db.scalars(
-                select(Transaction).where(
-                    Transaction.date == start,
-                    Transaction.type.in_((TYPE_IN, "RECEITA")),
-                    Transaction.category_id == cat_oferta.id,
-                    func.coalesce(Transaction.description, "") == ADJ_ENTRY_AGG_DESC
-                )
-            ).all()}
-
-            desired = {}
-            for _, r in edited.iterrows():
-                name = str(r.get("Congregação","")).strip()
-                if not name: continue
-                cid = by_name.get(name)
-                if cid is None: continue
-                desired[cid] = float(_to_float_brl(r.get("Total (R$)", 0.0)))
-
-            for cid, want in desired.items():
-                others = base_others_total(cid)
-                new_adj = want - others
-                adj = existing_adj.get(cid)
-                if abs(new_adj) < 0.0001:
-                    if adj: db.delete(adj)
-                else:
-                    if adj:
-                        adj.amount = float(new_adj); db.add(adj)
-                    else:
-                        db.add(Transaction(
-                            date=start, type=TYPE_IN, category_id=cat_oferta.id,
-                            amount=float(new_adj), description=ADJ_ENTRY_AGG_DESC,
-                            congregation_id=int(cid)
-                        ))
-            db.commit()
-        st.toast("💾 Alterações salvas.", icon="✅")
-        st.rerun()
-
-    _save_btn(_save, "agg_in_all")
-
-def _editor_saidas_agg_all(congs_all: List["Congregation"], start: date, end: date):
-    with SessionLocal() as db:
-        rows = []
-        for c in congs_all:
-            totals = _collect_month_data(db, c.id, start, end)["totals"]
-            rows.append({"Congregação": c.name, "Total Saídas (R$)": float(totals["saidas_total"])})
-        df_view = pd.DataFrame(rows).sort_values("Total Saídas (R$)", ascending=False).reset_index(drop=True)
-
-    edited = st.data_editor(
-        df_view, use_container_width=True, hide_index=True, num_rows="dynamic",
-        column_config={
-            "Congregação": st.column_config.SelectboxColumn("Congregação", options=[c.name for c in order_congs_sede_first(congs_all)], required=True),
-            "Total Saídas (R$)": st.column_config.NumberColumn("Total Saídas (R$)", min_value=-999999999.0, step=1.0, format="R$ %.2f"),
-        },
-        key="agg_out_all_editor",
-    )
-
-    def _save():
-        with SessionLocal() as db:
-            by_name = {c.name: c.id for c in congs_all}
-            cats_out = categories_for_type(db, TYPE_OUT)
-            if not cats_out:
-                st.error("Não há categorias de saída cadastradas."); return
-            cat_out_id = cats_out[0].id
-
-            def base_others_total(cid: int) -> float:
-                return float(db.scalar(
-                    select(func.coalesce(func.sum(Transaction.amount), 0.0))
-                    .where(
-                        Transaction.congregation_id == cid,
-                        Transaction.date >= start, Transaction.date < end,
-                        Transaction.type.in_((TYPE_OUT, "DESPESA")),
-                        func.coalesce(Transaction.description, "") != ADJ_OUT_AGG_DESC
-                    )
-                ) or 0.0)
-
-            existing_adj = {(t.congregation_id): t for t in db.scalars(
-                select(Transaction).where(
-                    Transaction.date == start,
-                    Transaction.type.in_((TYPE_OUT, "DESPESA")),
-                    Transaction.category_id == cat_out_id,
-                    func.coalesce(Transaction.description, "") == ADJ_OUT_AGG_DESC
-                )
-            ).all()}
-
-            desired = {}
-            for _, r in edited.iterrows():
-                name = str(r.get("Congregação","")).strip()
-                if not name: continue
-                cid = by_name.get(name); 
-                if cid is None: continue
-                desired[cid] = float(_to_float_brl(r.get("Total Saídas (R$)", 0.0)))
-
-            for cid, want in desired.items():
-                others = base_others_total(cid)
-                new_adj = want - others
-                adj = existing_adj.get(cid)
-                if abs(new_adj) < 0.0001:
-                    if adj: db.delete(adj)
-                else:
-                    if adj:
-                        adj.amount = float(new_adj); db.add(adj)
-                    else:
-                        db.add(Transaction(
-                            date=start, type=TYPE_OUT, category_id=cat_out_id,
-                            amount=float(new_adj), description=ADJ_OUT_AGG_DESC,
-                            congregation_id=int(cid)
-                        ))
-            db.commit()
-        st.toast("💾 Alterações salvas.", icon="✅")
-        st.rerun()
-
-    _save_btn(_save, "agg_out_all")
+    _auto_save_if_changed(df_view, edited_view, _save)
 
 # ===================== CORE COLETA =====================
 def _collect_month_data(db, cong_id: int, start: date, end: date, is_all: bool = False):
@@ -1178,7 +1028,7 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, is_all: bool =
             "ofertas": total_ofertas,
             "missoes": total_missoes,
             "entradas_outros": total_entradas_outros,
-            "entradas_total_sem_missoes": total_geral_entradas_outros if (total_geral_entradas_outros:=total_geral_entradas_sem_missoes) else total_geral_entradas_sem_missoes,  # preserva nome antigo
+            "entradas_total_sem_missoes": total_geral_entradas_sem_missoes,
             "saidas_total": total_saidas,
             "saldo": saldo
         }
@@ -1213,7 +1063,6 @@ def page_lancamentos(user: "User"):
             ent_data = st.date_input("Data do Culto", value=today_bahia(), key="ent_data", format="DD/MM/YYYY")
             with c2:
                 cats_in = categories_for_type(db, TYPE_IN)
-                cats_in = [c for c in cats_in if "ajuste" not in _norm(c.name)]
                 cat_names_in = [c.name for c in cats_in] or ["—"]
                 desired = ["Dízimo", "Oferta", "Missões"]
                 desired_norm = [_norm(x) for x in desired]
@@ -1292,7 +1141,7 @@ def page_lancamentos(user: "User"):
                     st.success("Saída registrada.")
         st.markdown('</div>', unsafe_allow_html=True)
 
-# ===================== PAGE: RELATÓRIO DE ENTRADA =====================
+# ===================== PAGE: RELATÓRIO DE ENTRADA (TABELA ÚNICA) =====================
 def page_relatorio_entrada(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1305,23 +1154,17 @@ def page_relatorio_entrada(user: "User"):
         congs = cong_options_for(user, db)
         if user.role == "SEDE":
             ordered = order_congs_sede_first(congs)
-            esc_opt = ["Todas as congregações"] + [c.name for c in ordered]
-            esc = st.selectbox("Escopo", esc_opt, key="re_in_allopt")
-            is_all = (esc == "Todas as congregações")
-            cong_obj = None if is_all else next(c for c in ordered if c.name == esc)
+            # Apenas lista de congregações (sem "Todas")
+            cong_sel = st.selectbox("Congregação", [c.name for c in ordered], key="re_cong_only")
+            cong_obj = next(c for c in ordered if c.name == cong_sel)
         else:
-            is_all = False
             cong_obj = congs[0] if congs else None
-
-        if is_all:
-            st.info("Escopo: **Todas as congregações** — edite o total de entradas mensal por congregação abaixo.")
-            _editor_entradas_agg_all(ordered, start, end)
-            return
 
         if not cong_obj:
             st.info("Selecione uma congregação."); return
         st.info(f"Escopo: **{cong_obj.name}**")
 
+        # TABELA ÚNICA (Data do Culto, Dízimo, Oferta, Total)
         base_df = _entrada_summary_df(db, cong_obj.id, start, end)
         if base_df.empty:
             base_df = pd.DataFrame(columns=["Data do Culto","Dízimo","Oferta","Total"])
@@ -1341,20 +1184,20 @@ def page_relatorio_entrada(user: "User"):
             key="re_entrada_sum_editor",
         )
 
+        # Recalcular Total na visualização editada (apenas UI)
         if not edited.empty:
             try:
                 edited["Total"] = edited["Dízimo"].map(_to_float_brl) + edited["Oferta"].map(_to_float_brl)
             except Exception:
                 pass
 
-        def _save_sum():
-            _apply_entrada_summary_changes(cong_obj.id, start, end, edited)
-            st.toast("💾 Alterações salvas.", icon="✅")
-            st.rerun()
-
-        _save_btn(_save_sum, "entrada_sum")
+        _auto_save_if_changed(
+            view_df, edited,
+            lambda: _apply_entrada_summary_changes(cong_obj.id, start, end, edited)
+        )
 
         st.divider()
+        # CSV de apoio
         csv = edited.assign(**{
             "Data do Culto": edited["Data do Culto"].map(lambda d: _to_date(d).strftime("%Y-%m-%d")),
         }).to_csv(index=False).encode("utf-8-sig")
@@ -1380,34 +1223,26 @@ def page_relatorio_saida(user: "User"):
         else:
             cong_obj = congs[0] if congs else None; is_all = False
 
-        if is_all:
-            st.info("Escopo: **Todas as congregações** — edite o total mensal de saídas por congregação abaixo.")
-            _editor_saidas_agg_all(ordered, start, end)
-            st.divider()
-            with SessionLocal() as db2:
-                rows = []
-                for c in ordered:
-                    total = _collect_month_data(db2, c.id, start, end)["totals"]["saidas_total"]
-                    rows.append({"Congregação": c.name, "Total Saídas (R$)": float(total)})
-            csv = pd.DataFrame(rows).to_csv(index=False).encode("utf-8-sig")
-            st.download_button("⬇️ Baixar CSV (Saídas por congregação)", data=csv, file_name=f"saidas_congregacoes_{start.strftime('%Y-%m')}.csv", mime="text/csv")
-            return
-
-        if not cong_obj:
+        if not cong_obj and not is_all:
             st.info("Sem congregação vinculada."); return
-        st.info(f"Escopo: **{cong_obj.name}**")
+        if cong_obj:
+            st.info(f"Escopo: **{cong_obj.name}**")
 
         q = select(Transaction).options(joinedload(Transaction.category)).where(
-            Transaction.date >= start, Transaction.date < end, Transaction.type.in_(("SAÍDA", "DESPESA")),
-            Transaction.congregation_id == cong_obj.id
+            Transaction.date >= start, Transaction.date < end, Transaction.type.in_(("SAÍDA", "DESPESA"))
         )
+        if not is_all:
+            q = q.where(Transaction.congregation_id == cong_obj.id)
         txs = db.scalars(q).all()
 
         total_saidas = sum(float(t.amount) for t in txs)
         st.metric("Total de saídas", format_currency(total_saidas))
 
         st.divider()
-        _editor_lancamentos(txs, "Saídas do período (editar na tabela)", tx_type_hint=TYPE_OUT)
+        if is_all:
+            st.info("Edição inline de saídas habilitada ao escolher uma congregação específica.")
+        else:
+            _editor_lancamentos(txs, "Saídas do período (editar na tabela)", tx_type_hint=TYPE_OUT)
 
         st.divider()
         rows_csv = [{
@@ -1503,6 +1338,7 @@ def page_relatorio_dizimistas(user: "User"):
                 Tithe.date >= start, Tithe.date < end, Tithe.congregation_id == cong_obj.id
             ).order_by(Tithe.date)).all()
 
+            # Resumo de pagamentos
             tithes_by_payment = defaultdict(lambda: {"count": 0, "total": 0.0})
             for tithe in tithes:
                 method = (tithe.payment_method or "Não Informado").upper()
@@ -1517,6 +1353,7 @@ def page_relatorio_dizimistas(user: "User"):
             st.divider()
             _editor_dizimos(tithes, "Dizimistas do período (editar na tabela)")
 
+        # Pesquisa Anual (com filtro PIX)
         st.divider()
         st.subheader("Pesquisa de Dizimistas (por Ano)")
         c1, c2, c3, c4, c5 = st.columns([1.2, 1.8, 1.4, 2.2, 1.6])
@@ -1548,6 +1385,12 @@ def page_relatorio_dizimistas(user: "User"):
         else:
             q = q.where(Tithe.congregation_id == cong_obj.id)
 
+        if mes_sel != "Todos":
+            m = MONTHS.index(mes_sel) + 1
+            m_start = date(int(ano_pesq), m, 1)
+            m_end = date(ano_pesq + (m==12), (m % 12) + 1, 1)
+            q = q.where(Tithe.date >= m_start, Tithe.date < m_end)
+
         with SessionLocal() as db2:
             t_list = db2.scalars(q.order_by(Tithe.tither_name, Tithe.date)).all()
 
@@ -1562,12 +1405,20 @@ def page_relatorio_dizimistas(user: "User"):
         for t in t_list:
             key = (_norm(t.tither_name), t.congregation_id)
             if key not in agg:
-                agg[key] = {"nome_display": t.tither_name, "congregacao": t.congregation.name if t.congregation else "—",
-                            "total_ano": 0.0, "meses": set(), "primeiro": t.date, "ultimo": t.date}
+                agg[key] = {
+                    "nome_display": t.tither_name,
+                    "congregacao": t.congregation.name if t.congregation else "—",
+                    "total_ano": 0.0,
+                    "meses": set(),
+                    "primeiro": t.date,
+                    "ultimo": t.date,
+                }
             agg[key]["total_ano"] += float(t.amount)
             agg[key]["meses"].add(t.date.month)
-            if t.date < agg[key]["primeiro"]: agg[key]["primeiro"] = t.date
-            if t.date > agg[key]["ultimo"]: agg[key]["ultimo"] = t.date
+            if t.date < agg[key]["primeiro"]:
+                agg[key]["primeiro"] = t.date
+            if t.date > agg[key]["ultimo"]:
+                agg[key]["ultimo"] = t.date
 
         rows = []
         for info in agg.values():
@@ -1595,6 +1446,7 @@ def page_relatorio_dizimistas(user: "User"):
             cA.metric("Dizimistas encontrados", f"{tot_reg}")
             cB.metric("Total geral da pesquisa", format_currency(tot_val))
 
+            # PIX: quantos e quais (únicos)
             pix_names = sorted({t.tither_name for t in t_list if (t.payment_method or "").strip().upper() == "PIX"})
             cC.metric("Dizimaram por PIX (únicos)", f"{len(pix_names)}")
             if pix_names:
@@ -1608,7 +1460,7 @@ def page_relatorio_dizimistas(user: "User"):
         else:
             st.caption("Nenhum resultado para os filtros informados.")
 
-# ===================== PDFs =====================
+# ===================== PDFs (prestação e consolidado) =====================
 def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
     buf = BytesIO()
     styles = getSampleStyleSheet()
@@ -1623,6 +1475,7 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
         start, end = month_bounds(ref)
         data = _collect_month_data(db, cong_id, start, end)
 
+        # 1) Entradas — resumo por Data do Culto (Dízimo + Oferta + Total)
         entries_by_date = defaultdict(lambda: {"dizimo": 0.0, "oferta": 0.0})
         for t in data["tx_in"]:
             if t.category and _norm(t.category.name) in ("dizimo", "dízimo"):
@@ -1637,6 +1490,7 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
             diz = totals["dizimo"]; ofe = totals["oferta"]; total = diz + ofe
             tx_in_data.append([d.strftime("%d/%m/%Y"), format_currency(diz), format_currency(ofe), format_currency(total)])
 
+        # 2) Saídas (detalhadas)
         tx_out_data = [["Data", "Categoria", "Descrição", "Valor"]]
         tx_out_data.extend([[t.date.strftime("%d/%m/%Y"), t.category.name, t.description or "", format_currency(t.amount)] for t in data["tx_out"]])
 
@@ -1644,6 +1498,7 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
     story.append(Paragraph(f"Congregação: {cong_name}", subtitle_style))
     story.append(Paragraph(f"Referente a: {ref.strftime('%B de %Y')}", subtitle_style))
 
+    # Entradas
     story.append(Paragraph("1. Entradas (Resumo: Dízimo e Oferta)", heading_style))
     if len(tx_in_data) > 1:
         tbl_in = Table(tx_in_data, colWidths=[3.2*cm, 4.0*cm, 4.0*cm, 5.3*cm])
@@ -1660,6 +1515,7 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
         story.append(Paragraph("Nenhuma entrada registrada.", styles['Normal']))
     story.append(Spacer(1, 0.5*cm))
 
+    # Saídas
     story.append(Paragraph("2. Saídas", heading_style))
     if len(tx_out_data) > 1:
         tbl_out = Table(tx_out_data, colWidths=[2.5*cm, 4.5*cm, 7.5*cm, 3.5*cm])
@@ -1676,6 +1532,7 @@ def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
         story.append(Paragraph("Nenhuma saída registrada.", styles['Normal']))
     story.append(Spacer(1, 1*cm))
 
+    # Resumo Financeiro
     story.append(Paragraph("3. Resumo Financeiro do Mês", heading_style))
     with SessionLocal() as db:
         start, end = month_bounds(ref)
@@ -1836,15 +1693,20 @@ def page_visao_geral(user: "User"):
             mime="application/pdf"
         )
 
-# ===================== COLETA MISSÕES =====================
+# ===================== RELATÓRIO DE MISSÕES (Entradas/ Saídas editáveis) =====================
+
 def _collect_missions_data(db: Session, start: date, end: date, only_cong_id: Optional[int] = None):
+    """
+    Coleta entradas e saídas de missões no período.
+    Se only_cong_id for informado, filtra para a congregação específica.
+    """
     q_in = select(Transaction).options(joinedload(Transaction.congregation), joinedload(Transaction.category)).where(
         Transaction.date >= start,
         Transaction.date < end,
         Transaction.type == TYPE_IN,
         Transaction.category.has(Category.name.in_(("Missões", "missões")))
     ).order_by(Transaction.date)
-    if only_cong_id:
+    if only_cong_id is not None:
         q_in = q_in.where(Transaction.congregation_id == only_cong_id)
     entradas_missoes = db.scalars(q_in).all()
     
@@ -1854,7 +1716,7 @@ def _collect_missions_data(db: Session, start: date, end: date, only_cong_id: Op
         Transaction.type == TYPE_OUT,
         Transaction.category.has(Category.name.in_(("Missões (Saída)", "missões (saída)")))
     ).order_by(Transaction.date)
-    if only_cong_id:
+    if only_cong_id is not None:
         q_out = q_out.where(Transaction.congregation_id == only_cong_id)
     saidas_missoes = db.scalars(q_out).all()
     
@@ -1896,10 +1758,10 @@ def build_missions_report_pdf(ref: date, entradas: list, saidas: list) -> bytes:
     story.append(Spacer(1, 0.8*cm))
     story.append(Paragraph("Saídas de Missões", heading_style))
     if saidas:
-        saidas_data = [["Data", "Congregação", "Descrição", "Valor (R$)"]]
+        saidas_data = [["Data", "Descrição", "Valor (R$)"]]
         for t in saidas:
-            saidas_data.append([t.date.strftime("%d/%m/%Y"), t.congregation.name if t.congregation else "—", t.description or "—", format_currency(float(t.amount))])
-        tbl_out = Table(saidas_data, colWidths=[3*cm, 6*cm, 7*cm, 3*cm])
+            saidas_data.append([t.date.strftime("%d/%m/%Y"), t.description or "—", format_currency(float(t.amount))])
+        tbl_out = Table(saidas_data, colWidths=[3*cm, 10*cm, 5*cm])
         tbl_out.setStyle(table_style)
         story.append(tbl_out)
     else:
@@ -1928,10 +1790,9 @@ def build_missions_report_pdf(ref: date, entradas: list, saidas: list) -> bytes:
     doc.build(story)
     return buf.getvalue()
 
-# ======== Páginas de Missões ========
 def page_relatorio_missoes(user: "User"):
     if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
-        st.warning("🔒 Acesso negado. Apenas usuários `SEDE` ou `TESOUREIRO MISSIONÁRIO` podem acessar este relatório.")
+        st.warning(f"🔒 Acesso negado. Apenas usuários `SEDE` ou `TESOUREIRO MISSIONÁRIO` podem acessar este relatório.")
         return
     
     ensure_seed()
@@ -1944,6 +1805,7 @@ def page_relatorio_missoes(user: "User"):
 
         st.info("Escopo: **Todas as congregações**")
         
+        # Editores: Entradas (por Congregação, Valor) e Saídas (Data, Descrição, Valor)
         congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
 
         st.subheader("Entradas de Missões — por Congregação (editar na tabela)")
@@ -1951,57 +1813,49 @@ def page_relatorio_missoes(user: "User"):
 
         st.subheader("Saídas de Missões (editar na tabela)")
         _, saidas_missoes = _collect_missions_data(db, start, end)
-        _editor_missions_outflows(saidas_missoes, "missoes_saidas", congs_all)
+        if saidas_missoes:
+            _editor_missions_outflows(saidas_missoes, "missoes_saidas")
+        else:
+            # Editor vazio permite inclusão
+            _editor_missions_outflows([], "missoes_saidas")
 
         st.divider()
         st.subheader("Gerar Relatório de Missões (PDF)")
         entradas_missoes, saidas_missoes = _collect_missions_data(db, start, end)
-        st.download_button(
+        if st.download_button(
             "⬇️ Baixar Relatório de Missões (PDF)",
             data=build_missions_report_pdf(ref, entradas_missoes, saidas_missoes),
             file_name=f"relatorio_missoes_{start.strftime('%Y-%m')}.pdf",
             mime="application/pdf"
-        )
+        ):
+            st.success("Relatório de missões gerado com sucesso!")
 
+# ==== NOVO: Relatório de Missões (apenas SALDO) para login de CONGREGAÇÃO ====
 def page_relatorio_missoes_congregacao(user: "User"):
-    # Nova aba para TESOUREIRO (congregações) visualizar apenas seus lançamentos
+    # Login de congregação: exibir APENAS o saldo de missões da própria congregação
     if user.role != "TESOUREIRO":
         st.warning("🔒 Acesso restrito aos usuários TESOUREIRO (congregações).")
         return
+
     ensure_seed()
     with SessionLocal() as db:
         sidebar_common(user)
         st.markdown("<h1 class='page-title'>Relatório de Missões (Minha Congregação)</h1>", unsafe_allow_html=True)
+
         ref = get_month_selector()
         start, end = month_bounds(ref)
 
         if not user.congregation_id:
-            st.info("Sua conta não está vinculada a uma congregação."); return
+            st.info("Sua conta não está vinculada a uma congregação.")
+            return
 
         entradas, saidas = _collect_missions_data(db, start, end, only_cong_id=user.congregation_id)
         total_in = sum(float(t.amount) for t in entradas)
         total_out = sum(float(t.amount) for t in saidas)
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Entradas de Missões", format_currency(total_in))
-        c2.metric("Saídas de Missões", format_currency(total_out))
-        c3.metric("Saldo no mês", format_currency(total_in - total_out))
+        saldo = total_in - total_out
 
-        st.subheader("Entradas de Missões (somente sua congregação)")
-        df_in = pd.DataFrame([{"Data": t.date.strftime("%d/%m/%Y"), "Categoria": t.category.name, "Valor (R$)": format_currency(float(t.amount))} for t in entradas])
-        st.dataframe(df_in, use_container_width=True, hide_index=True, height=220)
-
-        st.subheader("Saídas de Missões (somente sua congregação)")
-        df_out = pd.DataFrame([{"Data": t.date.strftime("%d/%m/%Y"), "Descrição": t.description or "—", "Valor (R$)": format_currency(float(t.amount))} for t in saidas])
-        st.dataframe(df_out, use_container_width=True, hide_index=True, height=220)
-
-        st.divider()
-        st.subheader("Baixar Relatório (PDF)")
-        st.download_button(
-            "⬇️ Baixar PDF (Missões da minha congregação)",
-            data=build_missions_report_pdf(ref, entradas, saidas),
-            file_name=f"relatorio_missoes_congregacao_{start.strftime('%Y-%m')}.pdf",
-            mime="application/pdf"
-        )
+        st.metric("Saldo de Missões (mês)", format_currency(saldo))
+        # Conforme solicitado, não exibir mais nada além do saldo.
 
 # ===================== PAGE: CADASTRO =====================
 def page_cadastro(user: "User"):
@@ -2012,8 +1866,6 @@ def page_cadastro(user: "User"):
         sidebar_common(user)
 
         st.markdown("<h1 class='page-title'>Cadastro</h1>", unsafe_allow_html=True)
-
-        # (restante do cadastro preservado — sem editores que precisem de botão)
 
         # Congregações
         st.subheader("Congregações")
@@ -2032,7 +1884,7 @@ def page_cadastro(user: "User"):
                 linhas = [l.strip() for l in (mass_text or "").splitlines()]
                 linhas = [l for l in linhas if l]
                 if not linhas:
-                    st.warning("Informe ao menos um nome.")
+                    st.warning("Informe ao menos um nome."); 
                 else:
                     inseridas = 0; repetidas = 0
                     for nome in linhas:
@@ -2187,8 +2039,8 @@ def main():
                     if u:
                         st.session_state.uid = u.id
             if st.session_state.get("uid"):
-                _check_inactivity_and_logout(cm)
-                _update_last_active(cm)
+                _check_inactivity_and_logout(cm)  # 20min inatividade
+                _update_last_active(cm)           # não desloga em refresh
         except Exception:
             pass
 
@@ -2200,8 +2052,8 @@ def main():
             if user.role == "SEDE":
                 menu_options = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Dizimistas", "Relatório de Missões", "Visão Geral", "Cadastro"]
             elif user.role == "TESOUREIRO":
-                # NOVO: congregações têm agora a aba "Relatório de Missões" (somente visualização da própria)
-                menu_options = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"]
+                # Adiciona Relatório de Missões (saldo apenas)
+                menu_options = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Dizimistas", "Relatório de Missões", "Visão Geral"]
             elif user.role == "TESOUREIRO MISSIONÁRIO":
                 menu_options = ["Relatório de Missões"]
             else:
@@ -2217,11 +2069,11 @@ def main():
         elif page == "Relatório de Dizimistas":
             page_relatorio_dizimistas(user)
         elif page == "Relatório de Missões":
-            # direciona conforme papel
-            if user.role == "TESOUREIRO":
-                page_relatorio_missoes_congregacao(user)
-            else:
+            # SEDE & Tes. Missionário = completo; Tesoureiro = saldo apenas
+            if user.role in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
                 page_relatorio_missoes(user)
+            else:
+                page_relatorio_missoes_congregacao(user)
         elif page == "Visão Geral":
             page_visao_geral(user)
         elif page == "Cadastro":
