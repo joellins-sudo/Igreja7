@@ -1349,7 +1349,8 @@ def page_relatorio_entrada(user: "User"):
             base_df = pd.DataFrame(columns=["Data do Culto","Dízimo","Oferta","Total"])
         view_df = base_df.copy()
 
-        edited = st.data_editor(
+        # === Editor da tabela-resumo de entradas ===
+edited = st.data_editor(
     view_df,
     use_container_width=True,
     hide_index=True,
@@ -1363,20 +1364,30 @@ def page_relatorio_entrada(user: "User"):
     key="re_entrada_sum_editor",
 )
 
-if not edited.empty:
+# --- Proteção caso 'edited' ainda não exista por algum motivo de colagem/escopo ---
+try:
+    _has_edited = isinstance(edited, pd.DataFrame)
+except NameError:
+    _has_edited = False
+
+# (Re)cálculo da coluna Total dentro da grade
+if _has_edited and not edited.empty:
     try:
         edited["Total"] = edited["Dízimo"].map(_to_float_brl) + edited["Oferta"].map(_to_float_brl)
     except Exception:
         pass
 
-# >>> BLOCO A (TOTAL EM DESTAQUE) – COLAR AQUI <<<
-try:
-    _edited_calc = edited.copy()
-    _edited_calc["Dízimo"] = _edited_calc["Dízimo"].map(_to_float_brl)
-    _edited_calc["Oferta"] = _edited_calc["Oferta"].map(_to_float_brl)
-    _edited_calc["Total"]  = _edited_calc["Dízimo"] + _edited_calc["Oferta"]
-    total_mes_entrada = float(_edited_calc["Total"].sum())
-except Exception:
+# >>> BLOCO A — Total do mês em destaque (logo abaixo da tabela) <<<
+if _has_edited and not edited.empty:
+    try:
+        _edited_calc = edited.copy()
+        _edited_calc["Dízimo"] = _edited_calc["Dízimo"].map(_to_float_brl)
+        _edited_calc["Oferta"] = _edited_calc["Oferta"].map(_to_float_brl)
+        _edited_calc["Total"]  = _edited_calc["Dízimo"] + _edited_calc["Oferta"]
+        total_mes_entrada = float(_edited_calc["Total"].sum())
+    except Exception:
+        total_mes_entrada = 0.0
+else:
     total_mes_entrada = 0.0
 
 st.metric(
@@ -1386,17 +1397,28 @@ st.metric(
 # <<< FIM DO BLOCO A
 
 def _save_sum():
-    _apply_entrada_summary_changes(cong_obj.id, start, end, edited)
-    st.toast("💾 Alterações salvas.", icon="✅")
-    st.rerun()
+    if _has_edited:
+        _apply_entrada_summary_changes(cong_obj.id, start, end, edited)
+        st.toast("💾 Alterações salvas.", icon="✅")
+        st.rerun()
+    else:
+        st.warning("Nada para salvar.")
 
 _save_btn(_save_sum, "entrada_sum")
 
 st.divider()
-csv = edited.assign(**{
-    "Data do Culto": edited["Data do Culto"].map(lambda d: _to_date(d).strftime("%Y-%m-%d")),
-}).to_csv(index=False).encode("utf-8-sig")
-st.download_button("⬇️ Baixar CSV (Entradas do período)", data=csv, file_name=f"entradas_resumo_{start.strftime('%Y-%m')}.csv", mime="text/csv")
+# Exportar CSV (só gera se houver 'edited' válido)
+if _has_edited and not edited.empty:
+    csv = edited.assign(**{
+        "Data do Culto": edited["Data do Culto"].map(lambda d: _to_date(d).strftime("%Y-%m-%d")),
+    }).to_csv(index=False).encode("utf-8-sig")
+    st.download_button(
+        "⬇️ Baixar CSV (Entradas do período)",
+        data=csv,
+        file_name=f"entradas_resumo_{start.strftime('%Y-%m')}.csv",
+        mime="text/csv"
+    )
+
 
 # ===================== PAGE: RELATÓRIO DE SAÍDA =====================
 def page_relatorio_saida(user: "User"):
