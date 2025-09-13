@@ -1349,75 +1349,38 @@ def page_relatorio_entrada(user: "User"):
             base_df = pd.DataFrame(columns=["Data do Culto","Dízimo","Oferta","Total"])
         view_df = base_df.copy()
 
-        # === Editor da tabela-resumo de entradas ===
-edited = st.data_editor(
-    view_df,
-    use_container_width=True,
-    hide_index=True,
-    num_rows="dynamic",
-    column_config={
-        "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
-        "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", min_value=-999999999.0, step=1.0, format="R$ %.2f"),
-        "Oferta": st.column_config.NumberColumn("Oferta (R$)", min_value=-999999999.0, step=1.0, format="R$ %.2f"),
-        "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
-    },
-    key="re_entrada_sum_editor",
-)
+        edited = st.data_editor(
+            view_df,
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            column_config={
+                "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
+                "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", min_value=-999999999.0, step=1.0, format="R$ %.2f"),
+                "Oferta": st.column_config.NumberColumn("Oferta (R$)", min_value=-999999999.0, step=1.0, format="R$ %.2f"),
+                "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
+            },
+            key="re_entrada_sum_editor",
+        )
 
-# --- Proteção caso 'edited' ainda não exista por algum motivo de colagem/escopo ---
-try:
-    _has_edited = isinstance(edited, pd.DataFrame)
-except NameError:
-    _has_edited = False
+        if not edited.empty:
+            try:
+                edited["Total"] = edited["Dízimo"].map(_to_float_brl) + edited["Oferta"].map(_to_float_brl)
+            except Exception:
+                pass
 
-# (Re)cálculo da coluna Total dentro da grade
-if _has_edited and not edited.empty:
-    try:
-        edited["Total"] = edited["Dízimo"].map(_to_float_brl) + edited["Oferta"].map(_to_float_brl)
-    except Exception:
-        pass
+        def _save_sum():
+            _apply_entrada_summary_changes(cong_obj.id, start, end, edited)
+            st.toast("💾 Alterações salvas.", icon="✅")
+            st.rerun()
 
-# >>> BLOCO A — Total do mês em destaque (logo abaixo da tabela) <<<
-if _has_edited and not edited.empty:
-    try:
-        _edited_calc = edited.copy()
-        _edited_calc["Dízimo"] = _edited_calc["Dízimo"].map(_to_float_brl)
-        _edited_calc["Oferta"] = _edited_calc["Oferta"].map(_to_float_brl)
-        _edited_calc["Total"]  = _edited_calc["Dízimo"] + _edited_calc["Oferta"]
-        total_mes_entrada = float(_edited_calc["Total"].sum())
-    except Exception:
-        total_mes_entrada = 0.0
-else:
-    total_mes_entrada = 0.0
+        _save_btn(_save_sum, "entrada_sum")
 
-st.metric(
-    "Total de Entradas (Dízimo + Oferta) no mês",
-    format_currency(total_mes_entrada)
-)
-# <<< FIM DO BLOCO A
-
-def _save_sum():
-    if _has_edited:
-        _apply_entrada_summary_changes(cong_obj.id, start, end, edited)
-        st.toast("💾 Alterações salvas.", icon="✅")
-        st.rerun()
-    else:
-        st.warning("Nada para salvar.")
-
-_save_btn(_save_sum, "entrada_sum")
-
-st.divider()
-# Exportar CSV (só gera se houver 'edited' válido)
-if _has_edited and not edited.empty:
-    csv = edited.assign(**{
-        "Data do Culto": edited["Data do Culto"].map(lambda d: _to_date(d).strftime("%Y-%m-%d")),
-    }).to_csv(index=False).encode("utf-8-sig")
-    st.download_button(
-        "⬇️ Baixar CSV (Entradas do período)",
-        data=csv,
-        file_name=f"entradas_resumo_{start.strftime('%Y-%m')}.csv",
-        mime="text/csv"
-    )
+        st.divider()
+        csv = edited.assign(**{
+            "Data do Culto": edited["Data do Culto"].map(lambda d: _to_date(d).strftime("%Y-%m-%d")),
+        }).to_csv(index=False).encode("utf-8-sig")
+        st.download_button("⬇️ Baixar CSV (Entradas do período)", data=csv, file_name=f"entradas_resumo_{start.strftime('%Y-%m')}.csv", mime="text/csv")
 
 # ===================== PAGE: RELATÓRIO DE SAÍDA =====================
 def page_relatorio_saida(user: "User"):
