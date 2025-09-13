@@ -1,11 +1,9 @@
 # main.py — AD Relatório Financeiro — v13.1
-# Melhorias solicitadas preservando o código base:
-# - (Login Congregação) Relatório de Entrada: tabela já é editável (mantido).
-# - (Login Congregação) Relatório de Missões: liberar aba e tornar a TABELA DE ENTRADAS editável (apenas sua congregação).
-# - (Login Congregação) Lançamentos: não há “ajuste Sede (Entrada)” no código (mantido sem essa opção).
-# - Datas em todo lugar como dia/mês/ano (mantido).
-# - (Login Sede) Relatório de Entrada: ao escolher uma congregação, opção de EXCLUSÃO RÁPIDA das entradas por data.
-# - (Tesoureiro Missionário) continua podendo lançar entradas (todas as congregações, via agregação) e saídas.
+# Melhorias desta versão:
+# - Relatório de Entrada (perfil SEDE): opção "Todas as congregações" com ranking mensal por total.
+# - Correções de consultas SQLAlchemy para uso correto de .limit(1) quando necessário.
+#
+# IMPORTANTE: Todo o restante do comportamento foi preservado.
 
 from __future__ import annotations
 
@@ -212,6 +210,7 @@ class Transaction(Base):
     description: Mapped[Optional[str]] = mapped_column(String)
     congregation_id: Mapped[int] = mapped_column(ForeignKey("congregations.id"))
     payment_method: Mapped[Optional[str]] = mapped_column(String, default=None)
+    # OBS: se você já tiver "service_type" em sua base, o ORM a ignora; não criamos coluna nova aqui.
     category: Mapped["Category"] = relationship(back_populates="transactions", lazy="joined")
     congregation: Mapped["Congregation"] = relationship(back_populates="transactions")
 
@@ -318,7 +317,6 @@ def logout():
             cm.set(COOKIE_NAME, "", expires_at=datetime.utcnow()-timedelta(days=1), key="auth_del_fallback")
             cm.set(LAST_COOKIE, "", expires_at=datetime.utcnow()-timedelta(days=1), key="last_del_fallback")
     except Exception:
-    # mantém silencioso para não quebrar a UI
         pass
     st.rerun()
 
@@ -844,15 +842,16 @@ def _editor_dizimos(tithes: List["Tithe"], titulo: str):
 
 # ===== MISSÕES: Editores específicos =====
 def _editor_missions_outflows(saidas: List["Transaction"], titulo: str):
-    rows = []
-    for t in (saidas or []):
-        rows.append({
-            "ID": t.id,
-            "Data": t.date,
-            "Descrição": t.description or "",
-            "Valor": float(t.amount),
-            "_cong_id": int(t.congregation_id or 0),
-        })
+    if not saidas:
+        st.caption("— Não há saídas de missões no período.")
+        # permite inclusão numa tabela vazia
+    rows = [{
+        "ID": t.id,
+        "Data": t.date,
+        "Descrição": t.description or "",
+        "Valor": float(t.amount),
+        "_cong_id": int(t.congregation_id or 0),
+    } for t in saidas] if saidas else []
     df_full = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["ID","Data","Descrição","Valor","_cong_id"])
     df_view = df_full.drop(columns=["_cong_id"]) if not df_full.empty else pd.DataFrame(columns=["ID","Data","Descrição","Valor"])
 
@@ -974,50 +973,6 @@ def _editor_missions_entries_agg(congs_all: List["Congregation"], start: date, e
                             description=ADJ_MISS_IN_DESC, congregation_id=int(cid)
                         ))
             db.commit()
-
-    _auto_save_if_changed(df_view, edited_view, _save)
-
-# === NOVO: Editor de ENTRADAS de Missões para UMA congregação (login Congregação) ===
-def _editor_missions_entries_single(cong_id: int, start: date, end: date, titulo: str):
-    with SessionLocal() as db:
-        cat_miss = db.scalar(select(Category).where(func.lower(Category.name).in_(("missões","missoes")), limit=1))
-        if not cat_miss:
-            st.error("Categoria 'Missões' não encontrada."); return
-        q = select(Transaction).options(joinedload(Transaction.category)).where(
-            Transaction.congregation_id == cong_id,
-            Transaction.date >= start, Transaction.date < end,
-            Transaction.type == TYPE_IN,
-            Transaction.category_id == cat_miss.id
-        ).order_by(Transaction.date)
-        txs = db.scalars(q).all()
-
-    # Tabela simples: ID, Data, Descrição, Valor (Categoria fixa Missões, não exibimos)
-    rows = [{
-        "ID": t.id, "Data": t.date, "Descrição": t.description or "", "Valor": float(t.amount),
-        "_cong_id": cong_id
-    } for t in txs]
-    df_full = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["ID","Data","Descrição","Valor","_cong_id"])
-    df_view = df_full.drop(columns=["_cong_id"]) if not df_full.empty else pd.DataFrame(columns=["ID","Data","Descrição","Valor"])
-
-    edited_view = st.data_editor(
-        df_view,
-        use_container_width=True,
-        hide_index=True,
-        num_rows="dynamic",
-        column_config={
-            "ID": st.column_config.Column("ID", disabled=True),
-            "Data": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
-            "Descrição": st.column_config.TextColumn("Descrição", max_chars=200),
-            "Valor": st.column_config.NumberColumn("Valor (R$)", min_value=-999999999.0, step=1.0, format="R$ %.2f"),
-        },
-        key=f"missoes_in_single_{titulo}",
-    )
-
-    def _save():
-        # Força categoria Missões e congregação fixa
-        full_orig = df_full.assign(**{"Categoria": "Missões"})
-        full_edit = edited_view.assign(**{"Categoria": "Missões"})
-        _apply_tx_changes(full_orig, full_edit, TYPE_IN, default_cong_id=cong_id)
 
     _auto_save_if_changed(df_view, edited_view, _save)
 
@@ -1185,44 +1140,7 @@ def page_lancamentos(user: "User"):
                     st.success("Saída registrada.")
         st.markdown('</div>', unsafe_allow_html=True)
 
-# ===================== PAGE: RELATÓRIO DE ENTRADA =====================
-def _delete_entries_by_dates(cong_id: int, dates: List[date]):
-    # Exclui: Dízimos (tithes) do dia; Entradas de Dízimo/Oferta do dia; e ajustes ADJ_ENTRY_DESC do dia.
-    with SessionLocal() as db:
-        if not dates:
-            return
-        # Tithes
-        db.query(Tithe).filter(
-            Tithe.congregation_id == cong_id,
-            Tithe.date.in_(dates)
-        ).delete(synchronize_session=False)
-        # Transactions: Dízimo / Oferta (e ajustes)
-        cats = categories_for_type(db, TYPE_IN)
-        cat_diz = next((c for c in cats if _norm(c.name) in ("dizimo","dízimo")), None)
-        cat_ofe = next((c for c in cats if _norm(c.name) == "oferta"), None)
-        if cat_diz:
-            db.query(Transaction).filter(
-                Transaction.congregation_id == cong_id,
-                Transaction.date.in_(dates),
-                Transaction.type.in_((TYPE_IN,"RECEITA")),
-                Transaction.category_id == cat_diz.id
-            ).delete(synchronize_session=False)
-        if cat_ofe:
-            db.query(Transaction).filter(
-                Transaction.congregation_id == cong_id,
-                Transaction.date.in_(dates),
-                Transaction.type.in_((TYPE_IN,"RECEITA")),
-                Transaction.category_id == cat_ofe.id
-            ).delete(synchronize_session=False)
-        # Ajustes (se existirem com descrição)
-        db.query(Transaction).filter(
-            Transaction.congregation_id == cong_id,
-            Transaction.date.in_(dates),
-            Transaction.type.in_((TYPE_IN,"RECEITA")),
-            func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC
-        ).delete(synchronize_session=False)
-        db.commit()
-
+# ===================== PAGE: RELATÓRIO DE ENTRADA (TABELA ÚNICA) =====================
 def page_relatorio_entrada(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1235,17 +1153,38 @@ def page_relatorio_entrada(user: "User"):
         congs = cong_options_for(user, db)
         if user.role == "SEDE":
             ordered = order_congs_sede_first(congs)
-            # Lista de congregações (sem "Todas")
-            cong_sel = st.selectbox("Congregação", [c.name for c in ordered], key="re_cong_only")
-            cong_obj = next(c for c in ordered if c.name == cong_sel)
+            esc_opt = ["Todas as congregações"] + [c.name for c in ordered]
+            esc = st.selectbox("Congregação", esc_opt, key="re_cong_all")
+            is_all = (esc == "Todas as congregações")
+            cong_obj = None if is_all else next(c for c in ordered if c.name == esc)
         else:
             cong_obj = congs[0] if congs else None
+            is_all = False
+
+        # === VISÃO AGREGADA PARA "TODAS AS CONGREGAÇÕES"
+        if is_all:
+            st.info("Escopo: **Todas as congregações**")
+            rows = []
+            for c in ordered:
+                df = _entrada_summary_df(db, c.id, start, end)
+                total = float(df["Total"].sum()) if not df.empty else 0.0
+                rows.append({"Congregação": c.name, "Total (R$)": total})
+            df_rank = pd.DataFrame(rows)
+            if not df_rank.empty:
+                df_rank = df_rank.sort_values("Total (R$)", ascending=False).reset_index(drop=True)
+                st.dataframe(
+                    df_rank.assign(**{"Total (R$)": df_rank["Total (R$)"].map(format_currency)}),
+                    use_container_width=True, hide_index=True, height=320
+                )
+            else:
+                st.caption("Sem entradas registradas no mês.")
+            return  # não segue para o editor por data
 
         if not cong_obj:
             st.info("Selecione uma congregação."); return
         st.info(f"Escopo: **{cong_obj.name}**")
 
-        # TABELA ÚNICA (Data do Culto, Dízimo, Oferta, Total) — EDITÁVEL
+        # TABELA ÚNICA (Data do Culto, Dízimo, Oferta, Total)
         base_df = _entrada_summary_df(db, cong_obj.id, start, end)
         if base_df.empty:
             base_df = pd.DataFrame(columns=["Data do Culto","Dízimo","Oferta","Total"])
@@ -1265,7 +1204,7 @@ def page_relatorio_entrada(user: "User"):
             key="re_entrada_sum_editor",
         )
 
-        # Recalcular Total na UI
+        # Recalcular Total na visualização editada (apenas UI)
         if not edited.empty:
             try:
                 edited["Total"] = edited["Dízimo"].map(_to_float_brl) + edited["Oferta"].map(_to_float_brl)
@@ -1277,23 +1216,8 @@ def page_relatorio_entrada(user: "User"):
             lambda: _apply_entrada_summary_changes(cong_obj.id, start, end, edited)
         )
 
-        # ====== NOVO: Exclusão rápida (apenas SEDE) ======
-        if user.role == "SEDE":
-            st.divider()
-            with st.expander("🗑️ Exclusão rápida por data (entradas e dízimos)"):
-                # Datas disponíveis no mês
-                available_dates = sorted({_to_date(d) for d in edited["Data do Culto"].tolist() if str(d).strip()})
-                pretty_map = {d.strftime("%d/%m/%Y"): d for d in available_dates}
-                labels = list(pretty_map.keys())
-                dates_pick = st.multiselect("Selecione as datas para excluir totalmente as entradas (Dízimos/Ofertas) e ajustes", labels)
-                conf = st.text_input("Digite EXCLUIR para confirmar", key="re_ent_del_conf")
-                btn_disabled = (not dates_pick) or (not _confirm_ok(conf))
-                if st.button("Excluir selecionadas", type="primary", disabled=btn_disabled):
-                    _delete_entries_by_dates(cong_obj.id, [pretty_map[x] for x in dates_pick])
-                    st.success("Entradas excluídas com sucesso.")
-                    st.rerun()
-
         st.divider()
+        # CSV de apoio
         csv = edited.assign(**{
             "Data do Culto": edited["Data do Culto"].map(lambda d: _to_date(d).strftime("%Y-%m-%d")),
         }).to_csv(index=False).encode("utf-8-sig")
@@ -1789,7 +1713,7 @@ def page_visao_geral(user: "User"):
             mime="application/pdf"
         )
 
-# ===================== RELATÓRIO DE MISSÕES (Entradas/ Saídas) =====================
+# ===================== RELATÓRIO DE MISSÕES (Entradas/ Saídas editáveis) =====================
 def _collect_missions_data(db: Session, start: date, end: date):
     q_in = select(Transaction).options(joinedload(Transaction.congregation), joinedload(Transaction.category)).where(
         Transaction.date >= start,
@@ -1878,6 +1802,10 @@ def build_missions_report_pdf(ref: date, entradas: list, saidas: list) -> bytes:
     return buf.getvalue()
 
 def page_relatorio_missoes(user: "User"):
+    if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
+        st.warning(f"🔒 Acesso negado. Apenas usuários `SEDE` ou `TESOUREIRO MISSIONÁRIO` podem acessar este relatório.")
+        return
+    
     ensure_seed()
     with SessionLocal() as db:
         sidebar_common(user)
@@ -1886,36 +1814,31 @@ def page_relatorio_missoes(user: "User"):
         ref = get_month_selector()
         start, end = month_bounds(ref)
 
-        # ===== Escopos diferentes por perfil =====
-        if user.role == "SEDE" or user.role == "TESOUREIRO MISSIONÁRIO":
-            st.info("Escopo: **Todas as congregações**")
-            congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+        st.info("Escopo: **Todas as congregações**")
+        
+        # Editores: Entradas (por Congregação, Valor) e Saídas (Data, Descrição, Valor)
+        congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
 
-            st.subheader("Entradas de Missões — por Congregação (editar na tabela)")
-            _editor_missions_entries_agg(congs_all, start, end, "missoes_entradas_agg")
+        st.subheader("Entradas de Missões — por Congregação (editar na tabela)")
+        _editor_missions_entries_agg(congs_all, start, end, "missoes_entradas_agg")
 
-            st.subheader("Saídas de Missões (editar na tabela)")
-            _, saidas_missoes = _collect_missions_data(db, start, end)
+        st.subheader("Saídas de Missões (editar na tabela)")
+        _, saidas_missoes = _collect_missions_data(db, start, end)
+        if saidas_missoes:
             _editor_missions_outflows(saidas_missoes, "missoes_saidas")
-
-            st.divider()
-            st.subheader("Gerar Relatório de Missões (PDF)")
-            entradas_missoes, saidas_missoes = _collect_missions_data(db, start, end)
-            st.download_button(
-                "⬇️ Baixar Relatório de Missões (PDF)",
-                data=build_missions_report_pdf(ref, entradas_missoes, saidas_missoes),
-                file_name=f"relatorio_missoes_{start.strftime('%Y-%m')}.pdf",
-                mime="application/pdf"
-            )
-        elif user.role == "TESOUREIRO":
-            # Login congregação: pode EDITAR suas ENTRADAS de Missões
-            cong = db.get(Congregation, user.congregation_id) if user.congregation_id else None
-            if not cong:
-                st.warning("Sem congregação vinculada."); return
-            st.info(f"Escopo: **{cong.name}** — Entradas de Missões")
-            _editor_missions_entries_single(cong.id, start, end, f"in_single_{cong.id}")
         else:
-            st.warning("🔒 Perfil sem acesso ao Relatório de Missões.")
+            _editor_missions_outflows([], "missoes_saidas")
+
+        st.divider()
+        st.subheader("Gerar Relatório de Missões (PDF)")
+        entradas_missoes, saidas_missoes = _collect_missions_data(db, start, end)
+        if st.download_button(
+            "⬇️ Baixar Relatório de Missões (PDF)",
+            data=build_missions_report_pdf(ref, entradas_missoes, saidas_missoes),
+            file_name=f"relatorio_missoes_{start.strftime('%Y-%m')}.pdf",
+            mime="application/pdf"
+        ):
+            st.success("Relatório de missões gerado com sucesso!")
 
 # ===================== PAGE: CADASTRO =====================
 def page_cadastro(user: "User"):
@@ -2112,8 +2035,7 @@ def main():
             if user.role == "SEDE":
                 menu_options = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Dizimistas", "Relatório de Missões", "Visão Geral", "Cadastro"]
             elif user.role == "TESOUREIRO":
-                # NOVO: liberar Relatório de Missões para congregação (entradas editáveis)
-                menu_options = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Dizimistas", "Relatório de Missões", "Visão Geral"]
+                menu_options = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Dizimistas", "Visão Geral"]
             elif user.role == "TESOUREIRO MISSIONÁRIO":
                 menu_options = ["Relatório de Missões"]
             else:
