@@ -1335,35 +1335,20 @@ def page_relatorio_entrada(user: "User"):
             is_all = False
             cong_obj = congs[0] if congs else None
 
-        # === SEDE: modo "Todas as congregações" ===
         if is_all:
             st.info("Escopo: **Todas as congregações** — edite o total de entradas mensal por congregação abaixo.")
             _editor_entradas_agg_all(ordered, start, end)
-
-            # TOTAL GERAL EM DESTAQUE (todas as congregações)
-            with SessionLocal() as _db_tot_in:
-                total_geral_in = 0.0
-                for _c in ordered:
-                    _t = _collect_month_data(_db_tot_in, _c.id, start, end)["totals"]
-                    total_geral_in += float(_t["entradas_total_sem_missoes"])
-            st.metric("Total geral de entradas (todas as congregações)", format_currency(total_geral_in))
             return
 
-        # === Congregação específica ===
         if not cong_obj:
-            st.info("Selecione uma congregação.")
-            return
-
+            st.info("Selecione uma congregação."); return
         st.info(f"Escopo: **{cong_obj.name}**")
 
-        # Base (Dízimo, Oferta, Total por data)
         base_df = _entrada_summary_df(db, cong_obj.id, start, end)
-        if base_df is None or base_df.empty:
-            base_df = pd.DataFrame(columns=["Data do Culto", "Dízimo", "Oferta", "Total"])
-
+        if base_df.empty:
+            base_df = pd.DataFrame(columns=["Data do Culto","Dízimo","Oferta","Total"])
         view_df = base_df.copy()
 
-        # Editor da tabela-resumo
         edited = st.data_editor(
             view_df,
             use_container_width=True,
@@ -1378,79 +1363,86 @@ def page_relatorio_entrada(user: "User"):
             key="re_entrada_sum_editor",
         )
 
-        # Recalcula a coluna Total (visual)
         if not edited.empty:
             try:
                 edited["Total"] = edited["Dízimo"].map(_to_float_brl) + edited["Oferta"].map(_to_float_brl)
             except Exception:
                 pass
 
-        # === TOTAL DO MÊS EM DESTAQUE (logo abaixo da tabela) ===
-        try:
-            _edited_calc = edited.copy()
-            _edited_calc["Dízimo"] = _edited_calc["Dízimo"].map(_to_float_brl)
-            _edited_calc["Oferta"] = _edited_calc["Oferta"].map(_to_float_brl)
-            _edited_calc["Total"] = _edited_calc["Dízimo"] + _edited_calc["Oferta"]
-            total_mes_entrada = float(_edited_calc["Total"].sum())
-        except Exception:
-            total_mes_entrada = 0.0
-
-        st.metric(
-            "Total de Entradas (Dízimo + Oferta) no mês",
-            format_currency(total_mes_entrada)
-        )
-
-        # Botão Salvar (persiste no banco via _apply_entrada_summary_changes)
         def _save_sum():
             _apply_entrada_summary_changes(cong_obj.id, start, end, edited)
             st.toast("💾 Alterações salvas.", icon="✅")
             st.rerun()
 
         _save_btn(_save_sum, "entrada_sum")
-# === [BLOCO: Apagar linhas do resumo de entrada] — COLE LOGO APÓS _save_btn(...) ===
-if isinstance(edited, pd.DataFrame) and not edited.empty:
-    try:
-        _datas_ord = sorted({_to_date(d) for d in edited["Data do Culto"].tolist() if pd.notna(d)})
-        _rotulos = [d.strftime("%d/%m/%Y") for d in _datas_ord]
-    except Exception:
-        _rotulos = []
-
-    _sel_del = st.multiselect(
-        "Selecione as datas que deseja APAGAR desta tabela-resumo",
-        options=_rotulos,
-        key="re_entrada_sum_del_dates"
-    )
-
-    def _delete_selected_rows():
-        if not _sel_del:
-            st.warning("Selecione ao menos uma data para apagar.")
-            return
-        to_drop = {datetime.strptime(x, "%d/%m/%Y").date() for x in _sel_del}
-        edited_clean = edited[~edited["Data do Culto"].map(_to_date).isin(to_drop)]
-        _apply_entrada_summary_changes(cong_obj.id, start, end, edited_clean)
-        st.toast("🗑️ Linhas apagadas com sucesso.", icon="✅")
-        st.rerun()
-
-    st.button(
-        "🗑️ Apagar linhas selecionadas",
-        type="secondary",
-        on_click=_delete_selected_rows,
-        key="btn_del_entrada_sum"
-    )
-# === [FIM DO BLOCO] ===
 
         st.divider()
-
-        # Download CSV do período
         csv = edited.assign(**{
             "Data do Culto": edited["Data do Culto"].map(lambda d: _to_date(d).strftime("%Y-%m-%d")),
         }).to_csv(index=False).encode("utf-8-sig")
+        st.download_button("⬇️ Baixar CSV (Entradas do período)", data=csv, file_name=f"entradas_resumo_{start.strftime('%Y-%m')}.csv", mime="text/csv")
 
+# ===================== PAGE: RELATÓRIO DE SAÍDA =====================
+def page_relatorio_saida(user: "User"):
+    ensure_seed()
+    with SessionLocal() as db:
+        sidebar_common(user)
+
+        st.markdown("<h1 class='page-title'>Relatório de Saída</h1>", unsafe_allow_html=True)
+        ref = get_month_selector()
+        start, end = month_bounds(ref)
+
+        congs = cong_options_for(user, db)
+        if user.role == "SEDE":
+            ordered = order_congs_sede_first(congs)
+            esc_opt = ["Todas as congregações"] + [c.name for c in ordered]
+            esc = st.selectbox("Escopo", esc_opt, key="rs_escopo")
+            is_all = (esc == "Todas as congregações")
+            cong_obj = None if is_all else next(c for c in ordered if c.name == esc)
+        else:
+            cong_obj = congs[0] if congs else None; is_all = False
+
+        if is_all:
+            st.info("Escopo: **Todas as congregações** — edite o total mensal de saídas por congregação abaixo.")
+            _editor_saidas_agg_all(ordered, start, end)
+            st.divider()
+            with SessionLocal() as db2:
+                rows = []
+                for c in ordered:
+                    total = _collect_month_data(db2, c.id, start, end)["totals"]["saidas_total"]
+                    rows.append({"Congregação": c.name, "Total Saídas (R$)": float(total)})
+            csv = pd.DataFrame(rows).to_csv(index=False).encode("utf-8-sig")
+            st.download_button("⬇️ Baixar CSV (Saídas por congregação)", data=csv, file_name=f"saidas_congregacoes_{start.strftime('%Y-%m')}.csv", mime="text/csv")
+            return
+
+        if not cong_obj:
+            st.info("Sem congregação vinculada."); return
+        st.info(f"Escopo: **{cong_obj.name}**")
+
+        q = select(Transaction).options(joinedload(Transaction.category)).where(
+            Transaction.date >= start, Transaction.date < end, Transaction.type.in_(("SAÍDA", "DESPESA")),
+            Transaction.congregation_id == cong_obj.id
+        )
+        txs = db.scalars(q).all()
+
+        total_saidas = sum(float(t.amount) for t in txs)
+        st.metric("Total de saídas", format_currency(total_saidas))
+
+        st.divider()
+        _editor_lancamentos(txs, "Saídas do período (editar na tabela)", tx_type_hint=TYPE_OUT)
+
+        st.divider()
+        rows_csv = [{
+            "Data": t.date.strftime("%Y-%m-%d"),
+            "Congregação": t.congregation.name,
+            "Tipo da saída": t.category.name,
+            "Valor": float(t.amount),
+            "Descrição": t.description or ""
+        } for t in txs]
+        csv = pd.DataFrame(rows_csv).to_csv(index=False).encode("utf-8-sig")
         st.download_button(
-            "⬇️ Baixar CSV (Entradas do período)",
-            data=csv,
-            file_name=f"entradas_resumo_{start.strftime('%Y-%m')}.csv",
-            mime="text/csv"
+            "⬇️ Baixar CSV das SAÍDAS do período",
+            data=csv, file_name=f"saidas_{start.strftime('%Y-%m')}.csv", mime="text/csv"
         )
 
 # ===================== PAGE: RELATÓRIO DE DIZIMISTAS =====================
@@ -1873,16 +1865,6 @@ def page_visao_geral(user: "User"):
         )
 
 # ===================== COLETA MISSÕES =====================
-# =====================================================================
-#  MISSÕES — COLE ESTE BLOCO: _collect_missions_data
-#  Busca entradas e saídas de Missões, opcionalmente filtrando uma só
-#  congregação (para o tesoureiro local).
-# =====================================================================
-# =====================================================================
-#  MISSÕES — COLE ESTE BLOCO: _collect_missions_data
-#  Busca entradas e saídas de Missões, opcionalmente filtrando uma só
-#  congregação (para o tesoureiro local).
-# =====================================================================
 def _collect_missions_data(db: Session, start: date, end: date, only_cong_id: Optional[int] = None):
     q_in = select(Transaction).options(joinedload(Transaction.congregation), joinedload(Transaction.category)).where(
         Transaction.date >= start,
@@ -1893,7 +1875,7 @@ def _collect_missions_data(db: Session, start: date, end: date, only_cong_id: Op
     if only_cong_id:
         q_in = q_in.where(Transaction.congregation_id == only_cong_id)
     entradas_missoes = db.scalars(q_in).all()
-
+    
     q_out = select(Transaction).options(joinedload(Transaction.congregation), joinedload(Transaction.category)).where(
         Transaction.date >= start,
         Transaction.date < end,
@@ -1903,8 +1885,151 @@ def _collect_missions_data(db: Session, start: date, end: date, only_cong_id: Op
     if only_cong_id:
         q_out = q_out.where(Transaction.congregation_id == only_cong_id)
     saidas_missoes = db.scalars(q_out).all()
-
+    
     return entradas_missoes, saidas_missoes
+
+def build_missions_report_pdf(ref: date, entradas: list, saidas: list) -> bytes:
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('title', parent=styles['Heading1'], alignment=TA_CENTER, fontSize=16, spaceAfter=8)
+    subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=12, textColor=colors.black, spaceAfter=12)
+    heading_style = ParagraphStyle('heading', parent=styles['Heading2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
+    table_style = TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("ALIGN", (-1, 1), (-1, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ])
+
+    story: List = []
+    story.append(Paragraph("Relatório Mensal de Missões", title_style))
+    story.append(Paragraph(f"Referente a: {ref.strftime('%B de %Y')}", subtitle_style))
+    story.append(Spacer(1, 0.5*cm))
+
+    story.append(Paragraph("Entradas de Missões (por data)", heading_style))
+    if entradas:
+        entradas_data = [["Data", "Congregação", "Valor (R$)"]]
+        for t in entradas:
+            entradas_data.append([t.date.strftime("%d/%m/%Y"), t.congregation.name, format_currency(float(t.amount))])
+        tbl_in = Table(entradas_data, colWidths=[3*cm, 9*cm, 5*cm])
+        tbl_in.setStyle(table_style)
+        story.append(tbl_in)
+    else:
+        story.append(Paragraph("Nenhuma entrada de missões registrada.", styles['Normal']))
+
+    story.append(Spacer(1, 0.8*cm))
+    story.append(Paragraph("Saídas de Missões", heading_style))
+    if saidas:
+        saidas_data = [["Data", "Congregação", "Descrição", "Valor (R$)"]]
+        for t in saidas:
+            saidas_data.append([t.date.strftime("%d/%m/%Y"), t.congregation.name if t.congregation else "—", t.description or "—", format_currency(float(t.amount))])
+        tbl_out = Table(saidas_data, colWidths=[3*cm, 6*cm, 7*cm, 3*cm])
+        tbl_out.setStyle(table_style)
+        story.append(tbl_out)
+    else:
+        story.append(Paragraph("Nenhuma saída de missões registrada.", styles['Normal']))
+
+    story.append(Spacer(1, 1*cm))
+    total_entradas_missions = sum(float(t.amount) for t in entradas)
+    total_saidas_missions = sum(float(t.amount) for t in saidas)
+    saldo_missions = total_entradas_missions - total_saidas_missions
+    story.append(Paragraph("Resumo Financeiro de Missões", heading_style))
+    summary_data = [
+        ["Total de Entradas de Missões", format_currency(total_entradas_missions)],
+        ["Total de Saídas de Missões", format_currency(total_saidas_missions)],
+        ["Saldo de Missões no Mês", format_currency(saldo_missions)],
+    ]
+    summary_table = Table(summary_data, colWidths=[8*cm, 8*cm])
+    summary_table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#eef2ff")),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+    ]))
+    story.append(summary_table)
+
+    doc.build(story)
+    return buf.getvalue()
+
+# ======== Páginas de Missões ========
+def page_relatorio_missoes(user: "User"):
+    if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
+        st.warning("🔒 Acesso negado. Apenas usuários `SEDE` ou `TESOUREIRO MISSIONÁRIO` podem acessar este relatório.")
+        return
+    
+    ensure_seed()
+    with SessionLocal() as db:
+        sidebar_common(user)
+
+        st.markdown("<h1 class='page-title'>Relatório de Missões</h1>", unsafe_allow_html=True)
+        ref = get_month_selector()
+        start, end = month_bounds(ref)
+
+        st.info("Escopo: **Todas as congregações**")
+        
+        congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+
+        st.subheader("Entradas de Missões — por Congregação (editar na tabela)")
+        _editor_missions_entries_agg(congs_all, start, end, "missoes_entradas_agg")
+
+        st.subheader("Saídas de Missões (editar na tabela)")
+        _, saidas_missoes = _collect_missions_data(db, start, end)
+        _editor_missions_outflows(saidas_missoes, "missoes_saidas", congs_all)
+
+        st.divider()
+        st.subheader("Gerar Relatório de Missões (PDF)")
+        entradas_missoes, saidas_missoes = _collect_missions_data(db, start, end)
+        st.download_button(
+            "⬇️ Baixar Relatório de Missões (PDF)",
+            data=build_missions_report_pdf(ref, entradas_missoes, saidas_missoes),
+            file_name=f"relatorio_missoes_{start.strftime('%Y-%m')}.pdf",
+            mime="application/pdf"
+        )
+
+def page_relatorio_missoes_congregacao(user: "User"):
+    # Nova aba para TESOUREIRO (congregações) visualizar apenas seus lançamentos
+    if user.role != "TESOUREIRO":
+        st.warning("🔒 Acesso restrito aos usuários TESOUREIRO (congregações).")
+        return
+    ensure_seed()
+    with SessionLocal() as db:
+        sidebar_common(user)
+        st.markdown("<h1 class='page-title'>Relatório de Missões (Minha Congregação)</h1>", unsafe_allow_html=True)
+        ref = get_month_selector()
+        start, end = month_bounds(ref)
+
+        if not user.congregation_id:
+            st.info("Sua conta não está vinculada a uma congregação."); return
+
+        entradas, saidas = _collect_missions_data(db, start, end, only_cong_id=user.congregation_id)
+        total_in = sum(float(t.amount) for t in entradas)
+        total_out = sum(float(t.amount) for t in saidas)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Entradas de Missões", format_currency(total_in))
+        c2.metric("Saídas de Missões", format_currency(total_out))
+        c3.metric("Saldo no mês", format_currency(total_in - total_out))
+
+        st.subheader("Entradas de Missões (somente sua congregação)")
+        df_in = pd.DataFrame([{"Data": t.date.strftime("%d/%m/%Y"), "Categoria": t.category.name, "Valor (R$)": format_currency(float(t.amount))} for t in entradas])
+        st.dataframe(df_in, use_container_width=True, hide_index=True, height=220)
+
+        st.subheader("Saídas de Missões (somente sua congregação)")
+        df_out = pd.DataFrame([{"Data": t.date.strftime("%d/%m/%Y"), "Descrição": t.description or "—", "Valor (R$)": format_currency(float(t.amount))} for t in saidas])
+        st.dataframe(df_out, use_container_width=True, hide_index=True, height=220)
+
+        st.divider()
+        st.subheader("Baixar Relatório (PDF)")
+        st.download_button(
+            "⬇️ Baixar PDF (Missões da minha congregação)",
+            data=build_missions_report_pdf(ref, entradas, saidas),
+            file_name=f"relatorio_missoes_congregacao_{start.strftime('%Y-%m')}.pdf",
+            mime="application/pdf"
+        )
 
 # ===================== PAGE: CADASTRO =====================
 def page_cadastro(user: "User"):
