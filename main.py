@@ -1368,7 +1368,8 @@ def page_relatorio_entrada(user: "User"):
                 edited["Total"] = edited["Dízimo"].map(_to_float_brl) + edited["Oferta"].map(_to_float_brl)
             except Exception:
                 pass
-
+            
+        
         def _save_sum():
             _apply_entrada_summary_changes(cong_obj.id, start, end, edited)
             st.toast("💾 Alterações salvas.", icon="✅")
