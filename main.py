@@ -206,6 +206,36 @@ label, [data-testid="stWidgetLabel"]{ font-size: 1.02rem; }
 hr{ opacity: .6; }
 </style>
 """
+# === Cores por formulário (Lançamentos) ===
+BUTTONS_CSS = """
+<style>
+/* ENTRADAS: verde */
+form[aria-label="form_entrada"] .stButton>button{
+  background:#16a34a !important; border-color:#16a34a !important; color:#fff !important;
+}
+form[aria-label="form_entrada"] .stButton>button:hover{
+  background:#15803d !important; border-color:#15803d !important;
+}
+
+/* DIZIMISTAS: azul */
+form[aria-label="form_dizimo"] .stButton>button{
+  background:#1d4ed8 !important; border-color:#1d4ed8 !important; color:#fff !important;
+}
+form[aria-label="form_dizimo"] .stButton>button:hover{
+  background:#1e40af !important; border-color:#1e40af !important;
+}
+
+/* SAÍDAS: vermelho (mantém) */
+form[aria-label="form_saida"] .stButton>button{
+  background:#dc2626 !important; border-color:#dc2626 !important; color:#fff !important;
+}
+form[aria-label="form_saida"] .stButton>button:hover{
+  background:#b91c1c !important; border-color:#b91c1c !important;
+}
+</style>
+"""
+st.markdown(BUTTONS_CSS, unsafe_allow_html=True)
+
 CSS_TABLE_BOOST = """
 <style>
 /* Aumenta o tamanho da fonte APENAS do conteúdo das células */
