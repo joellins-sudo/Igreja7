@@ -207,53 +207,6 @@ hr{ opacity: .6; }
 </style>
 """
 # === Cores dos botões por formulário (Lançamentos) — mapeado pelos keys dos forms ===
-BUTTONS_CSS = """
-<style>
-/* Aponta direto para cada st.form pelo aria-label = key do form */
-
-/* ENTRADA = verde */
-form[data-testid="stForm"][aria-label="form_entrada"] .stButton>button{
-  background:#16a34a !important;  /* verde */
-  border-color:#16a34a !important;
-  color:#fff !important; font-weight:700 !important;
-}
-form[data-testid="stForm"][aria-label="form_entrada"] .stButton>button:hover{
-  background:#15803d !important; border-color:#15803d !important;
-}
-
-/* DÍZIMISTA = azul */
-form[data-testid="stForm"][aria-label="form_dizimo"] .stButton>button{
-  background:#1d4ed8 !important;  /* azul */
-  border-color:#1d4ed8 !important;
-  color:#fff !important; font-weight:700 !important;
-}
-form[data-testid="stForm"][aria-label="form_dizimo"] .stButton>button:hover{
-  background:#1e40af !important; border-color:#1e40af !important;
-}
-
-/* SAÍDA = vermelho */
-form[data-testid="stForm"][aria-label="form_saida"] .stButton>button{
-  background:#dc2626 !important;  /* vermelho */
-  border-color:#dc2626 !important;
-  color:#fff !important; font-weight:700 !important;
-}
-form[data-testid="stForm"][aria-label="form_saida"] .stButton>button:hover{
-  background:#b91c1c !important; border-color:#b91c1c !important;
-}
-
-/* Fallback por ordem, caso sua versão do Streamlit não exponha aria-label */
-[data-testid="stAppViewContainer"] form[data-testid="stForm"]:nth-of-type(1) .stButton>button{
-  background:#16a34a !important; border-color:#16a34a !important; color:#fff !important;
-}
-[data-testid="stAppViewContainer"] form[data-testid="stForm"]:nth-of-type(2) .stButton>button{
-  background:#1d4ed8 !important; border-color:#1d4ed8 !important; color:#fff !important;
-}
-[data-testid="stAppViewContainer"] form[data-testid="stForm"]:nth-of-type(3) .stButton>button{
-  background:#dc2626 !important; border-color:#dc2626 !important; color:#fff !important;
-}
-</style>
-"""
-st.markdown(BUTTONS_CSS, unsafe_allow_html=True)
 
 # === Cores por formulário (Lançamentos) ===
 
@@ -280,6 +233,49 @@ CSS_TABLE_BOOST = """
 st.markdown(CSS_TABLE_BOOST, unsafe_allow_html=True)
 
 st.markdown(CSS, unsafe_allow_html=True)
+
+# === Cores dos botões de submit pelos KEYS dos botões ===
+SUBMIT_COLORS_CSS = """
+<style>
+/* ENTRADA = verde */
+[data-st-key="sb_entrada"] button,
+[data-st-key="sb_entrada"] .stButton>button{
+  background:#16a34a !important;  /* verde */
+  border-color:#16a34a !important;
+  color:#fff !important; font-weight:700 !important;
+}
+[data-st-key="sb_entrada"] button:hover,
+[data-st-key="sb_entrada"] .stButton>button:hover{
+  background:#15803d !important; border-color:#15803d !important;
+}
+
+/* DÍZIMO = azul */
+[data-st-key="sb_dizimo"] button,
+[data-st-key="sb_dizimo"] .stButton>button{
+  background:#1d4ed8 !important;  /* azul */
+  border-color:#1d4ed8 !important;
+  color:#fff !important; font-weight:700 !important;
+}
+[data-st-key="sb_dizimo"] button:hover,
+[data-st-key="sb_dizimo"] .stButton>button:hover{
+  background:#1e40af !important; border-color:#1e40af !important;
+}
+
+/* SAÍDA = vermelho */
+[data-st-key="sb_saida"] button,
+[data-st-key="sb_saida"] .stButton>button{
+  background:#dc2626 !important;  /* vermelho */
+  border-color:#dc2626 !important;
+  color:#fff !important; font-weight:700 !important;
+}
+[data-st-key="sb_saida"] button:hover,
+[data-st-key="sb_saida"] .stButton>button:hover{
+  background:#b91c1c !important; border-color:#b91c1c !important;
+}
+</style>
+"""
+st.markdown(SUBMIT_COLORS_CSS, unsafe_allow_html=True)
+
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
@@ -1693,7 +1689,7 @@ def page_lancamentos(user: "User"):
                 key="ent_valor"
             )
 
-            if st.form_submit_button("Salvar ENTRADA", type="primary"):
+            if st.form_submit_button("Salvar ENTRADA", type="primary", key="sb_entrada"):
                 with SessionLocal() as _db:
                     cat_name = ent_cat
                     if ent_flag_missoes:
@@ -1741,7 +1737,7 @@ def page_lancamentos(user: "User"):
                 key="dz_payment_method"
             )
 
-            if st.form_submit_button("Salvar DIZIMISTA", type="primary"):
+            if st.form_submit_button("Salvar DIZIMISTA", type="primary", key="sb_dizimo"):
                 nome = (dz_nome or "").strip()
                 if not nome:
                     st.error("Informe o nome do dizimista.")
@@ -1782,7 +1778,7 @@ def page_lancamentos(user: "User"):
                 key="sai_valor"
             )
 
-            if st.form_submit_button("Salvar SAÍDA", type="primary"):
+            if st.form_submit_button("Salvar SAÍDA", type="primary", key="sb_saida"):
                 with SessionLocal() as _db:
                     cat_obj = _db.scalar(select(Category).where(Category.name == sai_cat))
                     if not cat_obj:
