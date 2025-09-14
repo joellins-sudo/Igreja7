@@ -51,49 +51,83 @@ ADJ_ENTRY_AGG_DESC = "[Ajuste total de entradas (mês, sede)]"
 ADJ_OUT_AGG_DESC   = "[Ajuste total de saídas (mês, sede)]"
 
 # ===================== ST CONFIG / THEME =====================
+# ===================== ST CONFIG / THEME =====================
+
 st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
 
 CSS = """
 <style>
-:root{
-  --brand:#0f172a; --brand-2:#1d4ed8; --accent:#16a34a; --danger:#dc2626; --muted:#6b7280;
-  --bg:#f8fafc; --card:#ffffff; --ring:#e5e7eb;
+/* Aumenta a base e deixa tudo semibold */
+html, body, .stApp {
+  font-size: 18px !important;        /* aumente para 19px se quiser ainda maior */
+  font-weight: 600 !important;        /* "negrito leve" (semibold) para o texto geral */
 }
-html, body { background: var(--bg); }
-header[data-testid="stHeader"]{ background: linear-gradient(180deg,#ffffff, #f6f9ff) !important; border-bottom:1px solid var(--ring); }
-.block-container{ padding-top: .9rem !important; }
-[data-testid="stSidebar"]{ background: linear-gradient(180deg,#ffffff,#fbfdff); border-right:1px solid var(--ring); }
-[data-testid="stSidebar"] img{ border-radius: .6rem; border:1px solid var(--ring); box-shadow: 0 4px 16px rgba(0,0,0,.06); }
-.page-title{ font-family:'Nunito','Inter',system-ui; font-size:36px; font-weight:900; letter-spacing:.4px; color: var(--brand); margin:.25rem 0 1rem; }
-h2, .stMarkdown h2, .st-subheader{ color:#0f172a!important; font-weight:900 !important; }
-.st-container-card{ border: 1px solid var(--ring); border-radius: 1rem; padding: 1rem; margin-bottom: 1.15rem; background: var(--card); box-shadow:0 10px 30px rgb(31 58 138 / .06), 0 2px 8px rgb(0 0 0 /.04); position: relative; }
-.st-container-card::before{ content:""; position: absolute; left:0; top:0; bottom:0; width:6px; background: linear-gradient(180deg,var(--brand-2), var(--brand)); border-top-left-radius:1rem; border-bottom-left-radius:1rem; }
-div[data-testid="stMetric"]{ padding: .75rem .9rem; border:1px solid var(--ring); border-radius:.9rem; background:var(--card); box-shadow:0 1px 2px rgb(0 0 0 /.06); }
-div[data-testid="stMetricLabel"]{ color:#334155; font-weight:800; }
-div[data-testid="stMetricValue"]{ font-size:26px!important; line-height:1.15!important; white-space:nowrap!important; font-weight:900!important; }
-.stat-card{ border:1px solid var(--ring); border-radius:.9rem; background:var(--card); padding:.9rem 1rem; box-shadow:0 1px 2px rgba(0,0,0,.06); transition: transform .15s ease, box-shadow .15s ease; position:relative; height:86px; display:flex; flex-direction:column; justify-content:center; }
-.stat-card:hover{ transform: translateY(-2px); box-shadow: 0 12px 22px rgba(31,58,138,.12), 0 4px 8px rgba(0,0,0,.08); }
-.stat-label{ font-size:.92rem; color:#334155; font-weight:800; margin-bottom:.18rem; }
-.stat-value{ font-size:1.25rem; font-weight:900; color:#111827; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.stat-card .tooltip{ display:none; position:absolute; left:12px; top:calc(100% + 6px); background:#0f172a; color:#fff; font-weight:700; padding:.45rem .6rem; border-radius:.5rem; white-space:nowrap; z-index:100; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
-.stat-card:hover .tooltip{ display:block; }
-label, .stTextInput label, .stSelectbox label, .stNumberInput label{ color:#0f172a; font-weight:800; }
-.stTextInput input, .stNumberInput input, .stDateInput input{ border:1px solid var(--ring)!important; border-radius:.65rem!important; background:#fff!important; }
-.stSelectbox [data-baseweb="select"]>div{ border:1px solid var(--ring)!important; border-radius:.65rem!important; background:#fff!important; }
-.stTextInput input:focus, .stNumberInput input:focus, .stDateInput input:focus{ outline:none!important; border-color:#93c5fd!important; box-shadow:0 0 0 4px rgba(37,99,235,.18)!important; }
-.stButton>button{ border:1px solid var(--ring)!important; color:#fff!important; background: linear-gradient(180deg,#3b82f6,#2563eb)!important; font-weight:900!important; border-radius:.7rem!important; padding:.52rem .95rem!important; box-shadow:0 2px 6px rgba(37,99,235,.25)!important; }
-.stButton>button:hover{ filter:brightness(1.03); transform:translateY(-1px); }
-.stDownloadButton>button{ border:1px solid var(--ring)!important; color:#0f172a!important; background:#fff!important; border-radius:.7rem!important; font-weight:900!important; }
-[data-testid="stDataFrame"]{ border:1px solid var(--ring); border-radius:.9rem; overflow:hidden; box-shadow:0 1px 2px rgba(0,0,0,.04); }
-[data-testid="stDataFrame"] thead tr th{ position:sticky; top:0; z-index:2; background:#f1f5f9!important; font-weight:900!important; color:#0f172a!important; border-bottom:1px solid var(--ring)!important; }
-[data-testid="stDataFrame"] tbody tr:nth-child(even) td{ background:#fcfcfd; }
-[data-testid="stDataFrame"] tbody tr:hover td{ background:#f8fbff; }
-.st-expander{ border:1px solid var(--ring)!important; border-radius:.9rem!important; background:#fff!important; box-shadow:0 4px 16px rgb(31 58 138 /.06)!important; }
-.st-expanderHeader{ font-weight:900!important; color:#0f172a!important; }
-.small-note{ color: var(--muted); font-size:.92rem; }
-.cong-title{ font-weight:900; font-size:1.05rem; color:#0f172a; margin-bottom:.35rem; }
+
+/* Títulos principais que você já usa com class='page-title' */
+.page-title {
+  font-size: 2.2rem !important;
+  font-weight: 800 !important;        /* bem destacado */
+  margin: 0 0 0.5rem 0 !important;
+}
+
+/* Labels dos widgets (inputs, selects, radios) */
+label, div[data-testid="stWidgetLabel"] p, div[data-testid="stWidgetLabel"] {
+  font-weight: 700 !important;
+}
+
+/* Texto padrão de markdown */
+.block-container .stMarkdown p, .markdown-text-container p {
+  font-weight: 600 !important;
+}
+
+/* Tabelas: DataFrame e Data Editor */
+div[data-testid="stDataFrame"] table,
+div[data-testid="stDataEditor"] table {
+  font-size: 1rem !important;         /* ~18px por causa do html 18px */
+  font-weight: 600 !important;
+}
+
+/* Cabeçalhos das tabelas (um pouco mais fortes) */
+div[data-testid="stDataFrame"] th, 
+div[data-testid="stDataEditor"] th {
+  font-weight: 800 !important;
+}
+
+/* Métricas (st.metric) — valor grande e bem negrito */
+div[data-testid="stMetricValue"] {
+  font-size: 1.6rem !important;
+  font-weight: 800 !important;
+}
+div[data-testid="stMetricLabel"] {
+  font-weight: 700 !important;
+}
+
+/* Botões (inclusive primários) */
+button[kind="primary"], button, .stDownloadButton button {
+  font-weight: 800 !important;
+  font-size: 1rem !important;
+}
+
+/* Seus cards de ranking (se estiver usando a classe .stat-card do render_stat_card) */
+.stat-card {
+  border-radius: 14px;
+  padding: 14px 16px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+  background: #ffffff;
+}
+.stat-card .stat-label {
+  font-size: 0.95rem;
+  font-weight: 700;
+  opacity: 0.85;
+}
+.stat-card .stat-value {
+  font-size: 1.2rem;
+  font-weight: 800;
+  margin-top: 6px;
+}
 </style>
 """
+
 st.markdown(CSS, unsafe_allow_html=True)
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
