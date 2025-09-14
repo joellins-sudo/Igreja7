@@ -1730,7 +1730,8 @@ def page_lancamentos(user: "User"):
             f"<div class='cong-title'>CONGREGAÇÃO: {cong_obj.name.upper()}</div>",
             unsafe_allow_html=True
         )
-
+        
+    
         # ===================== ENTRADA (Doação) — VERDE =====================
         st.markdown('<div class="adrf-card adrf-entrada">', unsafe_allow_html=True)
         st.markdown("<h3 class='adrf-section-title'>Lançar ENTRADA (Doação)</h3>", unsafe_allow_html=True)
@@ -1791,8 +1792,142 @@ def page_lancamentos(user: "User"):
                     _db.commit()
                     st.success("Entrada registrada.")
         st.markdown("</div>", unsafe_allow_html=True)
+        # ===================== ENTRADAS EM TABELA (Dízimo & Oferta) =====================
+st.markdown('<div class="adrf-card adrf-entrada">', unsafe_allow_html=True)
+st.markdown("<h3 class='adrf-section-title'>Lançar ENTRADAS em Tabela (Dízimo & Oferta)</h3>", unsafe_allow_html=True)
+
+with st.form("form_entrada_grid", clear_on_submit=True):
+    # linhas iniciais (pode editar, adicionar e remover)
+    init_rows = [
+        {"Data do Culto": today_bahia(), "Dízimo (R$)": 0.0, "PIX no Dízimo?": False, "Oferta (R$)": 0.0},
+        {"Data do Culto": today_bahia(), "Dízimo (R$)": 0.0, "PIX no Dízimo?": False, "Oferta (R$)": 0.0},
+        {"Data do Culto": today_bahia(), "Dízimo (R$)": 0.0, "PIX no Dízimo?": False, "Oferta (R$)": 0.0},
+    ]
+    df_grid = st.data_editor(
+        pd.DataFrame(init_rows),
+        use_container_width=True,
+        hide_index=True,
+        num_rows="dynamic",
+        column_config={
+            "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
+            "Dízimo (R$)": st.column_config.NumberColumn("Dízimo (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
+            "PIX no Dízimo?": st.column_config.CheckboxColumn("PIX no Dízimo?", default=False),
+            "Oferta (R$)": st.column_config.NumberColumn("Oferta (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
+        },
+        key="entrada_grid_editor",
+    )
+
+    ok_grid = st.form_submit_button("Salvar ENTRADAS da Tabela", type="primary", key="sb_entrada_grid")
+
+if 'ok_grid' in locals() and ok_grid:
+    with SessionLocal() as _db:
+        # garante categorias
+        cats_in = categories_for_type(_db, TYPE_IN)
+        cat_diz = next((c for c in cats_in if _norm(c.name) in ("dizimo","dízimo")), None)
+        cat_ofe = next((c for c in cats_in if _norm(c.name) == "oferta"), None)
+        if not (cat_diz and cat_ofe):
+            st.error("Categorias 'Dízimo' e/ou 'Oferta' não encontradas.")
+            st.stop()
+
+        inseridos = 0
+        # percorre linhas e insere 1 ou 2 lançamentos por linha (conforme valores)
+        for _, r in df_grid.iterrows():
+            d = _to_date(r.get("Data do Culto"))
+            diz = float(_to_float_brl(r.get("Dízimo (R$)", 0.0)))
+            ofe = float(_to_float_brl(r.get("Oferta (R$)", 0.0)))
+            pix = bool(r.get("PIX no Dízimo?", False))
+
+            # Dízimo (como Transaction, com equivalência já tratada no seu código)
+            if diz > 0:
+                _db.add(Transaction(
+                    date=d, type=TYPE_IN, category_id=cat_diz.id, amount=diz,
+                    description=None, congregation_id=cong_obj.id,
+                    payment_method=("PIX" if pix else None)
+                ))
+                inseridos += 1
+
+            # Oferta
+            if ofe > 0:
+                _db.add(Transaction(
+                    date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=ofe,
+                    description=None, congregation_id=cong_obj.id
+                ))
+                inseridos += 1
+
+        _db.commit()
+    st.success(f"{inseridos} lançamento(s) inserido(s) com sucesso.")
+    st.rerun()
+
+st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown("---")
+# ===================== ENTRADAS EM TABELA (Dízimo & Oferta) =====================
+st.markdown('<div class="adrf-card adrf-entrada">', unsafe_allow_html=True)
+st.markdown("<h3 class='adrf-section-title'>Lançar ENTRADAS em Tabela (Dízimo & Oferta)</h3>", unsafe_allow_html=True)
+
+with st.form("form_entrada_grid", clear_on_submit=True):
+    # linhas iniciais (pode editar/adicionar/remover à vontade)
+    init_rows = [
+        {"Data do Culto": today_bahia(), "Dízimo (R$)": 0.0, "PIX no Dízimo?": False, "Oferta (R$)": 0.0},
+        {"Data do Culto": today_bahia(), "Dízimo (R$)": 0.0, "PIX no Dízimo?": False, "Oferta (R$)": 0.0},
+        {"Data do Culto": today_bahia(), "Dízimo (R$)": 0.0, "PIX no Dízimo?": False, "Oferta (R$)": 0.0},
+    ]
+
+    df_grid = st.data_editor(
+        pd.DataFrame(init_rows),
+        use_container_width=True,
+        hide_index=True,
+        num_rows="dynamic",
+        column_config={
+            "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
+            "Dízimo (R$)": st.column_config.NumberColumn("Dízimo (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
+            "PIX no Dízimo?": st.column_config.CheckboxColumn("PIX no Dízimo?", default=False),
+            "Oferta (R$)": st.column_config.NumberColumn("Oferta (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
+        },
+        key="entrada_grid_editor",
+    )
+
+    ok_grid = st.form_submit_button("Salvar ENTRADAS da Tabela", type="primary", key="sb_entrada_grid")
+
+if ok_grid:
+    with SessionLocal() as _db:
+        # garante categorias Dízimo/Oferta
+        cats_in = categories_for_type(_db, TYPE_IN)
+        cat_diz = next((c for c in cats_in if _norm(c.name) in ("dizimo","dízimo")), None)
+        cat_ofe = next((c for c in cats_in if _norm(c.name) == "oferta"), None)
+        if not (cat_diz and cat_ofe):
+            st.error("Categorias 'Dízimo' e/ou 'Oferta' não encontradas.")
+            st.stop()
+
+        inseridos = 0
+        for _, r in df_grid.iterrows():
+            d = _to_date(r.get("Data do Culto"))
+            diz = float(_to_float_brl(r.get("Dízimo (R$)", 0.0)))
+            ofe = float(_to_float_brl(r.get("Oferta (R$)", 0.0)))
+            pix = bool(r.get("PIX no Dízimo?", False))
+
+            # Dízimo (Transaction) — payment_method="PIX" quando marcado
+            if diz > 0:
+                _db.add(Transaction(
+                    date=d, type=TYPE_IN, category_id=cat_diz.id, amount=diz,
+                    description=None, congregation_id=cong_obj.id,
+                    payment_method=("PIX" if pix else None)
+                ))
+                inseridos += 1
+
+            # Oferta (Transaction)
+            if ofe > 0:
+                _db.add(Transaction(
+                    date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=ofe,
+                    description=None, congregation_id=cong_obj.id
+                ))
+                inseridos += 1
+
+        _db.commit()
+    st.success(f"{inseridos} lançamento(s) inserido(s) com sucesso.")
+    st.rerun()
+
+st.markdown("</div>", unsafe_allow_html=True)
 
         # ===================== DÍZIMOS — AZUL =====================
         st.markdown('<div class="adrf-card adrf-dizimo">', unsafe_allow_html=True)
