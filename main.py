@@ -12,6 +12,11 @@
 # (ex.: esconder "ajuste" na ENTRADA, relatórios agregados editáveis da SEDE, etc.) continuam iguais.
 
 from __future__ import annotations
+# ===== UI extra (menu bonito com fallback) =====
+try:
+    import streamlit_antd_components as sac  # pip install streamlit-antd-components
+except Exception:
+    sac = None  # fallback p/ radio padrão
 
 import os
 from datetime import date, timedelta, datetime
@@ -56,117 +61,46 @@ ADJ_OUT_AGG_DESC   = "[Ajuste total de saídas (mês, sede)]"
 st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
 
 CSS = """
-<style>
-/* Aumenta a base e deixa tudo semibold */
-html, body, .stApp {
-  font-size: 17px !important;        /* aumente para 19px se quiser ainda maior */
-  font-weight: 600 !important;        /* "negrito leve" (semibold) para o texto geral */
+/* Base: fonte um pouco maior e títulos em negrito */
+html, body, [data-testid="stAppViewContainer"] * { font-weight: 520; }
+h1, h2, h3, .page-title { font-weight: 700 !important; }
+
+/* Título da página */
+.page-title { 
+  font-size: 1.9rem; 
+  margin: 0 0 0.6rem 0; 
+  letter-spacing: .2px; 
 }
 
-/* Títulos principais que você já usa com class='page-title' */
-.page-title {
-  font-size: 2.2rem !important;
-  font-weight: 800 !important;        /* bem destacado */
-  margin: 0 0 0.5rem 0 !important;
+/* Cards de métricas */
+[data-testid="stMetricValue"] { font-size: 1.6rem !important; font-weight: 750 !important; }
+[data-testid="stMetricLabel"] { opacity: .75; }
+
+/* Editor & tabelas mais “clean” */
+.st-emotion-cache-1v0mbdj, .st-emotion-cache-16txtl3 { border-radius: 12px; }
+.st-emotion-cache-1wmy9hl { border-radius: 14px; }
+
+/* Botões mais arredondados */
+button[kind="primary"], button[kind="secondary"] {
+  border-radius: 12px !important;
 }
 
-/* Labels dos widgets (inputs, selects, radios) */
-label, div[data-testid="stWidgetLabel"] p, div[data-testid="stWidgetLabel"] {
-  font-weight: 700 !important;
-}
-
-/* Texto padrão de markdown */
-.block-container .stMarkdown p, .markdown-text-container p {
-  font-weight: 600 !important;
-}
-
-/* Tabelas: DataFrame e Data Editor */
-div[data-testid="stDataFrame"] table,
-div[data-testid="stDataEditor"] table {
-  font-size: 1rem !important;         /* ~18px por causa do html 18px */
-  font-weight: 600 !important;
-}
-
-/* Cabeçalhos das tabelas (um pouco mais fortes) */
-div[data-testid="stDataFrame"] th, 
-div[data-testid="stDataEditor"] th {
-  font-weight: 800 !important;
-}
-
-/* Métricas (st.metric) — valor grande e bem negrito */
-div[data-testid="stMetricValue"] {
-  font-size: 1.6rem !important;
-  font-weight: 800 !important;
-}
-div[data-testid="stMetricLabel"] {
-  font-weight: 700 !important;
-}
-
-/* Botões (inclusive primários) */
-button[kind="primary"], button, .stDownloadButton button {
-  font-weight: 800 !important;
-  font-size: 1rem !important;
-}
-
-/* Seus cards de ranking (se estiver usando a classe .stat-card do render_stat_card) */
+/* Seus cartões estatísticos (classe usada no app) */
 .stat-card {
-  border-radius: 14px;
-  padding: 14px 16px;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.06);
   background: #ffffff;
+  border: 1px solid #e9e9ee;
+  border-radius: 16px;
+  padding: 14px 16px;
+  box-shadow: 0 2px 8px rgba(10, 10, 35, .04);
 }
-.stat-card .stat-label {
-  font-size: 0.95rem;
-  font-weight: 700;
-  opacity: 0.85;
-}
-.stat-card .stat-value {
-  font-size: 1.2rem;
-  font-weight: 800;
-  margin-top: 6px;
-}
-/* ===== Sidebar PILL NAV (Menu bonito) ===== */
-:root{
-  --pill-border:#e5e7eb;
-  --pill-hover:#d4d4d8;
-  --pill-selected:#eef2ff;
-  --pill-selected-border:#6366f1;
+.stat-label { font-size: .85rem; opacity: .75; }
+.stat-value { font-size: 1.05rem; font-weight: 700; margin-top: .2rem; }
+
+/* Sidebar com leve brilho */
+[data-testid="stSidebar"] {
+  background: linear-gradient(180deg, #f7f7fb 0%, #f2f3f9 100%);
 }
 
-[data-testid="stSidebar"] [role="radiogroup"]{
-  display:flex;
-  flex-direction:column;
-  gap:8px;
-}
-
-[data-testid="stSidebar"] [role="radiogroup"] label{
-  border:1px solid var(--pill-border);
-  border-radius:12px;
-  padding:10px 12px;
-  background:linear-gradient(180deg,#fff,#fafafa);
-  font-weight:700 !important;
-  cursor:pointer;
-  transition:all .15s ease;
-  box-shadow:0 1px 2px rgba(0,0,0,0.04);
-}
-
-[data-testid="stSidebar"] [role="radiogroup"] label:hover{
-  border-color:var(--pill-hover);
-  transform:translateY(-1px);
-  box-shadow:0 6px 16px rgba(0,0,0,0.08);
-}
-
-/* realce do item selecionado */
-[data-testid="stSidebar"] [role="radiogroup"] label:has([role="radio"][aria-checked="true"]){
-  background:linear-gradient(180deg,#eef2ff,#e0e7ff);
-  border-color:var(--pill-selected-border);
-  box-shadow:0 10px 20px rgba(99,102,241,0.18);
-}
-
-/* evita espaçamento estranho dentro de cada opção */
-[data-testid="stSidebar"] [role="radiogroup"] label p{
-  margin:0 !important;
-}
 
 </style>
 """
@@ -522,75 +456,91 @@ def order_congs_sede_first(congs: List[Congregation]) -> List[Congregation]:
 
 def sidebar_common(user: "User") -> str:
     """
-    Desenha o menu lateral (uma única vez) e retorna a página selecionada.
-    Se já tiver sido desenhado nesta execução, apenas retorna a última seleção.
+    Desenha o menu lateral uma única vez e retorna a página selecionada.
+    Usa streamlit-antd-components se disponível; senão, cai no st.radio.
     """
-    # Evita menu duplicado quando chamado dentro das páginas
+    # Se já renderizou nesta execução, retorna a última seleção
     if st.session_state.get("sidebar_rendered", False):
         return st.session_state.get("main_menu_page", "Visão Geral")
 
     with st.sidebar:
-        # Identidade
+        # Tema (se SAC estiver disponível)
+        if sac:
+            sac.theme(primary_color="#6C47FF", border_radius=14)
+
+        # Logo + identificação
         if os.path.exists(LOGO_PATH):
             st.image(LOGO_PATH, use_column_width=True)
         st.write(f"👤 **{user.username}** — *{user.role}*")
+        st.divider()
 
-        # Ícones bonitos
-        MENU_ICONS = {
-            "Lançamentos": "📥",
-            "Relatório de Entrada": "📊",
-            "Relatório de Saída": "📉",
-            "Relatório de Missões": "🌍",
-            "Relatório de Dizimistas": "🧾",
-            "Visão Geral": "🏁",
-            "Cadastro": "🛠️",
-        }
-
-        # Opções por perfil
+        # Opções por papel
         if user.role == "SEDE":
-            menu_options_plain = [
+            options_plain = [
                 "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
                 "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Cadastro"
             ]
         elif user.role == "TESOUREIRO":
-            menu_options_plain = [
+            options_plain = [
                 "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
                 "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"
             ]
         elif user.role == "TESOUREIRO MISSIONÁRIO":
-            menu_options_plain = ["Relatório de Missões"]
+            options_plain = ["Relatório de Missões"]
         else:
-            menu_options_plain = ["Visão Geral"]
+            options_plain = ["Visão Geral"]
 
-        # Mostra com ícones
-        menu_labels_pretty = [f"{MENU_ICONS.get(opt, '•')} {opt}" for opt in menu_options_plain]
+        # Seleção prévia (se houver)
+        _prev = st.session_state.get("main_menu_page")
+        _default_index = options_plain.index(_prev) if _prev in options_plain else 0
 
-        # Mantém a seleção anterior (se houver)
-        _prev_page = st.session_state.get("main_menu_page")
-        _default_index = menu_options_plain.index(_prev_page) if _prev_page in menu_options_plain else 0
+        # ===== Menu bonito (SAC) =====
+        if sac:
+            ICONS = {
+                "Lançamentos": "upload",
+                "Relatório de Entrada": "bar-chart",
+                "Relatório de Saída": "line-chart",
+                "Relatório de Missões": "global",
+                "Relatório de Dizimistas": "profile",
+                "Visão Geral": "dashboard",
+                "Cadastro": "tool",
+            }
+            items = [sac.MenuItem(name=opt, icon=ICONS.get(opt, "dot-chart")) for opt in options_plain]
+            page = sac.menu(
+                items=items,
+                index=_default_index,
+                size="large",
+                variant="filled",
+                key=f"main_menu_{getattr(user, 'id', 'anon')}",
+            )
+        # ===== Fallback simples (radio) =====
+        else:
+            ICONS_TXT = {
+                "Lançamentos": "📥",
+                "Relatório de Entrada": "📊",
+                "Relatório de Saída": "📉",
+                "Relatório de Missões": "🌍",
+                "Relatório de Dizimistas": "🧾",
+                "Visão Geral": "🏁",
+                "Cadastro": "🛠️",
+            }
+            labels = [f"{ICONS_TXT.get(o,'•')} {o}" for o in options_plain]
+            sel = st.radio(
+                "Menu",
+                options=labels,
+                index=_default_index,
+                key=f"main_menu_nav_{getattr(user, 'id', 'anon')}",
+                label_visibility="collapsed",
+            )
+            page = options_plain[labels.index(sel)]
 
-        sel_label = st.radio(
-            "Menu",
-            options=menu_labels_pretty,
-            index=_default_index,
-            key=f"main_menu_nav_{getattr(user, 'id', 'anon')}",
-            label_visibility="collapsed",
-        )
-
-        # Converte para o texto puro (sem ícone)
-        sel_index = menu_labels_pretty.index(sel_label)
-        page = menu_options_plain[sel_index]
         st.session_state["main_menu_page"] = page
-
         st.divider()
-        if st.button("Sair", key=f"btn_logout_{getattr(user, 'id', 'anon')}"):
+        if st.button("Sair", key=f"logout_{getattr(user,'id','anon')}"):
             logout()
 
-        # Marca como renderizado para evitar duplicações
         st.session_state["sidebar_rendered"] = True
-
         return page
-
 
 # ======= NOVO: helper padrão para botões 'Salvar alterações' =======
 def _save_btn(on_click, key_suffix: str):
