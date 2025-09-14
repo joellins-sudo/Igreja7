@@ -211,6 +211,105 @@ hr{ opacity: .6; }
 # === Cores por formulário (Lançamentos) ===
 
 # Alias para manter compatibilidade com a linha 256
+APP_BUTTON_COLORS_CSS = """
+<style>
+/* ===================== PALETA (mude aqui as cores) ===================== */
+:root{
+  /* cor padrão para botões "Salvar alterações" e demais primários fora das seções */
+  --btn-primary:        #0ea5e9;
+  --btn-primary-hover:  #0284c7;
+
+  /* ENTRADA (verdinho) */
+  --btn-entrada:        #16a34a;
+  --btn-entrada-hover:  #15803d;
+
+  /* DÍZIMO (azul) */
+  --btn-dizimo:         #1d4ed8;
+  --btn-dizimo-hover:   #1e40af;
+
+  /* SAÍDA (vermelho) */
+  --btn-saida:          #dc2626;
+  --btn-saida-hover:    #b91c1c;
+}
+
+/* ===================== BASE: todos os botões PRIMARY ===================== */
+/* Corrige seletor: Streamlit usa atributo kind="primary" no <button> */
+.stButton > button[kind="primary"]{
+  background: var(--btn-primary) !important;
+  border-color: var(--btn-primary) !important;
+  color:#fff !important;
+  font-weight:700 !important;
+  border-radius:14px !important;
+  box-shadow:0 6px 16px rgba(0,0,0,.08) !important;
+}
+.stButton > button[kind="primary"]:hover{
+  background: var(--btn-primary-hover) !important;
+  border-color: var(--btn-primary-hover) !important;
+}
+
+/* ===================== ESPECÍFICOS POR SEÇÃO ===================== */
+/* IMPORTANTE: você já envolve os formulários com .adrf-entrada / .adrf-dizimo / .adrf-saida.
+   Usamos isso para aplicar as cores certas sem depender de chaves ou texto do botão. */
+
+/* ENTRADA */
+.adrf-entrada .stButton > button[kind="primary"]{
+  background: var(--btn-entrada) !important;
+  border-color: var(--btn-entrada) !important;
+}
+.adrf-entrada .stButton > button[kind="primary"]:hover{
+  background: var(--btn-entrada-hover) !important;
+  border-color: var(--btn-entrada-hover) !important;
+}
+
+/* DÍZIMO */
+.adrf-dizimo .stButton > button[kind="primary"]{
+  background: var(--btn-dizimo) !important;
+  border-color: var(--btn-dizimo) !important;
+}
+.adrf-dizimo .stButton > button[kind="primary"]:hover{
+  background: var(--btn-dizimo-hover) !important;
+  border-color: var(--btn-dizimo-hover) !important;
+}
+
+/* SAÍDA */
+.adrf-saida .stButton > button[kind="primary"]{
+  background: var(--btn-saida) !important;
+  border-color: var(--btn-saida) !important;
+}
+.adrf-saida .stButton > button[kind="primary"]:hover{
+  background: var(--btn-saida-hover) !important;
+  border-color: var(--btn-saida-hover) !important;
+}
+
+/* ===================== AJUSTES LEVES (opcionais) ===================== */
+/* Secundários um pouco mais fortes */
+.stButton > button[kind="secondary"]{
+  font-weight:650 !important;
+  border-radius:14px !important;
+}
+
+/* Botões dentro do DataFrame/DataEditor que porventura sejam "primary" */
+[data-testid="stDataFrame"] button[kind="primary"],
+[data-testid="stDataEditor"] button[kind="primary"]{
+  background: var(--btn-primary) !important;
+  border-color: var(--btn-primary) !important;
+  color:#fff !important;
+}
+[data-testid="stDataFrame"] button[kind="primary"]:hover,
+[data-testid="stDataEditor"] button[kind="primary"]:hover{
+  background: var(--btn-primary-hover) !important;
+  border-color: var(--btn-primary-hover) !important;
+}
+
+/* Download buttons (apenas estética) */
+.stDownloadButton > button{
+  border-radius:14px !important;
+  font-weight:650 !important;
+}
+</style>
+"""
+st.markdown(APP_BUTTON_COLORS_CSS, unsafe_allow_html=True)
+
 
 CSS_TABLE_BOOST = """
 <style>
@@ -1625,6 +1724,8 @@ def page_lancamentos(user: "User"):
     """
     st.markdown(_LAN_CSS, unsafe_allow_html=True)
 
+    
+
     with SessionLocal() as db:
         sidebar_common(user)
 
@@ -2517,26 +2618,44 @@ def page_visao_geral(user: "User"):
 
 # ===================== COLETA MISSÕES =====================
 def _collect_missions_data(db: Session, start: date, end: date, only_cong_id: Optional[int] = None):
-    q_in = select(Transaction).options(joinedload(Transaction.congregation), joinedload(Transaction.category)).where(
-        Transaction.date >= start,
-        Transaction.date < end,
-        Transaction.type == TYPE_IN,
-        Transaction.category.has(Category.name.in_(("Missões", "missões")))
-    ).order_by(Transaction.date)
+    # ENTRADAS: Missões (qualquer variação de acento/caso)
+    q_in = (
+        select(Transaction)
+        .options(joinedload(Transaction.congregation), joinedload(Transaction.category))
+        .join(Category, Transaction.category_id == Category.id)
+        .where(
+            Transaction.date >= start,
+            Transaction.date < end,
+            Transaction.type == TYPE_IN,
+            func.lower(Category.name).in_(("missões", "missoes"))
+        )
+        .order_by(Transaction.date)
+    )
     if only_cong_id:
         q_in = q_in.where(Transaction.congregation_id == only_cong_id)
     entradas_missoes = db.scalars(q_in).all()
-    
-    q_out = select(Transaction).options(joinedload(Transaction.congregation), joinedload(Transaction.category)).where(
-        Transaction.date >= start,
-        Transaction.date < end,
-        Transaction.type == TYPE_OUT,
-        Transaction.category.has(Category.name.in_(("Missões (Saída)", "missões (saída)")))
-    ).order_by(Transaction.date)
+
+    # SAÍDAS: Missões (Saída) – cobre acentos/sem acentos
+    saida_variants = (
+        "missões (saída)", "missoes (saida)",
+        "missões (saida)", "missoes (saída)"
+    )
+    q_out = (
+        select(Transaction)
+        .options(joinedload(Transaction.congregation), joinedload(Transaction.category))
+        .join(Category, Transaction.category_id == Category.id)
+        .where(
+            Transaction.date >= start,
+            Transaction.date < end,
+            Transaction.type == TYPE_OUT,
+            func.lower(Category.name).in_(saida_variants)
+        )
+        .order_by(Transaction.date)
+    )
     if only_cong_id:
         q_out = q_out.where(Transaction.congregation_id == only_cong_id)
     saidas_missoes = db.scalars(q_out).all()
-    
+
     return entradas_missoes, saidas_missoes
 
 def build_missions_report_pdf(ref: date, entradas: list, saidas: list) -> bytes:
