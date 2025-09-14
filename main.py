@@ -123,8 +123,8 @@ label, [data-testid="stWidgetLabel"]{ font-size: 1.02rem; }
 
 /* ==================== MÉTRICAS ==================== */
 [data-testid="stMetricValue"]{
-  font-size: 1.8rem !important;
-  font-weight: 1200 !important;
+  font-size: 1.9rem !important;
+  font-weight: 780 !important;
 }
 [data-testid="stMetricLabel"]{ font-size: 1.0rem; opacity: .8; }
 
@@ -155,6 +155,24 @@ label, [data-testid="stWidgetLabel"]{ font-size: 1.02rem; }
 hr{ opacity: .6; }
 </style>
 """
+CSS_TABLE_BOOST = """
+<style>
+/* Aumenta o tamanho da fonte APENAS do conteúdo das células */
+[data-testid="stDataFrame"] [role="gridcell"] *,
+[data-testid="stDataEditor"] [role="gridcell"] *{
+  font-size: 3.18rem !important;   /* ajuste aqui: 1.10–1.30rem */
+  line-height: 1.55 !important;
+}
+
+/* Cabeçalhos das colunas um pouco maiores e mais fortes */
+[data-testid="stDataFrame"] [role="columnheader"] *,
+[data-testid="stDataEditor"] [role="columnheader"] *{
+  font-size: 1.08rem !important;
+  font-weight: 700 !important;
+}
+</style>
+"""
+st.markdown(CSS_TABLE_BOOST, unsafe_allow_html=True)
 
 st.markdown(CSS, unsafe_allow_html=True)
 
