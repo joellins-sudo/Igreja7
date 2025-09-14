@@ -521,79 +521,66 @@ def current_user():
         return db.get(User, uid)
 
 def login_ui():
-    # CSS ADRF
+    # CSS base (o seu ADRF_LOGIN_CSS pode continuar)
     st.markdown(ADRF_LOGIN_CSS, unsafe_allow_html=True)
 
-    # Centraliza o conteúdo na viewport e remove espaços do Streamlit
-    CENTER_LOGIN_CSS = """
-<style>
-  html, body, [data-testid="stAppViewContainer"]{ height:100%; }
-  /* faz a área principal virar um container centralizado */
-  [data-testid="stAppViewContainer"] > .main{
-    display:flex; align-items:center; justify-content:center;
-    min-height:100vh; padding:0 !important;
-  }
-  /* opcional: some com header/rodapé do Streamlit na tela de login */
-  header[data-testid="stHeader"]{ display:none; }
-  footer { visibility:hidden; }
-</style>
+    # === Centraliza a viewport e transforma o st.form em um "card" ===
+    LOGIN_CARD_CSS = """
+    <style>
+      /* centraliza tudo vertical/horizontal */
+      [data-testid="stAppViewContainer"] > .main{
+        display:flex; align-items:center; justify-content:center;
+        min-height:100vh; padding:0 !important;
+      }
+      header[data-testid="stHeader"]{ display:none; }
+      footer{ visibility:hidden; }
+
+      /* deixa o formulário com cara de cartão e largura fixa */
+      form[data-testid="stForm"]{
+        width:520px; max-width:92vw; margin:0 auto;
+        background:#fff; border:1px solid #E6E8F0; border-radius:14px;
+        box-shadow:0 10px 30px rgba(16,24,40,.08);
+        padding:28px 22px;
+      }
+      /* inputs e botão mais bonitos dentro do card */
+      form[data-testid="stForm"] .stTextInput>div>div>input,
+      form[data-testid="stForm"] .stPassword>div>div>input{
+        height:44px; font-size:1rem;
+      }
+      form[data-testid="stForm"] .stButton>button{
+        width:100%; height:44px; font-weight:700; border-radius:10px;
+      }
+    </style>
     """
-    st.markdown(CENTER_LOGIN_CSS, unsafe_allow_html=True)
+    st.markdown(LOGIN_CARD_CSS, unsafe_allow_html=True)
 
-    # cartão
-    st.markdown("<div class='adrf-wrap'><div class='adrf-card'><div class='body'>",
-                unsafe_allow_html=True)
+    # === (REMOVA) Qualquer wrapper HTML aberto antes tipo:
+    # st.markdown("<div class='adrf-wrap'><div class='adrf-card'><div class='body'>", unsafe_allow_html=True)
+    # ... e o fechamento correspondente. Eles não "abraçam" widgets do Streamlit e viram um card vazio no topo.
 
-    # FORM (mesma lógica do seu backend)
-    st.markdown("<div class='adrf-form'>", unsafe_allow_html=True)
-
-    # Usuário
-    st.markdown("<div class='group'>", unsafe_allow_html=True)
-    st.markdown("<div class='ico'>👤</div>", unsafe_allow_html=True)
-    with st.container():
-        st.markdown("<div class='field'>", unsafe_allow_html=True)
-        u = st.text_input("Usuário", key="adrf_user", label_visibility="collapsed", placeholder="Usuário")
-        st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    # Senha
-    st.markdown("<div class='group'>", unsafe_allow_html=True)
-    st.markdown("<div class='ico'>🔒</div>", unsafe_allow_html=True)
-    with st.container():
-        st.markdown("<div class='field'>", unsafe_allow_html=True)
-        p = st.text_input("Senha", type="password", key="adrf_pass", label_visibility="collapsed", placeholder="Senha")
-        st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    # Órgão (visual)
+    # LOGO (opcional)
     try:
-        with SessionLocal() as _db:
-            nomes_cong = [c.name for c in _db.scalars(select(Congregation).order_by(Congregation.name)).all()]
-        if not nomes_cong: nomes_cong = ["Sede"]
+        if os.path.exists(LOGO_PATH):
+            st.image(LOGO_PATH, caption=None, use_container_width=False, width=120)
+        else:
+            st.markdown(
+                "<div style='text-align:center; font:800 48px/1 Inter,system-ui; color:#1f66eb'>ADRF<span style='color:#74b816'>!</span></div>",
+                unsafe_allow_html=True
+            )
     except Exception:
-        nomes_cong = ["Sede"]
+        pass
 
-    st.markdown("<div class='group'>", unsafe_allow_html=True)
-    st.markdown("<div class='ico'>🏢</div>", unsafe_allow_html=True)
-    with st.container():
-        st.markdown("<div class='field'>", unsafe_allow_html=True)
-        orgao = st.selectbox("Órgão", options=nomes_cong, index=0, key="adrf_orgao",
-                             label_visibility="collapsed", placeholder="Órgão")
-        st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    # === FORMULÁRIO DE LOGIN (dentro do card) ===
+    with st.form("adrf_login_form", clear_on_submit=False):
+        u = st.text_input("Usuário", placeholder="Usuário", key="adrf_user")
+        p = st.text_input("Senha", type="password", placeholder="Senha", key="adrf_pass")
 
-    # Botão
-    st.markdown("<div class='adrf-btn'>", unsafe_allow_html=True)
-    clicked = st.button("ACESSAR")
-    st.markdown("</div>", unsafe_allow_html=True)
+        # Se você tiver combo de órgão/perfil, coloque aqui também:
+        # org = st.selectbox("Órgão", ["PCPE", "PMPE", "SDS", ...])
 
-    # Link 2FA (visual)
-    st.markdown("<div class='adrf-2fa'><a href='#'>Autenticação em dois fatores</a></div>", unsafe_allow_html=True)
+        ok = st.form_submit_button("ACESSAR")
 
-    st.markdown("</div>", unsafe_allow_html=True)  # fecha .adrf-form
-
-    # Autenticação (igual ao seu original)
-    if clicked:
+    if ok:
         with SessionLocal() as db:
             user = db.scalar(select(User).where(User.username == u))
             if user and verify_password(p, user.password_hash):
@@ -603,14 +590,11 @@ def login_ui():
                     token = _make_token({"uid": int(user.id)})
                     cm.set(COOKIE_NAME, token, expires_at=datetime.utcnow()+timedelta(days=30), key="auth_set")
                     _update_last_active(cm)
-                    cm.set("ADRF_ORGAO", orgao, expires_at=datetime.utcnow()+timedelta(days=365), key="org_set")
                 except Exception:
                     st.warning("Login salvo só na sessão atual. Instale 'extra-streamlit-components' para lembrar o login.")
                 st.rerun()
             else:
                 st.error("Usuário ou senha inválidos.")
-
-    st.markdown("</div></div>", unsafe_allow_html=True)  # fecha cartão
 
 # ===================== HELPERS =====================
 def is_admin_general(user: "User") -> bool:
