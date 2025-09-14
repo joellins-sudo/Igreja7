@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# ========== Standard library ==========
+# ===== Standard library =====
 import os
 import json
 import base64
@@ -9,20 +9,45 @@ import time
 import hashlib
 import unicodedata as ud
 import locale as _locale
+from io import BytesIO
 from datetime import date, timedelta, datetime
 from typing import Optional, List, Tuple, Dict, Any
 from collections import defaultdict, Counter
 
-# ========== Third-party ==========
+# ===== Third-party =====
 import pandas as pd
 import streamlit as st
 from streamlit.components.v1 import html as st_html
 
-# Menu bonito (SAC). Se não estiver instalado, segue com fallback.
+# SQLAlchemy
+from sqlalchemy import (
+    select, func, String, Date, Float, ForeignKey, create_engine, and_,
+)
+from sqlalchemy.orm import (
+    relationship, Mapped, mapped_column, sessionmaker, joinedload, Session, DeclarativeBase,
+)
+
+# ReportLab (PDF)
+from reportlab.lib.pagesizes import A4, portrait
+from reportlab.lib import colors
+from reportlab.lib.units import cm
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer
+from reportlab.lib.enums import TA_CENTER
+
+# SAC (menu bonito) – opcional
 try:
     import streamlit_antd_components as sac  # pip install streamlit-antd-components
 except Exception:
     sac = None
+
+# Fuso (Bahia/BR)
+try:
+    from zoneinfo import ZoneInfo
+    TZ_BA = ZoneInfo("America/Bahia")
+except Exception:
+    TZ_BA = None
+
 
 from sqlalchemy import (
     select, func, String, Date, Float, ForeignKey, create_engine, and_,
