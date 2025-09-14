@@ -59,7 +59,7 @@ CSS = """
 <style>
 /* Aumenta a base e deixa tudo semibold */
 html, body, .stApp {
-  font-size: 18px !important;        /* aumente para 19px se quiser ainda maior */
+  font-size: 17px !important;        /* aumente para 19px se quiser ainda maior */
   font-weight: 600 !important;        /* "negrito leve" (semibold) para o texto geral */
 }
 
