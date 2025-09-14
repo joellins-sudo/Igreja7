@@ -336,48 +336,59 @@ st.markdown(CSS, unsafe_allow_html=True)
 # === Cores dos botões de submit pelos KEYS dos botões ===
 SUBMIT_COLORS_CSS = """
 <style>
-/* ENTRADA = verde */
-[data-st-key="sb_entrada"] button,
-[data-st-key="sb_entrada"] .stButton>button{
-  background:#16a34a !important;  /* verde */
+/* ===== ENTRADA (form_entrada) — VERDE ===== */
+[data-testid="stForm"][data-st-key="form_entrada"] [data-testid="baseButton-primary"],
+[data-testid="stForm"][data-st-key="form_entrada"] button[kind="primary"],
+[data-testid="stForm"][data-st-key="form_entrada"] .stButton>button{
+  background:#16a34a !important;
   border-color:#16a34a !important;
-  color:#fff !important; font-weight:700 !important;
+  color:#fff !important;
+  font-weight:700 !important;
+  border-radius:14px !important;
 }
-[data-st-key="sb_entrada"] button:hover,
-[data-st-key="sb_entrada"] .stButton>button:hover{
-  background:#15803d !important; border-color:#15803d !important;
+[data-testid="stForm"][data-st-key="form_entrada"] [data-testid="baseButton-primary"]:hover,
+[data-testid="stForm"][data-st-key="form_entrada"] button[kind="primary"]:hover,
+[data-testid="stForm"][data-st-key="form_entrada"] .stButton>button:hover{
+  background:#15803d !important;
+  border-color:#15803d !important;
 }
 
-/* DÍZIMO = azul */
-[data-st-key="sb_dizimo"] button,
-[data-st-key="sb_dizimo"] .stButton>button{
-  background:#1d4ed8 !important;  /* azul */
+/* ===== DÍZIMO (form_dizimo) — AZUL ===== */
+[data-testid="stForm"][data-st-key="form_dizimo"] [data-testid="baseButton-primary"],
+[data-testid="stForm"][data-st-key="form_dizimo"] button[kind="primary"],
+[data-testid="stForm"][data-st-key="form_dizimo"] .stButton>button{
+  background:#1d4ed8 !important;
   border-color:#1d4ed8 !important;
-  color:#fff !important; font-weight:700 !important;
+  color:#fff !important;
+  font-weight:700 !important;
+  border-radius:14px !important;
 }
-[data-st-key="sb_dizimo"] button:hover,
-[data-st-key="sb_dizimo"] .stButton>button:hover{
-  background:#1e40af !important; border-color:#1e40af !important;
+[data-testid="stForm"][data-st-key="form_dizimo"] [data-testid="baseButton-primary"]:hover,
+[data-testid="stForm"][data-st-key="form_dizimo"] button[kind="primary"]:hover,
+[data-testid="stForm"][data-st-key="form_dizimo"] .stButton>button:hover{
+  background:#1e40af !important;
+  border-color:#1e40af !important;
 }
 
-/* SAÍDA = vermelho */
-[data-st-key="sb_saida"] button,
-[data-st-key="sb_saida"] .stButton>button{
-  background:#dc2626 !important;  /* vermelho */
+/* ===== SAÍDA (form_saida) — VERMELHO ===== */
+[data-testid="stForm"][data-st-key="form_saida"] [data-testid="baseButton-primary"],
+[data-testid="stForm"][data-st-key="form_saida"] button[kind="primary"],
+[data-testid="stForm"][data-st-key="form_saida"] .stButton>button{
+  background:#dc2626 !important;
   border-color:#dc2626 !important;
-  color:#fff !important; font-weight:700 !important;
+  color:#fff !important;
+  font-weight:700 !important;
+  border-radius:14px !important;
 }
-[data-st-key="sb_saida"] button:hover,
-[data-st-key="sb_saida"] .stButton>button:hover{
-  background:#b91c1c !important; border-color:#b91c1c !important;
+[data-testid="stForm"][data-st-key="form_saida"] [data-testid="baseButton-primary"]:hover,
+[data-testid="stForm"][data-st-key="form_saida"] button[kind="primary"]:hover,
+[data-testid="stForm"][data-st-key="form_saida"] .stButton>button:hover{
+  background:#b91c1c !important;
+  border-color:#b91c1c !important;
 }
 </style>
 """
 st.markdown(SUBMIT_COLORS_CSS, unsafe_allow_html=True)
-
-
-ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
-LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
 
 # ===================== LOCALE (fallback) =====================
 def _set_locale_ptbr():
@@ -1684,38 +1695,7 @@ def page_lancamentos(user: "User"):
       }
 
       /* Cores dos botões por seção */
-      .adrf-entrada .stButton>button{
-        background:#16a34a !important;   /* verde */
-        border-color:#16a34a !important;
-        color:#fff !important;
-        font-weight:700 !important;
-      }
-      .adrf-entrada .stButton>button:hover{
-        background:#15803d !important;
-        border-color:#15803d !important;
-      }
-
-      .adrf-dizimo .stButton>button{
-        background:#1d4ed8 !important;   /* azul */
-        border-color:#1d4ed8 !important;
-        color:#fff !important;
-        font-weight:700 !important;
-      }
-      .adrf-dizimo .stButton>button:hover{
-        background:#1e40af !important;
-        border-color:#1e40af !important;
-      }
-
-      .adrf-saida .stButton>button{
-        background:#dc2626 !important;   /* vermelho */
-        border-color:#dc2626 !important;
-        color:#fff !important;
-        font-weight:700 !important;
-      }
-      .adrf-saida .stButton>button:hover{
-        background:#b91c1c !important;
-        border-color:#b91c1c !important;
-      }
+      
 
       /* Inputs um pouco mais compactos nesta página */
       .adrf-card [data-testid="stForm"] input,
