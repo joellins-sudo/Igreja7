@@ -521,15 +521,17 @@ def order_congs_sede_first(congs: List[Congregation]) -> List[Congregation]:
     return (sede + others) if sede else others
 
 def sidebar_common(user: "User") -> str:
+    # Se a sidebar (menu) já foi renderizada nesta execução, só retorna a página atual
+    if st.session_state.get("sidebar_rendered", False):
+        return st.session_state.get("main_menu_page", "Visão Geral")
+
     with st.sidebar:
-        # Logo no topo (se existir)
+        # Logo e identificação (renderiza só na 1ª vez)
         if os.path.exists(LOGO_PATH):
             st.image(LOGO_PATH, use_column_width=True)
-
-        # Usuário logado
         st.write(f"👤 **{user.username}** — *{user.role}*")
 
-        # ===== Menu com "pílulas" e ícones =====
+        # ===== Menu com ícones =====
         MENU_ICONS = {
             "Lançamentos": "📥",
             "Relatório de Entrada": "📊",
@@ -540,7 +542,6 @@ def sidebar_common(user: "User") -> str:
             "Cadastro": "🛠️",
         }
 
-        # Opções conforme o perfil
         if user.role == "SEDE":
             menu_options_plain = [
                 "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
@@ -556,198 +557,32 @@ def sidebar_common(user: "User") -> str:
         else:
             menu_options_plain = ["Visão Geral"]
 
-        # Labels com ícones para exibição
         menu_labels_pretty = [f"{MENU_ICONS.get(opt, '•')} {opt}" for opt in menu_options_plain]
 
-        # Índice padrão persiste entre recarregamentos
+        # Índice padrão (persiste)
         _prev_page = st.session_state.get("main_menu_page")
-        if _prev_page in menu_options_plain:
-            _default_index = menu_options_plain.index(_prev_page)
-        else:
-            _default_index = 0
+        _default_index = menu_options_plain.index(_prev_page) if _prev_page in menu_options_plain else 0
 
         sel_label = st.radio(
             "Menu",
             options=menu_labels_pretty,
             index=_default_index,
-            key=f"main_menu_nav_{getattr(user, 'id', 'anon')}",  # chave única por usuário
-            label_visibility="collapsed"
+            key=f"main_menu_nav_{getattr(user, 'id', 'anon')}",
+            label_visibility="collapsed",
         )
 
-        # Converte de volta para o texto puro (sem ícone) para o roteamento
-        sel_index = menu_labels_prety_index = menu_labels_pretty.index(sel_label)
+        sel_index = menu_labels_pretty.index(sel_label)
         page = menu_options_plain[sel_index]
-
-        # Guarda a página escolhida para persistir
-        st.session_state["main_menu_page"] = page
+        st.session_state["main_menu_page"] = page  # persiste seleção
 
         st.divider()
-
-        # Botão sair com chave única
         if st.button("Sair", key=f"btn_logout_{getattr(user, 'id', 'anon')}"):
             logout()
 
-        # Retorna a página para o roteamento no main()
+        # Marca que a sidebar foi renderizada para evitar duplicações em chamadas futuras
+        st.session_state["sidebar_rendered"] = True
+
         return page
-
-
-# ======= NOVO: helper padrão para botões 'Salvar alterações' =======
-def _save_btn(on_click, key_suffix: str):
-    st.button("Salvar alterações", type="primary", key=f"btn_save_{key_suffix}", on_click=on_click)
-
-
-# ===================== APPLY CHANGES — LANÇAMENTOS / DÍZIMOS =====================
-def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: str, default_cong_id: Optional[int]):
-    def norm_df(df: pd.DataFrame) -> pd.DataFrame:
-        d = df.copy()
-        if "Valor" in d.columns:
-            d["Valor"] = d["Valor"].map(_to_float_brl)
-        if "Data" in d.columns:
-            d["Data"] = d["Data"].map(_to_date)
-        for c in ("Categoria","Descrição"):
-            if c in d.columns:
-                d[c] = d[c].astype(str).fillna("")
-        return d
-
-    o = norm_df(orig_df)
-    n = norm_df(edited_df)
-
-    old_ids = set(int(x) for x in o["ID"].tolist() if pd.notna(x))
-    new_ids = set(int(x) for x in n["ID"].tolist() if pd.notna(x) and int(x) > 0)
-    to_delete = list(old_ids - new_ids)
-    old_map = {int(r["ID"]): r for _, r in o.iterrows()}
-
-    with SessionLocal() as db:
-        cats = categories_for_type(db, tx_type)
-        cat_by_name = {c.name: c for c in cats}
-
-        if to_delete:
-            db.query(Transaction).filter(Transaction.id.in_(to_delete)).delete(synchronize_session=False)
-
-        for rid in sorted(new_ids & old_ids):
-            old = old_map[rid]
-            new = n.loc[n["ID"] == rid].iloc[0]
-            changed = False
-            t = db.get(Transaction, rid)
-            if not t:
-                continue
-            if old["Data"] != new["Data"]:
-                t.date = _to_date(new["Data"]); changed = True
-            if str(old.get("Categoria","")) != str(new.get("Categoria","")) and "Categoria" in n.columns:
-                cat = cat_by_name.get(str(new["Categoria"]))
-                if cat:
-                    t.category_id = cat.id; changed = True
-            if float(old["Valor"]) != float(new["Valor"]):
-                t.amount = float(new["Valor"]); changed = True
-            if (old.get("Descrição","") or "") != (new.get("Descrição","") or ""):
-                t.description = (new.get("Descrição","") or None); changed = True
-            # NOVO: permitir mudar congregação no editor (quando houver _cong_id)
-            if "_cong_id" in n.columns:
-                old_cid = int(old.get("_cong_id", 0) or 0)
-                new_cid = int(new.get("_cong_id", 0) or 0)
-                if new_cid and new_cid != old_cid:
-                    t.congregation_id = new_cid; changed = True
-            if changed:
-                db.add(t)
-
-        for _, row in n.iterrows():
-            rid = row.get("ID", None)
-            is_new = pd.isna(rid) or int(rid) <= 0 or int(rid) not in old_ids
-            if not is_new:
-                continue
-            data = _to_date(row.get("Data"))
-            amount = _to_float_brl(row.get("Valor"))
-            desc = str(row.get("Descrição","")).strip() or None
-            if "Categoria" in n.columns:
-                cat_name = str(row.get("Categoria","")).strip()
-                if not cat_name:
-                    continue
-                cat = cat_by_name.get(cat_name)
-                if not cat:
-                    continue
-            else:
-                # Missões (Saída) editor simples
-                cat = db.scalar(select(Category).where(Category.name == "Missões (Saída)"))
-                if not cat:
-                    continue
-            # NOVO: pegar congregação do próprio row (quando existir)
-            row_cid = int(row.get("_cong_id", 0) or 0)
-            cong_id = row_cid or default_cong_id
-            if cong_id is None:
-                if not o.empty:
-                    cong_id = int(o.iloc[0].get("_cong_id", 0)) or None
-            if cong_id is None:
-                continue
-            db.add(Transaction(
-                date=data, type=tx_type, category_id=cat.id, amount=float(amount),
-                description=desc, congregation_id=int(cong_id)
-            ))
-        db.commit()
-
-
-def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default_cong_id: Optional[int]):
-    def norm_df(df: pd.DataFrame) -> pd.DataFrame:
-        d = df.copy()
-        if "Valor" in d.columns:
-            d["Valor"] = d["Valor"].map(_to_float_brl)
-        if "Data" in d.columns:
-            d["Data"] = d["Data"].map(_to_date)
-        for c in ("Dizimista","Forma de Pagamento"):
-            if c in d.columns:
-                d[c] = d[c].astype(str).fillna("")
-        return d
-
-    o = norm_df(orig_df)
-    n = norm_df(edited_df)
-
-    old_ids = set(int(x) for x in o["ID"].tolist() if pd.notna(x))
-    new_ids = set(int(x) for x in n["ID"].tolist() if pd.notna(x) and int(x) > 0)
-    to_delete = list(old_ids - new_ids)
-    old_map = {int(r["ID"]): r for _, r in o.iterrows()}
-
-    with SessionLocal() as db:
-        if to_delete:
-            db.query(Tithe).filter(Tithe.id.in_(to_delete)).delete(synchronize_session=False)
-
-        for rid in sorted(new_ids & old_ids):
-            old = old_map[rid]
-            new = n.loc[n["ID"] == rid].iloc[0]
-            changed = False
-            t = db.get(Tithe, rid)
-            if not t:
-                continue
-            if old["Data"] != new["Data"]:
-                t.date = _to_date(new["Data"]); changed = True
-            if (old["Dizimista"] or "") != (new["Dizimista"] or ""):
-                t.tither_name = (new["Dizimista"] or ""); changed = True
-            if float(old["Valor"]) != float(new["Valor"]):
-                t.amount = float(new["Valor"]); changed = True
-            if (old["Forma de Pagamento"] or "") != (new["Forma de Pagamento"] or ""):
-                t.payment_method = (new["Forma de Pagamento"] or None); changed = True
-            if changed:
-                db.add(t)
-
-        for _, row in n.iterrows():
-            rid = row.get("ID", None)
-            is_new = pd.isna(rid) or int(rid) <= 0 or int(rid) not in old_ids
-            if not is_new:
-                continue
-            data = _to_date(row.get("Data"))
-            nome = str(row.get("Dizimista","")).strip()
-            amount = _to_float_brl(row.get("Valor"))
-            forma = str(row.get("Forma de Pagamento","")).strip() or None
-            if not nome:
-                continue
-            cong_id = default_cong_id
-            if cong_id is None and not o.empty:
-                cong_id = int(o.iloc[0].get("_cong_id", 0)) or None
-            if cong_id is None:
-                continue
-            db.add(Tithe(
-                date=data, tither_name=nome, amount=float(amount),
-                congregation_id=int(cong_id), payment_method=forma
-            ))
-        db.commit()
 
 # ===================== RELATÓRIO DE ENTRADA — TABELA ÚNICA (EDIT SUMÁRIO) =====================
 def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date) -> pd.DataFrame:
