@@ -69,33 +69,44 @@ st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
 LOGIN_CSS = """
 <style>
 /* Esconde header e sidebar na tela de login */
-[data-testid="stHeader"], [data-testid="stSidebar"] { display: none !important; }
+[data-testid="stHeader"], [data-testid="stSidebar"] { display:none !important; }
 
-/* Trava a viewport em 100vh e remove rolagem em todos os níveis */
-html, body, #root, .stApp,
-[data-testid="stAppViewContainer"] {
+/* Travar a viewport em 100vh e impedir rolagem */
+html, body {
   height: 100vh !important;
-  min-height: 100vh !important;
   overflow: hidden !important;
+  overscroll-behavior: none !important;
   background: #f5f7fb;
 }
 
-/* Zera respiros do container principal */
+/* O app inteiro fica fixo na viewport (sem scroll) */
+#root, .stApp {
+  position: fixed !important;
+  inset: 0 !important;           /* top/right/bottom/left = 0 */
+  overflow: hidden !important;
+}
+
+/* Zera respiros para não “sobrar” altura */
+[data-testid="stAppViewContainer"],
+[data-testid="stAppViewContainer"] .main,
 [data-testid="stAppViewContainer"] .main .block-container{
+  height: 100% !important;
+  min-height: 100% !important;
+  overflow: hidden !important;
   padding: 0 !important;
   margin: 0 !important;
 }
 
-/* Wrapper ocupa a tela toda e centraliza o cartão */
+/* Wrapper ocupa a tela e centraliza o cartão */
 .login-wrap{
-  position: fixed; inset: 0;           /* ocupa 100% da viewport */
+  position: fixed; inset: 0;
   display: flex; align-items: center; justify-content: center;
 }
 
-/* Cartão menor (o “quadrado” central) */
+/* Cartão (quadrado) central, compacto */
 .login-card{
   width: calc(100vw - 32px);
-  max-width: 420px;                    /* ajuste se quiser ainda menor */
+  max-width: 420px;
   background: #fff;
   border: 1px solid #E6E8F0; border-radius: 12px;
   box-shadow: 0 6px 20px rgba(16,24,40,.06);
@@ -124,10 +135,10 @@ html, body, #root, .stApp,
   font-size: 1rem; opacity: .65;
 }
 
-/* Botão de acessar */
+/* Botão */
 .login-btn .stButton>button{
-  width: 100%; height: 40px; border-radius: 10px;
-  font-weight: 700; background: #165DAA;
+  width:100%; height: 40px; border-radius: 10px;
+  font-weight:700; background:#165DAA;
 }
 </style>
 """
