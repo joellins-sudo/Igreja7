@@ -63,27 +63,69 @@ ADJ_OUT_AGG_DESC   = "[Ajuste total de saídas (mês, sede)]"
 st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
 
 # ================== CSS do cartão de login (estilo SEI) ==================
+# ================== CSS do cartão de login central ==================
 LOGIN_CSS = """
 <style>
-.login-wrap { min-height: calc(100vh - 4rem); display: grid; place-items: center; }
-.login-card {
-  width: 100%; max-width: 520px; background: #fff; border: 1px solid #E6E8F0;
-  border-radius: 14px; box-shadow: 0 6px 22px rgba(16,24,40,.06); padding: 28px 26px 22px;
-}
-.login-logo { display:flex; align-items:center; justify-content:center; margin-bottom: 18px; }
-.login-title { text-align:center; font-weight: 800; font-size: 2rem; color:#2075C8; letter-spacing:.2px; }
-.login-subtitle { text-align:center; margin-top: -6px; color:#475467; font-size:.95rem; }
+/* Esconde sidebar e header no login e centraliza tudo */
+[data-testid="stSidebar"]{ display:none !important; }
+[data-testid="stHeader"]{ display:none !important; }
 
+/* Área que centraliza o cartão vertical e horizontalmente */
+.login-wrap{
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: #f5f7fb;
+  padding: 1.5rem;
+}
+
+/* Cartão branco com borda suave (o “quadrado” do login) */
+.login-card{
+  width: 100%;
+  max-width: 520px;
+  background: #fff;
+  border: 1px solid #E6E8F0;
+  border-radius: 14px;
+  box-shadow: 0 6px 22px rgba(16,24,40,.06);
+  padding: 26px 24px 22px;
+}
+
+/* Título azul grande: AD RF! */
+.login-title{
+  text-align: center;
+  font-weight: 800;
+  font-size: 2.6rem;          /* ajuste aqui se quiser maior/menor */
+  color: #2075C8;
+  letter-spacing: .4px;
+  margin: 4px 0 2px 0;
+}
+
+/* Campos com ícone à esquerda (👤 / 🔒) */
 .login-form .stTextInput>div>div>input,
-.login-form .stPassword>div>div>input { font-size: 1.02rem; padding-left: 2.2rem; }
+.login-form .stPassword>div>div>input{
+  font-size: 1.05rem;
+  padding-left: 2.2rem;
+  height: 44px;
+}
 
 .icon-left{ position: relative; }
 .icon-left:before{
   content: attr(data-ico);
-  position:absolute; left:.55rem; top:.48rem; font-size: 1.05rem; opacity:.65;
+  position: absolute;
+  left: .55rem;
+  top: .48rem;
+  font-size: 1.05rem;
+  opacity: .65;
 }
 
-.login-btn .stButton>button{ width:100%; height:44px; font-weight:700; border-radius: 10px; }
+/* Botão “Acessar” ocupando toda a largura */
+.login-btn .stButton>button{
+  width: 100%;
+  height: 46px;
+  font-weight: 700;
+  border-radius: 10px;
+  background: #165DAA;
+}
 </style>
 """
 
@@ -513,26 +555,17 @@ def current_user():
         return db.get(User, uid)
 
 def login_ui():
+    # Aplica o CSS do login
     st.markdown(LOGIN_CSS, unsafe_allow_html=True)
 
+    # Container central
     st.markdown('<div class="login-wrap">', unsafe_allow_html=True)
     st.markdown('<div class="login-card">', unsafe_allow_html=True)
 
-    # Logo / título (usa seu LOGO_PATH se existir; senão, mostra "sei!")
-    showed_logo = False
-    try:
-        if os.path.exists(LOGO_PATH):
-            st.markdown('<div class="login-logo">', unsafe_allow_html=True)
-            st.image(LOGO_PATH, width=120)
-            st.markdown('</div>', unsafe_allow_html=True)
-            showed_logo = True
-    except Exception:
-        pass
-    if not showed_logo:
-        st.markdown('<div class="login-title">sei!</div>', unsafe_allow_html=True)
-    st.markdown('<div class="login-subtitle">Acesse sua conta</div>', unsafe_allow_html=True)
+    # Título (nome azul grande)
+    st.markdown('<div class="login-title">AD RF!</div>', unsafe_allow_html=True)
 
-    # Formulário: somente Usuário e Senha
+    # Formulário: apenas Usuário e Senha
     with st.form("login_form_simple", clear_on_submit=False):
         st.markdown('<div class="login-form">', unsafe_allow_html=True)
 
@@ -546,16 +579,20 @@ def login_ui():
 
         st.markdown('</div>', unsafe_allow_html=True)  # fecha .login-form
 
+        st.markdown('<div class="login-btn">', unsafe_allow_html=True)
         submit = st.form_submit_button("ACESSAR", use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown('</div>', unsafe_allow_html=True)  # fecha .login-card
-    st.markdown('</div>', unsafe_allow_html=True)  # fecha .login-wrap
+    # Fecha containers
+    st.markdown('</div>', unsafe_allow_html=True)   # .login-card
+    st.markdown('</div>', unsafe_allow_html=True)   # .login-wrap
 
-    # Processa o login
+    # === Autenticação (mantém sua lógica existente) ===
     if submit:
         if not username or not password:
             st.warning("Informe usuário e senha.")
             return
+
         user_obj = None
         try:
             with SessionLocal() as db:
@@ -573,7 +610,6 @@ def login_ui():
             except Exception:
                 pass
             st.session_state.uid = int(user_obj.id)
-            st.success("Login realizado com sucesso.")
             st.rerun()
         else:
             st.error("Usuário ou senha inválidos.")
