@@ -649,58 +649,91 @@ except Exception:
         with SessionLocal() as db:
             return db.get(User, uid)
 
-    def login_ui():
+   def login_ui():
     # ===== CSS do layout do login (tela fixa e cartão central) =====
     LOGIN_CSS = """
     <style>
-    html, body, [data-testid="stAppViewContainer"]{
+      /* impede rolagem e dá um fundo suave */
+      html, body, [data-testid="stAppViewContainer"]{
         height:100%;
-        overflow:hidden;               /* impede rolagem */
+        overflow:hidden;
         background: linear-gradient(180deg,#f7f8fc 0%, #f1f3f9 100%);
-    }
-    /* esconde sidebar no login */
-    [data-testid="stSidebar"]{ display:none; }
+      }
 
-    /* centraliza e limita largura do conteúdo */
-    .block-container{ max-width:480px; margin:10vh auto; }
+      /* esconde sidebar no login */
+      [data-testid="stSidebar"]{ display:none; }
+
+      /* centraliza todo o conteúdo na página */
+      .block-container{
+        min-height:100vh;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        padding-top:0; padding-bottom:0;
+      }
+
+      /* cartão do login */
+      .login-card{
+        width: 420px;               /* deixe 360–480px se quiser menor/maior */
+        max-width: 92vw;
+        background:#fff;
+        border:1px solid #e8eaf1;
+        border-radius:16px;
+        padding: 26px 24px;
+        box-shadow: 0 10px 26px rgba(25,40,90,.08);
+      }
+
+      .login-title{
+        font-size: 48px;            /* título maior */
+        font-weight: 800;
+        color:#1a73e8;               /* azul */
+        text-align:center;
+        margin: 6px 0 18px;
+      }
+
+      .login-sub{
+        font-size: 13px;
+        text-align:center;
+        color:#8087a2;
+        margin-bottom:14px;
+      }
+
+      /* inputs mais compactos */
+      .stTextInput > div > label{ display:none; }
+      .stTextInput > div > div > input{
+        height: 40px;
+        font-size: 16px;
+      }
+
+      /* botão */
+      .stButton > button{
+        height: 42px;
+        font-size: 16px;
+        border-radius: 10px;
+        background:#155bd6;
+      }
     </style>
     """
     st.markdown(LOGIN_CSS, unsafe_allow_html=True)
-    # ... resto do formulário de login ...
 
-    st.markdown(LOGIN_CSS, unsafe_allow_html=True)
+    # ===== UI do formulário =====
+    st.markdown('<div class="login-card">', unsafe_allow_html=True)
+    st.markdown('<div class="login-title">ADRF</div>', unsafe_allow_html=True)
+    st.markdown('<div class="login-sub">Faça login para continuar</div>', unsafe_allow_html=True)
 
-    # ===== HTML de estrutura do cartão =====
-    st.markdown('<div class="login-wrap"><div class="login-card">', unsafe_allow_html=True)
+    usuario = st.text_input("Usuário", placeholder="Seu usuário", key="login_user")
+    senha   = st.text_input("Senha",   type="password", placeholder="Sua senha", key="login_pwd")
 
-    # Título ADRF
-    st.markdown('<div class="brand"><span class="big">ADRF</span><span class="sub">Acesso ao sistema</span></div>',
-                unsafe_allow_html=True)
+    if st.button("ACESSAR", use_container_width=True, key="btn_login"):
+        # Chame sua função de autenticação existente aqui:
+        if "do_login" in globals():
+            do_login(usuario, senha)           # se você já usa essa função
+        elif "login" in globals():
+            login(usuario, senha)              # ou essa
+        else:
+            st.warning("Implemente a autenticação aqui (ex.: do_login(usuario, senha)).")
 
-    # ===== Formulário =====
-    with st.form("login_form", clear_on_submit=False):
-        user = st.text_input("Usuário", key="lg_user", placeholder="Seu usuário")
-        pw   = st.text_input("Senha",   key="lg_pass", type="password", placeholder="Sua senha")
-        submit = st.form_submit_button("ACESSAR")
-
-    st.markdown("</div></div>", unsafe_allow_html=True)  # fecha .login-card / .login-wrap
-
-    # ===== Ação do botão =====
-    if submit:
-        try:
-            # >>>> SUBSTITUA pela sua lógica existente de autenticação <<<<
-            # Exemplo comum no seu projeto: auth_login(user, pw) ou login(user, pw)
-            ok = False
-            try:
-                ok = auth_login(user, pw)          # se você tiver essa função
-            except NameError:
-                ok = login(user, pw)               # ou esta
-            if ok:
-                st.experimental_rerun()
-            else:
-                st.error("Usuário ou senha inválidos.")
-        except Exception:
-            st.error("Falha ao tentar autenticar. Verifique a função de login que o app usa.")
+    st.markdown('</div>', unsafe_allow_html=True)
 
     # ===================== HELPERS =====================
     def is_admin_general(user: "User") -> bool:
