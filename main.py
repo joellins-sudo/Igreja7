@@ -147,7 +147,6 @@ html, body {
 }
 </style>
 """
-st.markdown(LOGIN_WIDTH_FIX, unsafe_allow_html=True)
 
 LOGIN_WIDTH_FIX = """
 <style>
