@@ -2516,8 +2516,11 @@ def main():
             login_ui()
             return
 
-        # ------ menu lateral (uma única vez) ------
-        page = sidebar_common(user)  # << usa o menu padronizado
+        # ------ força redesenho do menu nesta execução ------
+        st.session_state.pop("sidebar_rendered", None)   # <<< linha chave
+
+        # ------ menu lateral (desenha 1x e devolve a página escolhida) ------
+        page = sidebar_common(user)
 
         # ------ roteamento ------
         if page == "Lançamentos":
@@ -2529,7 +2532,6 @@ def main():
         elif page == "Relatório de Dizimistas":
             page_relatorio_dizimistas(user)
         elif page == "Relatório de Missões":
-            # Tesoureiro vê a própria congregação; demais papéis veem o geral
             if user.role == "TESOUREIRO":
                 page_relatorio_missoes_congregacao(user)
             else:
@@ -2546,4 +2548,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
