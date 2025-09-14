@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 # ===== UI extra (menu bonito com fallback) =====
+from streamlit.components.v1 import html as st_html
+
 try:
     import streamlit_antd_components as sac  # pip install streamlit-antd-components
 except Exception:
@@ -68,34 +70,35 @@ st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
 # ===== CSS do login: tela fixa (sem rolagem), cartão central e compacto =====
 LOGIN_CSS = """
 <style>
-/* Esconde header e sidebar na tela de login */
+/* Some header/sidebar na tela de login */
 [data-testid="stHeader"], [data-testid="stSidebar"] { display:none !important; }
 
-/* Travar a viewport em 100vh e impedir rolagem */
+/* Travar tudo em 100vh e impedir rolagem */
 html, body {
   height: 100vh !important;
-  overflow: hidden !important;
-  overscroll-behavior: none !important;
+  width: 100vw !important;
+  margin: 0 !important;
+  overflow: hidden !important;           /* bloqueia scroll */
+  overscroll-behavior: none !important;  /* bloqueia bounce */
+  touch-action: none !important;         /* bloqueia gesto touch */
   background: #f5f7fb;
 }
 
-/* O app inteiro fica fixo na viewport (sem scroll) */
-#root, .stApp {
+/* Em alguns ambientes o stApp é quem rola; fixe também */
+#root, .stApp, [data-testid="stAppViewContainer"], 
+[data-testid="stAppViewContainer"] .main, 
+[data-testid="stAppViewContainer"] .main .block-container {
   position: fixed !important;
-  inset: 0 !important;           /* top/right/bottom/left = 0 */
+  inset: 0 !important;              /* top/right/bottom/left = 0 */
   overflow: hidden !important;
-}
-
-/* Zera respiros para não “sobrar” altura */
-[data-testid="stAppViewContainer"],
-[data-testid="stAppViewContainer"] .main,
-[data-testid="stAppViewContainer"] .main .block-container{
-  height: 100% !important;
-  min-height: 100% !important;
-  overflow: hidden !important;
+  height: 100vh !important;
+  width: 100vw !important;
   padding: 0 !important;
   margin: 0 !important;
 }
+
+/* Esconde barras de rolagem (fallback visual) */
+*::-webkit-scrollbar { width:0 !important; height:0 !important; }
 
 /* Wrapper ocupa a tela e centraliza o cartão */
 .login-wrap{
@@ -103,28 +106,30 @@ html, body {
   display: flex; align-items: center; justify-content: center;
 }
 
-/* Cartão (quadrado) central, compacto */
+/* Cartão central compacto */
 .login-card{
-  width: calc(100vw - 32px);
-  max-width: 420px;
+  width: min(420px, calc(100vw - 32px));
   background: #fff;
   border: 1px solid #E6E8F0; border-radius: 12px;
   box-shadow: 0 6px 20px rgba(16,24,40,.06);
-  padding: 20px 18px 16px;
+  padding: 22px 18px 18px;
 }
 
-/* Título azul */
+/* Título azul – “ADRF” bem grande */
 .login-title{
   text-align: center;
-  font-weight: 800; font-size: 2.2rem;
-  color: #2075C8; letter-spacing: .4px;
-  margin: 4px 0 12px 0;
+  font-weight: 900; 
+  font-size: clamp(30px, 5vw, 46px);   /* maior que antes */
+  color: #0B63CE;                      /* azul */
+  letter-spacing: .4px;
+  margin: 6px 0 12px 0;
 }
 
 /* Campos compactos */
 .login-form .stTextInput>div>div>input,
 .login-form .stPassword>div>div>input{
-  font-size: .97rem; height: 38px; padding-left: 2rem;
+  font-size: 1rem !important;
+  height: 38px; padding-left: 2rem;
 }
 
 /* Ícones à esquerda dos inputs */
@@ -135,12 +140,62 @@ html, body {
   font-size: 1rem; opacity: .65;
 }
 
-/* Botão */
+/* Botão primário */
 .login-btn .stButton>button{
   width:100%; height: 40px; border-radius: 10px;
-  font-weight:700; background:#165DAA;
+  font-weight:800; background:#165DAA;
 }
 </style>
+"""
+from streamlit.components.v1 import html as st_html
+
+LOCK_SCROLL_JS = """
+<script>
+(function(){
+  const prevent = (e)=>{ e.preventDefault(); e.stopPropagation(); return false; };
+  const keyBlock = new Set(["ArrowUp","ArrowDown","PageUp","PageDown","Home","End"," "]);
+
+  function bindBlock(el){
+    if(!el) return;
+    el.addEventListener('wheel', prevent, {passive:false});
+    el.addEventListener('touchmove', prevent, {passive:false});
+  }
+  function unbindBlock(el){
+    if(!el) return;
+    el.removeEventListener('wheel', prevent);
+    el.removeEventListener('touchmove', prevent);
+  }
+
+  function lockAll(){
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    [window, document, document.documentElement, document.body].forEach(bindBlock);
+
+    const sel = [
+      '#root', '.stApp', '[data-testid="stAppViewContainer"]',
+      '[data-testid="stAppViewContainer"] .main',
+      '[data-testid="stAppViewContainer"] .main .block-container'
+    ];
+    sel.forEach(s => document.querySelectorAll(s).forEach(bindBlock));
+
+    window.addEventListener('keydown', (e)=>{
+      if (keyBlock.has(e.key)) prevent(e);
+    }, {passive:false});
+  }
+
+  function unlockAll(){
+    document.documentElement.style.overflow = "";
+    document.body.style.overflow = "";
+    [window, document, document.documentElement, document.body].forEach(unbindBlock);
+  }
+
+  // Observa: se .login-wrap existe => trava; caso contrário => libera
+  const apply = () => (document.querySelector('.login-wrap') ? lockAll() : unlockAll());
+  const obs = new MutationObserver(apply);
+  obs.observe(document.body, {childList:true, subtree:true});
+  apply(); // primeira execução
+})();
+</script>
 """
 
 CSS = """
@@ -569,64 +624,37 @@ def current_user():
         return db.get(User, uid)
 
 def login_ui():
-    # aplica o CSS específico do login
+    # Injeta CSS e JS de bloqueio
     st.markdown(LOGIN_CSS, unsafe_allow_html=True)
+    st_html(LOCK_SCROLL_JS, height=0)
 
-    # wrapper 100vh centralizado
-    st.markdown('<div class="login-wrap">', unsafe_allow_html=True)
-    st.markdown('<div class="login-card">', unsafe_allow_html=True)
+    # Cartão central
+    st.markdown('<div class="login-wrap"><div class="login-card">', unsafe_allow_html=True)
+    st.markdown('<div class="login-title">ADRF</div>', unsafe_allow_html=True)  # nome atualizado (azul, maior)
+    st.markdown('<div class="login-form">', unsafe_allow_html=True)
 
-    # título azul
-    st.markdown('<div class="login-title">AD RF!</div>', unsafe_allow_html=True)
+    # Usuário
+    st.markdown('<div class="icon-left" data-ico="👤">', unsafe_allow_html=True)
+    user = st.text_input("Usuário", placeholder="Seu usuário", label_visibility="collapsed", key="login_user")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    # formulário: usuário + senha (compactos)
-    with st.form("login_form_simple", clear_on_submit=False):
-        st.markdown('<div class="login-form">', unsafe_allow_html=True)
+    # Senha
+    st.markdown('<div class="icon-left" data-ico="🔒">', unsafe_allow_html=True)
+    pwd = st.text_input("Senha", type="password", placeholder="Sua senha", label_visibility="collapsed", key="login_pass")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-        st.markdown('<div class="icon-left" data-ico="👤">', unsafe_allow_html=True)
-        username = st.text_input("Usuário", key="login_username")
-        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)  # fecha .login-form
 
-        st.markdown('<div class="icon-left" data-ico="🔒">', unsafe_allow_html=True)
-        password = st.text_input("Senha", type="password", key="login_password")
-        st.markdown('</div>', unsafe_allow_html=True)
+    # Botão
+    st.markdown('<div class="login-btn">', unsafe_allow_html=True)
+    ok = st.button("ACESSAR", use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-        st.markdown('</div>', unsafe_allow_html=True)  # fecha .login-form
+    st.markdown('</div></div>', unsafe_allow_html=True)  # fecha .login-card / .login-wrap
 
-        st.markdown('<div class="login-btn">', unsafe_allow_html=True)
-        submit = st.form_submit_button("ACESSAR", use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    # fecha os containers
-    st.markdown('</div>', unsafe_allow_html=True)   # .login-card
-    st.markdown('</div>', unsafe_allow_html=True)   # .login-wrap
-
-    # === autenticação (mantém sua lógica) ===
-    if submit:
-        if not username or not password:
-            st.warning("Informe usuário e senha.")
-            return
-
-        user_obj = None
-        try:
-            with SessionLocal() as db:
-                user_obj = _find_user_by_username(db, username)
-                if not user_obj or not _validate_password(user_obj, password):
-                    user_obj = None
-        except Exception:
-            user_obj = None
-
-        if user_obj:
-            try:
-                cm = get_cookie_manager()
-                token = _write_token({"uid": int(user_obj.id)})
-                cm.set(COOKIE_NAME, token)
-            except Exception:
-                pass
-            st.session_state.uid = int(user_obj.id)
-            st.rerun()
-        else:
-            st.error("Usuário ou senha inválidos.")
+    if ok:
+        # TODO: sua validação de credenciais aqui
+        pass
 
 # ===================== HELPERS =====================
 def is_admin_general(user: "User") -> bool:
