@@ -123,6 +123,34 @@ label, [data-testid="stWidgetLabel"] { font-size: 1.02rem; }
 
 /* ==================== AJUSTES LEVES ==================== */
 hr { opacity: .6; }
+/* ===== TAMANHO DAS TABELAS (DataFrame / Data Editor) ===== */
+:root{
+  --table-font-size: 1.12rem;     /* célula */
+  --table-header-size: 1.08rem;   /* cabeçalho */
+}
+
+[data-testid="stDataFrame"] [role="gridcell"],
+[data-testid="stDataEditor"] [role="gridcell"]{
+  font-size: var(--table-font-size) !important;
+}
+
+[data-testid="stDataFrame"] [role="columnheader"],
+[data-testid="stDataEditor"] [role="columnheader"]{
+  font-size: var(--table-header-size) !important;
+  font-weight: 700 !important;
+}
+
+/* Altura das linhas (opcional – pode ajustar) */
+[data-testid="stDataFrame"] [role="row"],
+[data-testid="stDataEditor"] [role="row"]{
+  min-height: 38px;
+}
+
+/* Um pouco mais de espaço interno nas células (opcional) */
+[data-testid="stDataFrame"] [role="gridcell"] > div,
+[data-testid="stDataEditor"] [role="gridcell"] > div{
+  padding: 8px 10px;
+}
 </style>
 """
 
