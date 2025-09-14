@@ -1,42 +1,35 @@
-    # main.py — AD Relatório Financeiro — v13.3
-    # Melhorias deste commit (apenas estas):
-    # 1) Adicionado botão "Salvar alterações" abaixo de TODAS as tabelas editáveis.
-    # 2) Tesoureiro Missionário pode lançar SAÍDAS de Missões para QUALQUER congregação
-    #    (editor agora tem coluna "Congregação"); Entradas continuam no editor agregado.
-    # 3) Nova aba "Relatório de Missões" para TESOUREIRO (congregações) ver apenas seus lançamentos.
-    # 4) [EQUIVALÊNCIA DE DÍZIMOS] Dízimos lançados em "Entrada (Doação)" e por "Dizimista"
-    #    agora são tratados como equivalentes (NÃO são somados). Em resumos por data e totais mensais,
-    #    usa-se o MAIOR entre (soma de Tithes) e (soma de Transactions categoria "Dízimo").
-    #
-    # Obs.: Todo o restante do seu código foi preservado. Itens que você pediu antes
-    # (ex.: esconder "ajuste" na ENTRADA, relatórios agregados editáveis da SEDE, etc.) continuam iguais.
+from __future__ import annotations
 
-    from __future__ import annotations
-    # ===== UI extra (menu bonito com fallback) =====
-    from streamlit.components.v1 import html as st_html
+# ========== Standard library ==========
+import os
+import json
+import base64
+import hmac
+import time
+import hashlib
+import unicodedata as ud
+import locale as _locale
+from datetime import date, timedelta, datetime
+from typing import Optional, List, Tuple, Dict, Any
+from collections import defaultdict, Counter
 
-    try:
-        import streamlit_antd_components as sac  # pip install streamlit-antd-components
-    except Exception:
-        sac = None  # fallback p/ radio padrão
-    import hashlib
-    from sqlalchemy import select
+# ========== Third-party ==========
+import pandas as pd
+import streamlit as st
+from streamlit.components.v1 import html as st_html
 
-    import os
-    from datetime import date, timedelta, datetime
-    from typing import Optional, List, Tuple, Dict, Any
-    from collections import defaultdict, Counter
-    import locale as _locale
-    import pandas as pd
-    import streamlit as st
+# Menu bonito (SAC). Se não estiver instalado, segue com fallback.
+try:
+    import streamlit_antd_components as sac  # pip install streamlit-antd-components
+except Exception:
+    sac = None
 
-    from sqlalchemy import select, func, String, Date, Float, ForeignKey, create_engine, and_
-    from sqlalchemy.orm import relationship, Mapped, mapped_column, sessionmaker, joinedload, Session
-    from sqlalchemy.orm import DeclarativeBase
-    import unicodedata as ud
-    import hashlib
-    import json, base64, hmac, time
-
+from sqlalchemy import (
+    select, func, String, Date, Float, ForeignKey, create_engine, and_,
+)
+from sqlalchemy.orm import (
+    relationship, Mapped, mapped_column, sessionmaker, joinedload, Session, DeclarativeBase,
+)
     # PDF
     from io import BytesIO
     from reportlab.lib.pagesizes import A4, portrait
