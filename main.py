@@ -63,72 +63,41 @@ st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
 CSS = """
 <style>
 /* ==================== BASE / TIPOGRAFIA ==================== */
-:root { --base-font: 17px; }  /* aumente para 18/19/20px se quiser */
+:root{
+  --base-font: 17px;              /* aumente para 18/19/20px se quiser */
+  --table-font-size: 1.12rem;     /* fonte das células */
+  --table-header-size: 1.08rem;   /* fonte dos cabeçalhos */
+}
 
-html, body, [data-testid="stAppViewContainer"] {
+html, body, [data-testid="stAppViewContainer"]{
   font-size: var(--base-font);
   line-height: 1.45;
 }
 
 /* Títulos mais fortes e maiores */
-.page-title, h1 { font-size: 2.0rem; font-weight: 800 !important; }
-h2 { font-size: 1.45rem; font-weight: 750; }
-h3 { font-size: 1.25rem; font-weight: 700; }
+.page-title, h1{ font-size: 2.0rem; font-weight: 800 !important; }
+h2{ font-size: 1.45rem; font-weight: 750; }
+h3{ font-size: 1.25rem; font-weight: 700; }
 
 /* ==================== WIDGETS / TEXTOS ==================== */
-[data-testid="stSidebar"] * { font-size: 1.02rem; }
-label, [data-testid="stWidgetLabel"] { font-size: 1.02rem; }
+[data-testid="stSidebar"] *{ font-size: 1.02rem; }
+label, [data-testid="stWidgetLabel"]{ font-size: 1.02rem; }
 
 /* Inputs (texto, número, data, selects) um pouco maiores */
 .stTextInput input,
 .stNumberInput input,
 .stDateInput input,
 .stSelectbox div,
-.stMultiSelect div {
+.stMultiSelect div{
   font-size: 1.02rem !important;
 }
 
 /* ==================== TABELAS / EDITOR ==================== */
-/* Aviso: classes .st-emotion-* mudam conforme a versão do Streamlit. */
-[data-testid="stDataFrame"] * { font-size: 1.0rem; }      /* DataFrame */
-[data-testid="stDataEditor"] * { font-size: 1.02rem; }     /* Data Editor */
+/* Regras gerais (ok manter) */
+[data-testid="stDataFrame"] *{ font-size: 1.0rem; }
+[data-testid="stDataEditor"] *{ font-size: 1.02rem; }
 
-/* ==================== MÉTRICAS ==================== */
-[data-testid="stMetricValue"] {
-  font-size: 1.8rem !important;
-  font-weight: 750 !important;
-}
-[data-testid="stMetricLabel"] { font-size: 1.0rem; opacity: .8; }
-
-/* ==================== BOTÕES ==================== */
-.stButton > button, .stDownloadButton > button {
-  font-size: 1.02rem;
-  border-radius: 14px;
-  font-weight: 650;
-}
-
-/* ==================== CARTÕES ESTATÍSTICOS ==================== */
-.stat-card {
-  background: #fff; border: 1px solid #e9e9ee; border-radius: 16px;
-  padding: 14px 16px;
-}
-.stat-label { font-size: .92rem; opacity: .75; }
-.stat-value { font-size: 1.12rem; font-weight: 700; margin-top: .2rem; }
-
-/* ==================== SIDEBAR ==================== */
-[data-testid="stSidebar"] {
-  background: linear-gradient(180deg, #f7f7fb 0%, #f2f3f9 100%);
-}
-[data-testid="stSidebar"] .block-container { padding-top: 1rem; }
-
-/* ==================== AJUSTES LEVES ==================== */
-hr { opacity: .6; }
-/* ===== TAMANHO DAS TABELAS (DataFrame / Data Editor) ===== */
-:root{
-  --table-font-size: 7.12rem;     /* célula */
-  --table-header-size: 6.08rem;   /* cabeçalho */
-}
-
+/* Regras específicas – aumentam o tamanho real das células/cabeçalhos */
 [data-testid="stDataFrame"] [role="gridcell"],
 [data-testid="stDataEditor"] [role="gridcell"]{
   font-size: var(--table-font-size) !important;
@@ -140,17 +109,50 @@ hr { opacity: .6; }
   font-weight: 700 !important;
 }
 
-/* Altura das linhas (opcional – pode ajustar) */
+/* Altura das linhas (opcional) */
 [data-testid="stDataFrame"] [role="row"],
 [data-testid="stDataEditor"] [role="row"]{
   min-height: 38px;
 }
 
-/* Um pouco mais de espaço interno nas células (opcional) */
+/* Espaço interno das células (opcional) */
 [data-testid="stDataFrame"] [role="gridcell"] > div,
 [data-testid="stDataEditor"] [role="gridcell"] > div{
   padding: 8px 10px;
 }
+
+/* ==================== MÉTRICAS ==================== */
+[data-testid="stMetricValue"]{
+  font-size: 2.8rem !important;
+  font-weight: 750 !important;
+}
+[data-testid="stMetricLabel"]{ font-size: 1.0rem; opacity: .8; }
+
+/* ==================== BOTÕES ==================== */
+.stButton > button, .stDownloadButton > button{
+  font-size: 1.02rem;
+  border-radius: 14px;
+  font-weight: 650;
+}
+
+/* ==================== CARTÕES ESTATÍSTICOS ==================== */
+.stat-card{
+  background: #fff;
+  border: 1px solid #e9e9ee;
+  border-radius: 16px;
+  padding: 14px 16px;
+}
+.stat-label{ font-size: .92rem; opacity: .75; }
+.stat-value{ font-size: 1.12rem; font-weight: 700; margin-top: .2rem; }
+
+/* ==================== SIDEBAR ==================== */
+[data-testid="stSidebar"]{
+  background: linear-gradient(180deg, #f7f7fb 0%, #f2f3f9 100%);
+}
+[data-testid="stSidebar"] .block-container{ padding-top: 1rem; }
+
+/* ==================== AJUSTES LEVES ==================== */
+hr{ opacity: .6; }
 </style>
 """
 
