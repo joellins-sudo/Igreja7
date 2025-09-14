@@ -125,7 +125,7 @@ label, [data-testid="stWidgetLabel"] { font-size: 1.02rem; }
 hr { opacity: .6; }
 /* ===== TAMANHO DAS TABELAS (DataFrame / Data Editor) ===== */
 :root{
-  --table-font-size: 2rem;     /* célula */
+  --table-font-size: 5rem;     /* célula */
   --table-header-size: 1.08rem;   /* cabeçalho */
 }
 
