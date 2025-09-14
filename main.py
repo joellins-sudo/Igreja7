@@ -1695,7 +1695,6 @@ def page_lancamentos(user: "User"):
       }
 
       /* Cores dos botões por seção */
-      
 
       /* Inputs um pouco mais compactos nesta página */
       .adrf-card [data-testid="stForm"] input,
