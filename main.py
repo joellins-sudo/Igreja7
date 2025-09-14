@@ -1934,15 +1934,33 @@ def page_visao_geral(user: "User"):
         if is_all:
             for c in ordered:
                 totals = _collect_month_data(db, c.id, start, end)["totals"]
-                agg_total.append((c.name, totals["entradas_total_sem_missoes"], totals["saidas_total"], totals["saldo"], totals["missoes"]))
+                agg_total.append((
+                    c.name,
+                    totals["entradas_total_sem_missoes"],
+                    totals["saidas_total"],
+                    totals["saldo"],
+                    totals["missoes"]
+                ))
         elif congs:
             cong_obj = congs[0]
             totals = _collect_month_data(db, cong_obj.id, start, end)["totals"]
-            agg_total.append((cong_obj.name, totals["entradas_total_sem_missoes"], totals["saidas_total"], totals["saldo"], totals["missoes"]))
+            agg_total.append((
+                cong_obj.name,
+                totals["entradas_total_sem_missoes"],
+                totals["saidas_total"],
+                totals["saldo"],
+                totals["missoes"]
+            ))
 
         # ==== SEDE (todas as congregações) ====
         if user.role == "SEDE":
-            df_rank = pd.DataFrame([{"Congregação": n, "Entradas (D+O + Outras)": v, "Saídas": s, "Saldo": sal} for (n, v, s, sal, _m) in agg_total])
+            df_rank = pd.DataFrame([{
+                "Congregação": n,
+                "Entradas (D+O + Outras)": v,
+                "Saídas": s,
+                "Saldo": sal
+            } for (n, v, s, sal, _m) in agg_total])
+
             if not df_rank.empty:
                 df_sorted = df_rank.sort_values("Entradas (D+O + Outras)", ascending=False).reset_index(drop=True)
                 top_n = min(5, len(df_sorted))
@@ -1952,6 +1970,7 @@ def page_visao_geral(user: "User"):
                     label = f"{i+1}º lugar"
                     text = f"{row['Congregação']} — {format_currency(float(row['Entradas (D+O + Outras)']))}"
                     render_stat_card(cols[i], label, text)
+
                 st.divider()
                 st.dataframe(
                     df_sorted.assign(**{
@@ -1966,9 +1985,9 @@ def page_visao_geral(user: "User"):
 
             # === [BLOCO 9: Totais gerais — Entradas, Saídas e Saldo (todas as congregações)] ===
             try:
-                _tot_in    = sum(float(v)     for (_n, v, _s, _sal, _m) in agg_total)
-                _tot_out   = sum(float(_s)    for (_n, _v, _s, _sal, _m) in agg_total)
-                _tot_saldo = sum(float(_sal)  for (_n, _v, _s, _sal, _m) in agg_total)
+                _tot_in    = sum(float(v)    for (_n, v, _s, _sal, _m) in agg_total)
+                _tot_out   = sum(float(_s)   for (_n, _v, _s, _sal, _m) in agg_total)
+                _tot_saldo = sum(float(_sal) for (_n, _v, _s, _sal, _m) in agg_total)
             except Exception:
                 _tot_in = _tot_out = _tot_saldo = 0.0
 
@@ -1977,6 +1996,16 @@ def page_visao_geral(user: "User"):
             c2.metric("Total de Saídas (todas as congregações)", format_currency(_tot_out))
             c3.metric("Saldo (todas as congregações)", format_currency(_tot_saldo))
             # === [FIM BLOCO 9] ===
+
+            st.divider()
+            st.subheader("Relatório Consolidado Mensal")
+            st.download_button(
+                "⬇️ Baixar PDF do Relatório Geral",
+                data=build_consolidated_pdf(agg_total, ref),
+                file_name=f"relatorio_mensal_{start.strftime('%Y-%m')}.pdf",
+                mime="application/pdf",
+                key=f"dl_pdf_relatorio_geral_{start.strftime('%Y_%m')}"
+            )
 
         # ==== Tesoureiro (apenas sua congregação) ====
         if user.role != "SEDE" and agg_total:
@@ -2003,27 +2032,20 @@ def page_visao_geral(user: "User"):
 
             st.dataframe(df_summary_5, use_container_width=True, hide_index=True)
 
-        if user.role == "SEDE":
-            st.divider()
-            st.subheader("Relatório Consolidado Mensal")
-            st.download_button(
-                "⬇️ Baixar PDF do Relatório Geral",
-                data=build_consolidated_pdf(agg_total, ref),
-                file_name=f"relatorio_mensal_{start.strftime('%Y-%m')}.pdf",
-                mime="application/pdf"
-            )
-
+        # ==== PDF completo por congregação ====
         st.subheader("Prestação de contas (PDF completo)")
         if user.role == "SEDE":
             sel = st.selectbox("Congregação", [c.name for c in ordered], key="pc_cong_sel")
             cong_obj = next(c for c in ordered if c.name == sel)
         else:
             cong_obj = ordered[0]
+
         st.download_button(
             "⬇️ Baixar PDF do mês (completo)",
             data=build_full_statement_pdf(cong_obj.id, cong_obj.name, ref),
             file_name=f"prestacao_{_norm(cong_obj.name)}_{start.strftime('%Y-%m')}.pdf",
-            mime="application/pdf"
+            mime="application/pdf",
+            key=f"dl_pdf_prestacao_{_norm(cong_obj.name)}_{start.strftime('%Y_%m')}"
         )
 
         # === [BLOCO 8: Resumo Financeiro Mensal (5 colunas) — substitui o bloco antigo do tesoureiro] ===
