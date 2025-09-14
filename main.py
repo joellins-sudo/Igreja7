@@ -48,29 +48,6 @@ try:
 except Exception:
     TZ_BA = None
 
-
-from sqlalchemy import (
-    select, func, String, Date, Float, ForeignKey, create_engine, and_,
-)
-from sqlalchemy.orm import (
-    relationship, Mapped, mapped_column, sessionmaker, joinedload, Session, DeclarativeBase,
-)
-    # PDF
-    from io import BytesIO
-    from reportlab.lib.pagesizes import A4, portrait
-    from reportlab.lib import colors
-    from reportlab.lib.units import cm
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer
-    from reportlab.lib.enums import TA_CENTER
-
-    # TZ Bahia/BR
-    try:
-        from zoneinfo import ZoneInfo
-        TZ_BA = ZoneInfo("America/Bahia")
-    except Exception:
-        TZ_BA = None
-
     APP_NAME = "AD Relatório Financeiro"
     ADJ_ENTRY_DESC = "[Ajuste via relatório de entrada]"
     ADJ_MISS_IN_DESC = "[Ajuste Missões por Congregação]"
