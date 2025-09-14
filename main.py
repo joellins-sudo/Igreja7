@@ -123,7 +123,7 @@ label, [data-testid="stWidgetLabel"]{ font-size: 1.02rem; }
 
 /* ==================== MÉTRICAS ==================== */
 [data-testid="stMetricValue"]{
-  font-size: 2.8rem !important;
+  font-size: 1.1rem !important;
   font-weight: 750 !important;
 }
 [data-testid="stMetricLabel"]{ font-size: 1.0rem; opacity: .8; }
