@@ -64,121 +64,58 @@ CSS = """
 /* ==================== BASE / TIPOGRAFIA ==================== */
 
 /* Fonte levemente mais forte no app todo */
-html, body, [data-testid="stAppViewContainer"] * {
-  font-weight: 520;
-}
+html, body, [data-testid="stAppViewContainer"] * { font-weight: 520; }
 
 /* Títulos realmente em negrito */
-h1, h2, h3, .page-title {
-  font-weight: 700 !important;
-}
+h1, h2, h3, .page-title { font-weight: 700 !important; }
 
 /* Título da página */
-.page-title {
-  font-size: 1.9rem;
-  margin: 0 0 0.6rem 0;
-  letter-spacing: .2px;
-}
+.page-title { font-size: 1.9rem; margin: 0 0 .6rem 0; letter-spacing: .2px; }
 
 /* ==================== MÉTRICAS ==================== */
-
-[data-testid="stMetricValue"] {
-  font-size: 1.6rem !important;
-  font-weight: 750 !important;
-}
-[data-testid="stMetricLabel"] {
-  opacity: .75;
-}
+[data-testid="stMetricValue"] { font-size: 1.6rem !important; font-weight: 750 !important; }
+[data-testid="stMetricLabel"] { opacity: .75; }
 
 /* ==================== TABELAS / EDITOR ==================== */
-/* Aviso: classes .st-emotion-* mudam conforme versão do Streamlit.
+/* Aviso: classes .st-emotion-* mudam conforme a versão do Streamlit.
    Mantive as suas e adicionei seletores mais estáveis como fallback. */
 
 /* Suas classes atuais (ok manter): */
-.st-emotion-cache-1v0mbdj, .st-emotion-cache-16txtl3 {
-  border-radius: 12px;
-}
-.st-emotion-cache-1wmy9hl {
-  border-radius: 14px;
-}
+.st-emotion-cache-1v0mbdj, .st-emotion-cache-16txtl3 { border-radius: 12px; }
+.st-emotion-cache-1wmy9hl { border-radius: 14px; }
 
 /* Fallback estável para tabelas e editores (quando aplicável) */
-[data-testid="stDataFrame"] {
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: 0 2px 10px rgba(10,10,35,.03);
-}
+[data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; box-shadow: 0 2px 10px rgba(10,10,35,.03); }
 
 /* ==================== BOTÕES ==================== */
-
-button[kind="primary"], button[kind="secondary"],
-.stButton > button, .stDownloadButton > button {
-  border-radius: 12px !important;
-  font-weight: 650;
+button[kind="primary"], button[kind="secondary"], .stButton > button, .stDownloadButton > button {
+  border-radius: 12px !important; font-weight: 650;
 }
-
 /* Hover suave nos botões */
-.stButton > button:hover, .stDownloadButton > button:hover {
-  filter: brightness(0.98);
-}
+.stButton > button:hover, .stDownloadButton > button:hover { filter: brightness(0.98); }
 
 /* ==================== CARTÕES ESTATÍSTICOS (classe do app) ==================== */
-
-.stat-card {
-  background: #ffffff;
-  border: 1px solid #e9e9ee;
-  border-radius: 16px;
-  padding: 14px 16px;
-  box-shadow: 0 2px 8px rgba(10, 10, 35, .04);
-}
-.stat-label {
-  font-size: .85rem;
-  opacity: .75;
-}
-.stat-value {
-  font-size: 1.05rem;
-  font-weight: 700;
-  margin-top: .2rem;
-}
+.stat-card { background: #fff; border: 1px solid #e9e9ee; border-radius: 16px; padding: 14px 16px; box-shadow: 0 2px 8px rgba(10,10,35,.04); }
+.stat-label { font-size: .85rem; opacity: .75; }
+.stat-value { font-size: 1.05rem; font-weight: 700; margin-top: .2rem; }
 
 /* ==================== SIDEBAR ==================== */
-
-[data-testid="stSidebar"] {
-  background: linear-gradient(180deg, #f7f7fb 0%, #f2f3f9 100%);
-}
-
+[data-testid="stSidebar"] { background: linear-gradient(180deg, #f7f7fb 0%, #f2f3f9 100%); }
 /* Espaçamento e realce leve na sidebar */
-[data-testid="stSidebar"] .block-container {
-  padding-top: 1rem;
-}
+[data-testid="stSidebar"] .block-container { padding-top: 1rem; }
 
 /* ==================== MENUS (SAC – streamlit-antd-components) ==================== */
 /* Estes estilos só terão efeito se você estiver usando o SAC. */
-
-.sac-menu {
-  border-radius: 14px;
-  overflow: hidden;
-  box-shadow: 0 2px 12px rgba(20,20,60,.06);
-}
-
+.sac-menu { border-radius: 14px; overflow: hidden; box-shadow: 0 2px 12px rgba(20,20,60,.06); }
 /* Item selecionado em destaque */
-.sac-menu .ant-menu-item-selected {
-  font-weight: 700;
-}
+.sac-menu .ant-menu-item-selected { font-weight: 700; }
 
 /* ==================== PEQUENOS AJUSTES ==================== */
-
 /* Dividers um pouco mais suaves */
-hr {
-  opacity: .6;
-}
-
+hr { opacity: .6; }
 /* Inputs com cantos mais suaves */
-.stTextInput > div > div > input,
-.stNumberInput input,
-.stDateInput input {
-  border-radius: 10px !important;
-}
+.stTextInput > div > div > input, .stNumberInput input, .stDateInput input { border-radius: 10px !important; }
+
 </style>
 """
 
