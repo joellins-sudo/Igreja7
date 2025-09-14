@@ -523,8 +523,9 @@ def current_user():
 def login_ui():
     # CSS ADRF
     st.markdown(ADRF_LOGIN_CSS, unsafe_allow_html=True)
+
     # Centraliza o conteúdo na viewport e remove espaços do Streamlit
-CENTER_LOGIN_CSS = """
+    CENTER_LOGIN_CSS = """
 <style>
   html, body, [data-testid="stAppViewContainer"]{ height:100%; }
   /* faz a área principal virar um container centralizado */
@@ -536,28 +537,12 @@ CENTER_LOGIN_CSS = """
   header[data-testid="stHeader"]{ display:none; }
   footer { visibility:hidden; }
 </style>
-"""
-st.markdown(CENTER_LOGIN_CSS, unsafe_allow_html=True)
+    """
+    st.markdown(CENTER_LOGIN_CSS, unsafe_allow_html=True)
 
     # cartão
-    st.markdown("<div class='adrf-wrap'><div class='adrf-card'><div class='body'>", unsafe_allow_html=True)
-
-    # LOGO (usa assets/logo.png se houver; senão mostra texto ADRF!)
-    st.markdown("<div class='adrf-logo'>", unsafe_allow_html=True)
-    try:
-        if os.path.exists(LOGO_PATH):
-            st.image(LOGO_PATH, caption=None, use_container_width=False)
-        else:
-            st.markdown(
-              "<div style='font:800 54px/1.1 Inter,system-ui; color:#1f6feb;'>ADRF<span style=\"color:#74b816\">!</span></div>",
-              unsafe_allow_html=True
-            )
-    except Exception:
-        st.markdown(
-          "<div style='font:800 54px/1.1 Inter,system-ui; color:#1f6feb;'>ADRF<span style=\"color:#74b816\">!</span></div>",
-          unsafe_allow_html=True
-        )
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("<div class='adrf-wrap'><div class='adrf-card'><div class='body'>",
+                unsafe_allow_html=True)
 
     # FORM (mesma lógica do seu backend)
     st.markdown("<div class='adrf-form'>", unsafe_allow_html=True)
