@@ -2035,7 +2035,11 @@ def page_visao_geral(user: "User"):
         # ==== PDF completo por congregação ====
         st.subheader("Prestação de contas (PDF completo)")
         if user.role == "SEDE":
-            sel = st.selectbox("Congregação", [c.name for c in ordered], key="pc_cong_sel")
+            sel = st.selectbox(
+                "Congregação",
+                [c.name for c in ordered],
+                key=f"pc_cong_sel_vg_{start.strftime('%Y_%m')}"
+            )
             cong_obj = next(c for c in ordered if c.name == sel)
         else:
             cong_obj = ordered[0]
@@ -2048,30 +2052,6 @@ def page_visao_geral(user: "User"):
             key=f"dl_pdf_prestacao_{_norm(cong_obj.name)}_{start.strftime('%Y_%m')}"
         )
 
-        # === [BLOCO 8: Resumo Financeiro Mensal (5 colunas) — substitui o bloco antigo do tesoureiro] ===
-        if user.role != "SEDE" and agg_total:
-            st.divider()
-            st.subheader("Resumo Financeiro Mensal")
-
-            # Busca totais detalhados para a congregação do usuário (dízimos e ofertas separadas)
-            with SessionLocal() as _db_vg:
-                _tot = _collect_month_data(_db_vg, cong_obj.id, start, end)["totals"]
-
-            _dz = float(_tot.get("dizimos", 0.0))
-            _of = float(_tot.get("ofertas", 0.0))
-            _dz_of = _dz + _of
-            _sa = float(_tot.get("saidas_total", 0.0))
-            _saldo = float(_tot.get("saldo", 0.0))
-
-            df_summary_5 = pd.DataFrame([{
-                "Dízimos Total": format_currency(_dz),
-                "Ofertas Total": format_currency(_of),
-                "Dízimos + Ofertas": format_currency(_dz_of),
-                "Total Saídas": format_currency(_sa),
-                "Saldo": format_currency(_saldo),
-            }])
-
-            st.dataframe(df_summary_5, use_container_width=True, hide_index=True)
         # === [FIM BLOCO 8] ===
 
         if user.role == "SEDE":
