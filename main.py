@@ -125,8 +125,8 @@ label, [data-testid="stWidgetLabel"] { font-size: 1.02rem; }
 hr { opacity: .6; }
 /* ===== TAMANHO DAS TABELAS (DataFrame / Data Editor) ===== */
 :root{
-  --table-font-size: 5rem;     /* célula */
-  --table-header-size: 1.08rem;   /* cabeçalho */
+  --table-font-size: 7.12rem;     /* célula */
+  --table-header-size: 6.08rem;   /* cabeçalho */
 }
 
 [data-testid="stDataFrame"] [role="gridcell"],
