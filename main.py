@@ -459,9 +459,14 @@ def order_congs_sede_first(congs: List[Congregation]) -> List[Congregation]:
 
 def sidebar_common(user: "User") -> str:
     """
-    Desenha SEMPRE a sidebar e retorna a página selecionada.
-    A seleção anterior é mantida em st.session_state["main_menu_page"].
+    Desenha a sidebar e retorna a página selecionada.
+    Garante que o menu seja desenhado apenas UMA vez por rerun.
+    Chamadas subsequentes só retornam a última seleção.
     """
+    # Se já desenhamos o menu neste rerun, só devolve a seleção armazenada
+    if st.session_state.get("__menu_rendered_once", False):
+        return st.session_state.get("main_menu_page", "Visão Geral")
+
     with st.sidebar:
         # Identidade
         if os.path.exists(LOGO_PATH):
@@ -495,23 +500,22 @@ def sidebar_common(user: "User") -> str:
         else:
             menu_options_plain = ["Visão Geral"]
 
-        # Labels com ícones (para exibir)
+        # Labels bonitos com ícones (mostra para o usuário)
         menu_labels_pretty = [f"{MENU_ICONS.get(opt, '•')} {opt}" for opt in menu_options_plain]
 
         # Mantém seleção anterior
         prev_page = st.session_state.get("main_menu_page")
         default_index = menu_options_plain.index(prev_page) if prev_page in menu_options_plain else 0
 
-        # Um único radio, sempre com a MESMA key
         sel_label = st.radio(
             "Menu",
             options=menu_labels_pretty,
             index=default_index,
-            key="main_menu_nav",          # não mude esta key
-            label_visibility="collapsed",
+            key="main_menu_nav",          # mantenha esta key única
+            label_visibility="collapsed", # esconde o texto "Menu"
         )
 
-        # Converte label bonito -> valor puro
+        # Converte de label com ícone -> valor puro
         sel_index = menu_labels_pretty.index(sel_label)
         page = menu_options_plain[sel_index]
         st.session_state["main_menu_page"] = page
@@ -520,6 +524,8 @@ def sidebar_common(user: "User") -> str:
         if st.button("Sair", key="btn_logout"):
             logout()
 
+    # Marca que já renderizamos o menu neste rerun
+    st.session_state["__menu_rendered_once"] = True
     return page
 
 
