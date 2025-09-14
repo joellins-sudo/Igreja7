@@ -63,29 +63,60 @@ ADJ_OUT_AGG_DESC   = "[Ajuste total de saídas (mês, sede)]"
 st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
 
 # ================== CSS do cartão de login (estilo SEI) ==================
-LOGIN_CSS = """
+# ================== CSS do cartão de login (estilo ADRF) ==================
+ADRF_LOGIN_CSS = """
 <style>
-.login-wrap { min-height: calc(100vh - 4rem); display: grid; place-items: center; }
-.login-card {
-  width: 100%; max-width: 520px; background: #fff; border: 1px solid #E6E8F0;
-  border-radius: 14px; box-shadow: 0 6px 22px rgba(16,24,40,.06); padding: 28px 26px 22px;
-}
-.login-logo { display:flex; align-items:center; justify-content:center; margin-bottom: 18px; }
-.login-title { text-align:center; font-weight: 800; font-size: 2rem; color:#2075C8; letter-spacing:.2px; }
-.login-subtitle { text-align:center; margin-top: -6px; color:#475467; font-size:.95rem; }
+  :root{
+    --adrf: #1F6FEB;       /* primária ADRF */
+    --adrf-ink:#0E3A75;    /* títulos */
+    --adrf-soft:#E8F1FF;   /* foco */
+    --bg:#f5f7fb;
+    --card:#ffffff;
+    --text:#344054;
+  }
+  body{ background:var(--bg); }
 
-.login-form .stTextInput>div>div>input,
-.login-form .stPassword>div>div>input { font-size: 1.02rem; padding-left: 2.2rem; }
+  /* Barra superior */
+  .adrf-topbar{
+    background: linear-gradient(90deg, var(--adrf) 0%, #205fee 100%);
+    color:#fff; padding:10px 16px; display:flex; gap:12px; align-items:center;
+    box-shadow: 0 2px 8px rgba(0,0,0,.08);
+  }
+  .adrf-topbar .brand{ font-weight:800; letter-spacing:.2px; }
+  .adrf-topbar .sub{ margin-left:auto; opacity:.9; font-size:.92rem; }
 
-.icon-left{ position: relative; }
-.icon-left:before{
-  content: attr(data-ico);
-  position:absolute; left:.55rem; top:.48rem; font-size: 1.05rem; opacity:.65;
-}
+  /* Área central / cartão */
+  .login-wrap{ min-height: calc(100vh - 52px); display:grid; place-items:center; padding:32px 16px; }
+  .login-card{
+    width:100%; max-width:520px; background:#fff;
+    border:1px solid #E6E8F0; border-radius:14px;
+    box-shadow: 0 8px 30px rgba(16,24,40,.08);
+    padding: 28px 26px 22px; position:relative;
+  }
+  .login-card::after{
+    content:"ADRF"; position:absolute; right:12px; bottom:8px;
+    font-weight:800; letter-spacing:.2px; font-size:26px; color:var(--adrf); opacity:.06;
+  }
+  .login-logo{ display:flex; align-items:center; justify-content:center; margin-bottom: 10px; }
+  .login-title{ text-align:center; font-weight:900; font-size:1.9rem; color:var(--adrf-ink); margin: 6px 0 2px; }
+  .login-subtitle{ text-align:center; color:#475467; font-size:.98rem; margin:0 0 16px; }
 
-.login-btn .stButton>button{ width:100%; height:44px; font-weight:700; border-radius: 10px; }
+  /* Deixa inputs do Streamlit com cara de ADRF quando dentro de .login-form */
+  .login-form .stTextInput>div>div>input,
+  .login-form .stPassword>div>div>input{
+    font-size:1.02rem; padding: 10px 12px; border:1px solid #E5E7EB !important; border-radius:12px !important;
+  }
+  .login-form .stTextInput>div>div:focus-within,
+  .login-form .stPassword>div>div:focus-within{
+    box-shadow: 0 0 0 3px var(--adrf-soft) !important; border-color: var(--adrf) !important;
+  }
+  .login-btn .stButton>button{
+    width:100%; height:46px; border-radius:12px; font-weight:800; letter-spacing:.2px;
+    box-shadow: 0 6px 16px rgba(31,111,235,.25);
+  }
 </style>
 """
+
 CSS = """
 <style>
 /* ==================== BASE / TIPOGRAFIA ==================== */
@@ -496,29 +527,58 @@ def current_user():
         return db.get(User, uid)
 
 def login_ui():
-    col_logo, col_title = st.columns([1, 3])
-    if os.path.exists(LOGO_PATH):
-        with col_logo:
-            st.image(LOGO_PATH, use_container_width=True)
-    with col_title:
-        st.markdown(f"<h1 class='page-title'>{APP_NAME}</h1>", unsafe_allow_html=True)
-    u = st.text_input("Usuário")
-    p = st.text_input("Senha", type="password")
-    if st.button("Entrar", type="primary"):
-        with SessionLocal() as db:
-            user = db.scalar(select(User).where(User.username == u))
-            if user and verify_password(p, user.password_hash):
-                st.session_state.uid = user.id
-                try:
-                    cm = get_cookie_manager()
-                    token = _make_token({"uid": int(user.id)})
-                    cm.set(COOKIE_NAME, token, expires_at=datetime.utcnow()+timedelta(days=30), key="auth_set")
-                    _update_last_active(cm)
-                except Exception:
-                    st.warning("Login salvo só na sessão atual. Instale 'extra-streamlit-components' para lembrar o login.")
-                st.rerun()
-            else:
-                st.error("Usuário ou senha inválidos.")
+    # injeta o CSS do login ADRF
+    st.markdown(ADRF_LOGIN_CSS, unsafe_allow_html=True)
+
+    # Barra superior ADRF
+    st.markdown(
+        "<div class='adrf-topbar'><div class='brand'>ADRF</div><div class='sub'>Acesso ao sistema</div></div>",
+        unsafe_allow_html=True
+    )
+
+    # Card + título
+    st.markdown("<div class='login-wrap'><div class='login-card'>", unsafe_allow_html=True)
+    with st.container():
+        # Logo (opcional) — usa o mesmo LOGO_PATH já definido no seu código
+        st.markdown("<div class='login-logo'>", unsafe_allow_html=True)
+        try:
+            if os.path.exists(LOGO_PATH):
+                st.image(LOGO_PATH, width=96)
+        except Exception:
+            pass
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown("<div class='login-title'>ADRF</div>", unsafe_allow_html=True)
+        st.markdown("<div class='login-subtitle'>Entre com suas credenciais</div>", unsafe_allow_html=True)
+
+        # Formulário (usa seus campos usuais)
+        st.markdown("<div class='login-form'>", unsafe_allow_html=True)
+        u = st.text_input("Usuário", key="adrf_user")
+        p = st.text_input("Senha", type="password", key="adrf_pass")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Botão Entrar (mantém sua lógica de autenticação)
+        col = st.container()
+        with col:
+            click = st.button("Acessar", type="primary", use_container_width=True)
+            if click:
+                with SessionLocal() as db:
+                    user = db.scalar(select(User).where(User.username == u))
+                    if user and verify_password(p, user.password_hash):
+                        st.session_state.uid = user.id
+                        # cookies/token (como no seu código)
+                        try:
+                            cm = get_cookie_manager()
+                            token = _make_token({"uid": int(user.id)})
+                            cm.set(COOKIE_NAME, token, expires_at=datetime.utcnow()+timedelta(days=30), key="auth_set")
+                            _update_last_active(cm)
+                        except Exception:
+                            st.warning("Login salvo só na sessão atual. Instale 'extra-streamlit-components' para lembrar o login.")
+                        st.rerun()
+                    else:
+                        st.error("Usuário ou senha inválidos.")
+
+    st.markdown("</div></div>", unsafe_allow_html=True)
 
 # ===================== HELPERS =====================
 def is_admin_general(user: "User") -> bool:
