@@ -655,66 +655,19 @@ except Exception:
     <style>
     html, body, [data-testid="stAppViewContainer"]{
         height:100%;
-        overflow:hidden;              /* impede rolagem */
+        overflow:hidden;               /* impede rolagem */
         background: linear-gradient(180deg,#f7f8fc 0%, #f1f3f9 100%);
     }
     /* esconde sidebar no login */
-    [data-testid="stSidebar"]{ display:none !important; }
+    [data-testid="stSidebar"]{ display:none; }
 
-    /* wrapper central */
-    .login-wrap{
-        min-height:100vh;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        padding: 24px;
-    }
-    /* cartão */
-    .login-card{
-        width: 440px;                 /* largura do cartão */
-        max-width: 92vw;
-        background:#fff;
-        border:1px solid #e9e9ee;
-        border-radius:18px;
-        box-shadow: 0 12px 36px rgba(30, 35, 90, .08);
-        padding: 26px 26px 28px;
-    }
-
-    /* marca ADRF */
-    .brand{
-        text-align:center;
-        margin: 6px 0 20px;
-    }
-    .brand .big{
-        display:block;
-        font-weight: 800;
-        font-size: 56px;              /* aumente se quiser */
-        line-height: 1;
-        letter-spacing: .5px;
-        color: #1f6feb;               /* azul */
-    }
-    .brand .sub{
-        display:block;
-        margin-top:6px;
-        font-size: 13px;
-        color: #6b7280;
-    }
-
-    /* inputs e botão */
-    .login-card .stTextInput input,
-    .login-card .stPassword  input{
-        height: 42px;
-        font-size: 16px;
-        border-radius: 10px;
-    }
-    .login-card .stButton > button{
-        width:100%;
-        height: 44px;
-        border-radius: 10px;
-        font-weight: 700;
-    }
+    /* centraliza e limita largura do conteúdo */
+    .block-container{ max-width:480px; margin:10vh auto; }
     </style>
     """
+    st.markdown(LOGIN_CSS, unsafe_allow_html=True)
+    # ... resto do formulário de login ...
+
     st.markdown(LOGIN_CSS, unsafe_allow_html=True)
 
     # ===== HTML de estrutura do cartão =====
