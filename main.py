@@ -456,25 +456,32 @@ def order_congs_sede_first(congs: List[Congregation]) -> List[Congregation]:
 
 def sidebar_common(user: "User") -> str:
     """
-    Desenha o menu lateral uma única vez e retorna a página selecionada.
-    Usa streamlit-antd-components se disponível; senão, cai no st.radio.
+    Desenha o menu lateral (uma única vez) e retorna a página selecionada.
+    Evita menu duplicado usando flags em session_state.
+    Usa streamlit-antd-components (se instalado) ou fallback para st.radio.
     """
-    # Se já renderizou nesta execução, retorna a última seleção
+    # Se a sidebar já foi desenhada nesta execução, só retorna a última seleção
     if st.session_state.get("sidebar_rendered", False):
         return st.session_state.get("main_menu_page", "Visão Geral")
 
+    # Tenta usar o menu bonito; se não houver, cai no radio padrão
+    try:
+        import streamlit_antd_components as sac  # pip install streamlit-antd-components
+    except Exception:
+        sac = None
+
     with st.sidebar:
-        # Tema (se SAC estiver disponível)
+        # Tema do SAC (se disponível)
         if sac:
             sac.theme(primary_color="#6C47FF", border_radius=14)
 
-        # Logo + identificação
+        # Cabeçalho/identidade
         if os.path.exists(LOGO_PATH):
             st.image(LOGO_PATH, use_column_width=True)
         st.write(f"👤 **{user.username}** — *{user.role}*")
         st.divider()
 
-        # Opções por papel
+        # Opções por perfil
         if user.role == "SEDE":
             options_plain = [
                 "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
@@ -490,11 +497,11 @@ def sidebar_common(user: "User") -> str:
         else:
             options_plain = ["Visão Geral"]
 
-        # Seleção prévia (se houver)
-        _prev = st.session_state.get("main_menu_page")
-        _default_index = options_plain.index(_prev) if _prev in options_plain else 0
+        # Seleção anterior (se houver)
+        prev = st.session_state.get("main_menu_page")
+        default_index = options_plain.index(prev) if prev in options_plain else 0
 
-        # ===== Menu bonito (SAC) =====
+        # ===== Menu com ícones (SAC) =====
         if sac:
             ICONS = {
                 "Lançamentos": "upload",
@@ -505,17 +512,17 @@ def sidebar_common(user: "User") -> str:
                 "Visão Geral": "dashboard",
                 "Cadastro": "tool",
             }
-            items = [sac.MenuItem(name=opt, icon=ICONS.get(opt, "dot-chart")) for opt in options_plain]
+            items = [sac.MenuItem(name=o, icon=ICONS.get(o, "dot-chart")) for o in options_plain]
             page = sac.menu(
                 items=items,
-                index=_default_index,
+                index=default_index,
                 size="large",
                 variant="filled",
-                key=f"main_menu_{getattr(user, 'id', 'anon')}",
+                key=f"main_menu_{getattr(user,'id','anon')}",
             )
-        # ===== Fallback simples (radio) =====
+        # ===== Fallback: radio com emojis =====
         else:
-            ICONS_TXT = {
+            EMOJIS = {
                 "Lançamentos": "📥",
                 "Relatório de Entrada": "📊",
                 "Relatório de Saída": "📉",
@@ -524,23 +531,26 @@ def sidebar_common(user: "User") -> str:
                 "Visão Geral": "🏁",
                 "Cadastro": "🛠️",
             }
-            labels = [f"{ICONS_TXT.get(o,'•')} {o}" for o in options_plain]
+            labels = [f"{EMOJIS.get(o,'•')} {o}" for o in options_plain]
             sel = st.radio(
                 "Menu",
                 options=labels,
-                index=_default_index,
-                key=f"main_menu_nav_{getattr(user, 'id', 'anon')}",
+                index=default_index,
+                key=f"main_menu_nav_{getattr(user,'id','anon')}",
                 label_visibility="collapsed",
             )
             page = options_plain[labels.index(sel)]
 
+        # Guarda seleção e marca como renderizado para não duplicar
         st.session_state["main_menu_page"] = page
+        st.session_state["sidebar_rendered"] = True
+
         st.divider()
-        if st.button("Sair", key=f"logout_{getattr(user,'id','anon')}"):
+        if st.button("Sair", key=f"btn_logout_{getattr(user,'id','anon')}"):
             logout()
 
-        st.session_state["sidebar_rendered"] = True
         return page
+
 
 # ======= NOVO: helper padrão para botões 'Salvar alterações' =======
 def _save_btn(on_click, key_suffix: str):
