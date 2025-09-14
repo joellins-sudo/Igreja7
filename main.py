@@ -520,17 +520,81 @@ def order_congs_sede_first(congs: List[Congregation]) -> List[Congregation]:
     others = sorted([c for c in congs if _norm(c.name) != "sede"], key=lambda x: _norm(x.name))
     return (sede + others) if sede else others
 
-def sidebar_common(user: "User"):
+def sidebar_common(user: "User") -> str:
     with st.sidebar:
+        # Logo no topo (se existir)
         if os.path.exists(LOGO_PATH):
             st.image(LOGO_PATH, use_column_width=True)
+
+        # Usuário logado
         st.write(f"👤 **{user.username}** — *{user.role}*")
-        if st.button("Sair"):
+
+        # ===== Menu com "pílulas" e ícones =====
+        MENU_ICONS = {
+            "Lançamentos": "📥",
+            "Relatório de Entrada": "📊",
+            "Relatório de Saída": "📉",
+            "Relatório de Missões": "🌍",
+            "Relatório de Dizimistas": "🧾",
+            "Visão Geral": "🏁",
+            "Cadastro": "🛠️",
+        }
+
+        # Opções conforme o perfil
+        if user.role == "SEDE":
+            menu_options_plain = [
+                "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
+                "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Cadastro"
+            ]
+        elif user.role == "TESOUREIRO":
+            menu_options_plain = [
+                "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
+                "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"
+            ]
+        elif user.role == "TESOUREIRO MISSIONÁRIO":
+            menu_options_plain = ["Relatório de Missões"]
+        else:
+            menu_options_plain = ["Visão Geral"]
+
+        # Labels com ícones para exibição
+        menu_labels_pretty = [f"{MENU_ICONS.get(opt, '•')} {opt}" for opt in menu_options_plain]
+
+        # Índice padrão persiste entre recarregamentos
+        _prev_page = st.session_state.get("main_menu_page")
+        if _prev_page in menu_options_plain:
+            _default_index = menu_options_plain.index(_prev_page)
+        else:
+            _default_index = 0
+
+        sel_label = st.radio(
+            "Menu",
+            options=menu_labels_pretty,
+            index=_default_index,
+            key=f"main_menu_nav_{getattr(user, 'id', 'anon')}",  # chave única por usuário
+            label_visibility="collapsed"
+        )
+
+        # Converte de volta para o texto puro (sem ícone) para o roteamento
+        sel_index = menu_labels_prety_index = menu_labels_pretty.index(sel_label)
+        page = menu_options_plain[sel_index]
+
+        # Guarda a página escolhida para persistir
+        st.session_state["main_menu_page"] = page
+
+        st.divider()
+
+        # Botão sair com chave única
+        if st.button("Sair", key=f"btn_logout_{getattr(user, 'id', 'anon')}"):
             logout()
+
+        # Retorna a página para o roteamento no main()
+        return page
+
 
 # ======= NOVO: helper padrão para botões 'Salvar alterações' =======
 def _save_btn(on_click, key_suffix: str):
     st.button("Salvar alterações", type="primary", key=f"btn_save_{key_suffix}", on_click=on_click)
+
 
 # ===================== APPLY CHANGES — LANÇAMENTOS / DÍZIMOS =====================
 def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: str, default_cong_id: Optional[int]):
@@ -619,6 +683,7 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
                 description=desc, congregation_id=int(cong_id)
             ))
         db.commit()
+
 
 def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default_cong_id: Optional[int]):
     def norm_df(df: pd.DataFrame) -> pd.DataFrame:
