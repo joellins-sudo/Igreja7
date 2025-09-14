@@ -459,100 +459,68 @@ def order_congs_sede_first(congs: List[Congregation]) -> List[Congregation]:
 
 def sidebar_common(user: "User") -> str:
     """
-    Desenha o menu lateral (uma única vez) e retorna a página selecionada.
-    Evita menu duplicado usando flags em session_state.
-    Usa streamlit-antd-components (se instalado) ou fallback para st.radio.
+    Desenha SEMPRE a sidebar e retorna a página selecionada.
+    A seleção anterior é mantida em st.session_state["main_menu_page"].
     """
-    # Se a sidebar já foi desenhada nesta execução, só retorna a última seleção
-    if st.session_state.get("sidebar_rendered", False):
-        return st.session_state.get("main_menu_page", "Visão Geral")
-
-    # Tenta usar o menu bonito; se não houver, cai no radio padrão
-    try:
-        import streamlit_antd_components as sac  # pip install streamlit-antd-components
-    except Exception:
-        sac = None
-
     with st.sidebar:
-        # Tema do SAC (se disponível)
-        if sac:
-            sac.theme(primary_color="#6C47FF", border_radius=14)
-
-        # Cabeçalho/identidade
+        # Identidade
         if os.path.exists(LOGO_PATH):
             st.image(LOGO_PATH, use_column_width=True)
         st.write(f"👤 **{user.username}** — *{user.role}*")
-        st.divider()
+
+        # Ícones do menu
+        MENU_ICONS = {
+            "Lançamentos": "📥",
+            "Relatório de Entrada": "📊",
+            "Relatório de Saída": "📉",
+            "Relatório de Missões": "🌍",
+            "Relatório de Dizimistas": "🧾",
+            "Visão Geral": "🏁",
+            "Cadastro": "🛠️",
+        }
 
         # Opções por perfil
         if user.role == "SEDE":
-            options_plain = [
+            menu_options_plain = [
                 "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
                 "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Cadastro"
             ]
         elif user.role == "TESOUREIRO":
-            options_plain = [
+            menu_options_plain = [
                 "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
                 "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"
             ]
         elif user.role == "TESOUREIRO MISSIONÁRIO":
-            options_plain = ["Relatório de Missões"]
+            menu_options_plain = ["Relatório de Missões"]
         else:
-            options_plain = ["Visão Geral"]
+            menu_options_plain = ["Visão Geral"]
 
-        # Seleção anterior (se houver)
-        prev = st.session_state.get("main_menu_page")
-        default_index = options_plain.index(prev) if prev in options_plain else 0
+        # Labels com ícones (para exibir)
+        menu_labels_pretty = [f"{MENU_ICONS.get(opt, '•')} {opt}" for opt in menu_options_plain]
 
-        # ===== Menu com ícones (SAC) =====
-        if sac:
-            ICONS = {
-                "Lançamentos": "upload",
-                "Relatório de Entrada": "bar-chart",
-                "Relatório de Saída": "line-chart",
-                "Relatório de Missões": "global",
-                "Relatório de Dizimistas": "profile",
-                "Visão Geral": "dashboard",
-                "Cadastro": "tool",
-            }
-            items = [sac.MenuItem(name=o, icon=ICONS.get(o, "dot-chart")) for o in options_plain]
-            page = sac.menu(
-                items=items,
-                index=default_index,
-                size="large",
-                variant="filled",
-                key=f"main_menu_{getattr(user,'id','anon')}",
-            )
-        # ===== Fallback: radio com emojis =====
-        else:
-            EMOJIS = {
-                "Lançamentos": "📥",
-                "Relatório de Entrada": "📊",
-                "Relatório de Saída": "📉",
-                "Relatório de Missões": "🌍",
-                "Relatório de Dizimistas": "🧾",
-                "Visão Geral": "🏁",
-                "Cadastro": "🛠️",
-            }
-            labels = [f"{EMOJIS.get(o,'•')} {o}" for o in options_plain]
-            sel = st.radio(
-                "Menu",
-                options=labels,
-                index=default_index,
-                key=f"main_menu_nav_{getattr(user,'id','anon')}",
-                label_visibility="collapsed",
-            )
-            page = options_plain[labels.index(sel)]
+        # Mantém seleção anterior
+        prev_page = st.session_state.get("main_menu_page")
+        default_index = menu_options_plain.index(prev_page) if prev_page in menu_options_plain else 0
 
-        # Guarda seleção e marca como renderizado para não duplicar
+        # Um único radio, sempre com a MESMA key
+        sel_label = st.radio(
+            "Menu",
+            options=menu_labels_pretty,
+            index=default_index,
+            key="main_menu_nav",          # não mude esta key
+            label_visibility="collapsed",
+        )
+
+        # Converte label bonito -> valor puro
+        sel_index = menu_labels_pretty.index(sel_label)
+        page = menu_options_plain[sel_index]
         st.session_state["main_menu_page"] = page
-        st.session_state["sidebar_rendered"] = True
 
         st.divider()
-        if st.button("Sair", key=f"btn_logout_{getattr(user,'id','anon')}"):
+        if st.button("Sair", key="btn_logout"):
             logout()
 
-        return page
+    return page
 
 
 # ======= NOVO: helper padrão para botões 'Salvar alterações' =======
