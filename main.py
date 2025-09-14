@@ -125,6 +125,49 @@ button[kind="primary"], button, .stDownloadButton button {
   font-weight: 800;
   margin-top: 6px;
 }
+/* ===== Sidebar PILL NAV (Menu bonito) ===== */
+:root{
+  --pill-border:#e5e7eb;
+  --pill-hover:#d4d4d8;
+  --pill-selected:#eef2ff;
+  --pill-selected-border:#6366f1;
+}
+
+[data-testid="stSidebar"] [role="radiogroup"]{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+
+[data-testid="stSidebar"] [role="radiogroup"] label{
+  border:1px solid var(--pill-border);
+  border-radius:12px;
+  padding:10px 12px;
+  background:linear-gradient(180deg,#fff,#fafafa);
+  font-weight:700 !important;
+  cursor:pointer;
+  transition:all .15s ease;
+  box-shadow:0 1px 2px rgba(0,0,0,0.04);
+}
+
+[data-testid="stSidebar"] [role="radiogroup"] label:hover{
+  border-color:var(--pill-hover);
+  transform:translateY(-1px);
+  box-shadow:0 6px 16px rgba(0,0,0,0.08);
+}
+
+/* realce do item selecionado */
+[data-testid="stSidebar"] [role="radiogroup"] label:has([role="radio"][aria-checked="true"]){
+  background:linear-gradient(180deg,#eef2ff,#e0e7ff);
+  border-color:var(--pill-selected-border);
+  box-shadow:0 10px 20px rgba(99,102,241,0.18);
+}
+
+/* evita espaçamento estranho dentro de cada opção */
+[data-testid="stSidebar"] [role="radiogroup"] label p{
+  margin:0 !important;
+}
+
 </style>
 """
 
