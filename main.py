@@ -64,67 +64,64 @@ st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
 
 # ================== CSS do cartão de login (estilo SEI) ==================
 # ================== CSS do cartão de login central ==================
+# ===== CSS do cartão de login compacto, central e sem rolagem =====
 LOGIN_CSS = """
 <style>
-/* Esconde sidebar e header no login e centraliza tudo */
+/* Some a sidebar e o header na tela de login */
 [data-testid="stSidebar"]{ display:none !important; }
 [data-testid="stHeader"]{ display:none !important; }
 
-/* Área que centraliza o cartão vertical e horizontalmente */
+/* Remove respiros do container principal e evita rolagem */
+[data-testid="stAppViewContainer"] .main .block-container{
+  padding-top:0 !important; padding-bottom:0 !important; margin:0 !important;
+}
+html, body, [data-testid="stAppViewContainer"]{
+  height:100vh !important; overflow:hidden !important; background:#f5f7fb;
+}
+
+/* Wrapper 100vh para centralizar perfeitamente */
 .login-wrap{
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  background: #f5f7fb;
-  padding: 1.5rem;
+  height:100vh; width:100vw;
+  display:flex; align-items:center; justify-content:center;
 }
 
-/* Cartão branco com borda suave (o “quadrado” do login) */
+/* Cartão menor (o “quadrado”) */
 .login-card{
-  width: 100%;
-  max-width: 520px;
-  background: #fff;
-  border: 1px solid #E6E8F0;
-  border-radius: 14px;
-  box-shadow: 0 6px 22px rgba(16,24,40,.06);
-  padding: 26px 24px 22px;
+  width:100%; max-width:420px;   /* <= menor que antes */
+  background:#fff;
+  border:1px solid #E6E8F0; border-radius:12px;
+  box-shadow:0 6px 20px rgba(16,24,40,.06);
+  padding:20px 18px 16px;
 }
 
-/* Título azul grande: AD RF! */
+/* Título azul mais compacto */
 .login-title{
-  text-align: center;
-  font-weight: 800;
-  font-size: 2.6rem;          /* ajuste aqui se quiser maior/menor */
-  color: #2075C8;
-  letter-spacing: .4px;
-  margin: 4px 0 2px 0;
+  text-align:center;
+  font-weight:800; font-size:2.2rem;   /* ajuste aqui se quiser */
+  color:#2075C8; letter-spacing:.4px;
+  margin:2px 0 10px 0;
 }
 
-/* Campos com ícone à esquerda (👤 / 🔒) */
+/* Campos menores */
 .login-form .stTextInput>div>div>input,
 .login-form .stPassword>div>div>input{
-  font-size: 1.05rem;
-  padding-left: 2.2rem;
-  height: 44px;
+  font-size:.97rem;
+  height:38px;                      /* <= mais baixo */
+  padding-left:2.0rem;              /* espaço pro ícone */
 }
 
-.icon-left{ position: relative; }
+/* Ícone à esquerda dos inputs */
+.icon-left{ position:relative; }
 .icon-left:before{
   content: attr(data-ico);
-  position: absolute;
-  left: .55rem;
-  top: .48rem;
-  font-size: 1.05rem;
-  opacity: .65;
+  position:absolute; left:.55rem; top:.38rem;
+  font-size:1rem; opacity:.65;
 }
 
-/* Botão “Acessar” ocupando toda a largura */
+/* Botão mais baixo e 100% largura */
 .login-btn .stButton>button{
-  width: 100%;
-  height: 46px;
-  font-weight: 700;
-  border-radius: 10px;
-  background: #165DAA;
+  width:100%; height:40px; border-radius:10px;
+  font-weight:700; background:#165DAA;
 }
 </style>
 """
@@ -555,17 +552,17 @@ def current_user():
         return db.get(User, uid)
 
 def login_ui():
-    # Aplica o CSS do login
+    # aplica o CSS específico do login
     st.markdown(LOGIN_CSS, unsafe_allow_html=True)
 
-    # Container central
+    # wrapper 100vh centralizado
     st.markdown('<div class="login-wrap">', unsafe_allow_html=True)
     st.markdown('<div class="login-card">', unsafe_allow_html=True)
 
-    # Título (nome azul grande)
+    # título azul
     st.markdown('<div class="login-title">AD RF!</div>', unsafe_allow_html=True)
 
-    # Formulário: apenas Usuário e Senha
+    # formulário: usuário + senha (compactos)
     with st.form("login_form_simple", clear_on_submit=False):
         st.markdown('<div class="login-form">', unsafe_allow_html=True)
 
@@ -583,11 +580,11 @@ def login_ui():
         submit = st.form_submit_button("ACESSAR", use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # Fecha containers
+    # fecha os containers
     st.markdown('</div>', unsafe_allow_html=True)   # .login-card
     st.markdown('</div>', unsafe_allow_html=True)   # .login-wrap
 
-    # === Autenticação (mantém sua lógica existente) ===
+    # === autenticação (mantém sua lógica) ===
     if submit:
         if not username or not password:
             st.warning("Informe usuário e senha.")
