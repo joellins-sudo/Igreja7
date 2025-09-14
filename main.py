@@ -160,8 +160,8 @@ CSS_TABLE_BOOST = """
 /* Aumenta o tamanho da fonte APENAS do conteúdo das células */
 [data-testid="stDataFrame"] [role="gridcell"] *,
 [data-testid="stDataEditor"] [role="gridcell"] *{
-  font-size: 3.18rem !important;   /* ajuste aqui: 1.10–1.30rem */
-  line-height: 1.55 !important;
+  font-size: 1.18rem !important;   /* ajuste aqui: 1.10–1.30rem */
+  line-height: 4.55 !important;
 }
 
 /* Cabeçalhos das colunas um pouco maiores e mais fortes */
