@@ -462,6 +462,7 @@ def _to_float_brl(x: Any) -> float:
 # ===================== DB BASE & MODELS =====================
 # ===================== DB BASE & MODELS =====================
 # ===================== DB BASE & MODELS (fix MappedAnnotationError) =====================
+# ===================== DB BASE & MODELS (fix MappedAnnotationError) =====================
 class Base(DeclarativeBase):
     pass
 
@@ -486,8 +487,8 @@ class User(Base):
     username: Mapped[str] = mapped_column(String, unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String)
     role: Mapped[str] = mapped_column(String)  # 'SEDE', 'TESOUREIRO', 'TESOUREIRO MISSIONÁRIO'
-    congregation_id: Mapped[int | None] = mapped_column(ForeignKey("congregations.id"), nullable=True)
-    congregation: Mapped["Congregation" | None] = relationship(back_populates="users")
+    congregation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("congregations.id"), nullable=True)
+    congregation: Mapped[Optional["Congregation"]] = relationship(back_populates="users")
 
 class Transaction(Base):
     __tablename__ = "transactions"
@@ -496,9 +497,9 @@ class Transaction(Base):
     type: Mapped[str] = mapped_column(String)  # 'DOAÇÃO' ou 'SAÍDA'
     category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"))
     amount: Mapped[float] = mapped_column(Float)
-    description: Mapped[str | None] = mapped_column(String, nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     congregation_id: Mapped[int] = mapped_column(ForeignKey("congregations.id"))
-    payment_method: Mapped[str | None] = mapped_column(String, default=None)
+    payment_method: Mapped[Optional[str]] = mapped_column(String, default=None)
 
     category: Mapped["Category"] = relationship(back_populates="transactions", lazy="joined")
     congregation: Mapped["Congregation"] = relationship(back_populates="transactions")
@@ -510,7 +511,7 @@ class Tithe(Base):
     tither_name: Mapped[str] = mapped_column(String)
     amount: Mapped[float] = mapped_column(Float)
     congregation_id: Mapped[int] = mapped_column(ForeignKey("congregations.id"))
-    payment_method: Mapped[str | None] = mapped_column(String, default=None)
+    payment_method: Mapped[Optional[str]] = mapped_column(String, default=None)
     congregation: Mapped["Congregation"] = relationship(back_populates="tithes")
 
 # ===================== ENGINE / SESSION =====================
