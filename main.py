@@ -2494,6 +2494,7 @@ def main():
     try:
         ensure_seed()
 
+        # ------ sessão / cookies ------
         try:
             cm = get_cookie_manager()
             tok = cm.get(COOKIE_NAME)
@@ -2509,22 +2510,16 @@ def main():
         except Exception:
             pass
 
+        # ------ auth ------
         user = current_user()
         if not user:
-            login_ui(); return
+            login_ui()
+            return
 
-        with st.sidebar:
-            if user.role == "SEDE":
-                menu_options = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Dizimistas", "Relatório de Missões", "Visão Geral", "Cadastro"]
-            elif user.role == "TESOUREIRO":
-                # NOVO: congregações têm agora a aba "Relatório de Missões" (somente visualização da própria)
-                menu_options = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"]
-            elif user.role == "TESOUREIRO MISSIONÁRIO":
-                menu_options = ["Relatório de Missões"]
-            else:
-                menu_options = ["Visão Geral"]
-            page = st.radio("Menu", options=menu_options, index=0, key="main_menu")
+        # ------ menu lateral (uma única vez) ------
+        page = sidebar_common(user)  # << usa o menu padronizado
 
+        # ------ roteamento ------
         if page == "Lançamentos":
             page_lancamentos(user)
         elif page == "Relatório de Entrada":
@@ -2534,7 +2529,7 @@ def main():
         elif page == "Relatório de Dizimistas":
             page_relatorio_dizimistas(user)
         elif page == "Relatório de Missões":
-            # direciona conforme papel
+            # Tesoureiro vê a própria congregação; demais papéis veem o geral
             if user.role == "TESOUREIRO":
                 page_relatorio_missoes_congregacao(user)
             else:
@@ -2543,6 +2538,8 @@ def main():
             page_visao_geral(user)
         elif page == "Cadastro":
             page_cadastro(user)
+        else:
+            st.warning("Seleção de página inválida.")
     except Exception as e:
         st.error("Ocorreu um erro ao renderizar a aplicação.")
         st.exception(e)
