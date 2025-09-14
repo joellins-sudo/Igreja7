@@ -147,6 +147,38 @@ html, body {
 }
 </style>
 """
+st.markdown(LOGIN_WIDTH_FIX, unsafe_allow_html=True)
+
+LOGIN_WIDTH_FIX = """
+<style>
+/* Área do login ocupa 100% da viewport e centraliza o cartão */
+#login-scope{
+  position: fixed; inset: 0;
+  display: grid; place-items: center;
+  background: var(--login-bg, transparent);
+  overflow: hidden;   /* evita qualquer scroll no login */
+}
+
+/* Cartão do login: LARGURA CONTROLADA AQUI */
+#login-scope .auth-card{
+  width: 420px;              /* ajuste: 360–460px se quiser mais/menos estreito */
+  max-width: 92vw;
+  background: #fff;
+  border-radius: 14px;
+  padding: 22px 20px;
+  border: 1px solid #E6E8F0;
+  box-shadow: 0 6px 24px rgba(0,0,0,.06);
+}
+
+/* Campos e botão ocupam 100% da largura do cartão */
+#login-scope .stTextInput > div > div,
+#login-scope .stButton > button{
+  width: 100% !important;
+  max-width: 100% !important;
+}
+</style>
+"""
+
 from streamlit.components.v1 import html as st_html
 
 LOCK_SCROLL_JS = """
@@ -624,37 +656,107 @@ def current_user():
         return db.get(User, uid)
 
 def login_ui():
-    # Injeta CSS e JS de bloqueio
+    """Tela de login minimalista ao estilo do exemplo: cartão central, sem rolagem."""
+    import streamlit as st
+
+    # ===== CSS do layout do login (escopo só desta tela) =====
+    LOGIN_CSS = """
+    <style>
+      :root { --brand:#0d6efd; }  /* azul da marca */
+      html, body, [data-testid="stAppViewContainer"]{
+        height:100%;
+        overflow:hidden;           /* evita rolagem na tela de login */
+        background:#f4f6fb;        /* fundo claro */
+      }
+      /* overlay que centra o cartão */
+      #login-scope{
+        position:fixed; inset:0;
+        display:grid; place-items:center;
+        background:linear-gradient(180deg,#f6f7fb 0%, #f1f3f9 100%);
+        z-index: 9999;
+      }
+      /* cartão do login: ajuste a largura aqui */
+      #login-scope .auth-card{
+        width: 420px;              /* deixe 360–460px conforme preferir */
+        max-width: 92vw;
+        background:#ffffff;
+        border:1px solid #E6E8F0;
+        border-radius:16px;
+        box-shadow:0 10px 30px rgba(10,20,60,.08);
+        padding: 28px 22px 20px;
+      }
+      /* Marca ADRF */
+      #login-scope .brand{
+        font-weight: 900;
+        font-size: 52px;           /* aumente/diminua se quiser */
+        letter-spacing: .6px;
+        color: var(--brand);
+        text-align:center;
+        margin: 2px 0 18px;
+        user-select:none;
+      }
+      /* inputs 100% da largura do cartão */
+      #login-scope .stTextInput > div > div{
+        width:100% !important;
+        border-radius:10px;
+        font-size:1rem;
+      }
+      /* botão primário */
+      #login-scope .stButton > button{
+        width:100% !important;
+        height: 44px;
+        border-radius: 10px;
+        background: var(--brand);
+        border: 1px solid #0a5ad6;
+        font-weight: 700;
+      }
+      #login-scope .stButton > button:hover{ filter:brightness(.98); }
+      /* remove rótulos visíveis (usamos placeholder) */
+      #login-scope label[for^="login_user"],
+      #login-scope label[for^="login_pass"]{
+        display:none;
+      }
+      /* mensagem de erro mais visível */
+      #login-scope .stAlert{ margin-top: .25rem; }
+    </style>
+    """
     st.markdown(LOGIN_CSS, unsafe_allow_html=True)
-    st_html(LOCK_SCROLL_JS, height=0)
 
-    # Cartão central
-    st.markdown('<div class="login-wrap"><div class="login-card">', unsafe_allow_html=True)
-    st.markdown('<div class="login-title">ADRF</div>', unsafe_allow_html=True)  # nome atualizado (azul, maior)
-    st.markdown('<div class="login-form">', unsafe_allow_html=True)
+    # ===== Estrutura do cartão =====
+    st.markdown('<div id="login-scope"><div class="auth-card">', unsafe_allow_html=True)
 
-    # Usuário
-    st.markdown('<div class="icon-left" data-ico="👤">', unsafe_allow_html=True)
-    user = st.text_input("Usuário", placeholder="Seu usuário", label_visibility="collapsed", key="login_user")
-    st.markdown('</div>', unsafe_allow_html=True)
+    # Marca ADRF
+    st.markdown('<div class="brand">ADRF</div>', unsafe_allow_html=True)
 
-    # Senha
-    st.markdown('<div class="icon-left" data-ico="🔒">', unsafe_allow_html=True)
-    pwd = st.text_input("Senha", type="password", placeholder="Sua senha", label_visibility="collapsed", key="login_pass")
-    st.markdown('</div>', unsafe_allow_html=True)
+    # Inputs
+    username = st.text_input(
+        "Usuário", key="login_user",
+        placeholder="Seu usuário", label_visibility="collapsed",
+    )
+    password = st.text_input(
+        "Senha", key="login_pass", type="password",
+        placeholder="Sua senha", label_visibility="collapsed",
+    )
 
-    st.markdown('</div>', unsafe_allow_html=True)  # fecha .login-form
+    # Botão acessar
+    do_login = st.button("ACESSAR", key="btn_login_access")
 
-    # Botão
-    st.markdown('<div class="login-btn">', unsafe_allow_html=True)
-    ok = st.button("ACESSAR", use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    # ===== Lógica de autenticação (use sua função existente) =====
+    # Troque `login(username, password)` pela função que você já usa no projeto.
+    if do_login:
+        try:
+            ok = login(username, password)  # <<-- usa sua função existente
+            # Se sua função não retorna bool, mas lança exceção/define cookie,
+            # basta chamar e, em sucesso, forçar recarregar:
+            if ok is None or ok is True:
+                st.experimental_rerun()
+            else:
+                st.error("Usuário ou senha inválidos.")
+        except Exception:
+            st.error("Usuário ou senha inválidos.")
 
-    st.markdown('</div></div>', unsafe_allow_html=True)  # fecha .login-card / .login-wrap
-
-    if ok:
-        # TODO: sua validação de credenciais aqui
-        pass
+    # Fecha o wrapper do cartão
+    st.markdown("</div></div>", unsafe_allow_html=True)
 
 # ===================== HELPERS =====================
 def is_admin_general(user: "User") -> bool:
