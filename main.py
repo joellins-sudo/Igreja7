@@ -65,63 +65,69 @@ st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
 # ================== CSS do cartão de login (estilo SEI) ==================
 # ================== CSS do cartão de login central ==================
 # ===== CSS do cartão de login compacto, central e sem rolagem =====
+# ===== CSS do login: tela fixa (sem rolagem), cartão central e compacto =====
 LOGIN_CSS = """
 <style>
-/* Some a sidebar e o header na tela de login */
-[data-testid="stSidebar"]{ display:none !important; }
-[data-testid="stHeader"]{ display:none !important; }
+/* Esconde header e sidebar na tela de login */
+[data-testid="stHeader"], [data-testid="stSidebar"] { display: none !important; }
 
-/* Remove respiros do container principal e evita rolagem */
+/* Trava a viewport em 100vh e remove rolagem em todos os níveis */
+html, body, #root, .stApp,
+[data-testid="stAppViewContainer"] {
+  height: 100vh !important;
+  min-height: 100vh !important;
+  overflow: hidden !important;
+  background: #f5f7fb;
+}
+
+/* Zera respiros do container principal */
 [data-testid="stAppViewContainer"] .main .block-container{
-  padding-top:0 !important; padding-bottom:0 !important; margin:0 !important;
-}
-html, body, [data-testid="stAppViewContainer"]{
-  height:100vh !important; overflow:hidden !important; background:#f5f7fb;
+  padding: 0 !important;
+  margin: 0 !important;
 }
 
-/* Wrapper 100vh para centralizar perfeitamente */
+/* Wrapper ocupa a tela toda e centraliza o cartão */
 .login-wrap{
-  height:100vh; width:100vw;
-  display:flex; align-items:center; justify-content:center;
+  position: fixed; inset: 0;           /* ocupa 100% da viewport */
+  display: flex; align-items: center; justify-content: center;
 }
 
-/* Cartão menor (o “quadrado”) */
+/* Cartão menor (o “quadrado” central) */
 .login-card{
-  width:100%; max-width:420px;   /* <= menor que antes */
-  background:#fff;
-  border:1px solid #E6E8F0; border-radius:12px;
-  box-shadow:0 6px 20px rgba(16,24,40,.06);
-  padding:20px 18px 16px;
+  width: calc(100vw - 32px);
+  max-width: 420px;                    /* ajuste se quiser ainda menor */
+  background: #fff;
+  border: 1px solid #E6E8F0; border-radius: 12px;
+  box-shadow: 0 6px 20px rgba(16,24,40,.06);
+  padding: 20px 18px 16px;
 }
 
-/* Título azul mais compacto */
+/* Título azul */
 .login-title{
-  text-align:center;
-  font-weight:800; font-size:2.2rem;   /* ajuste aqui se quiser */
-  color:#2075C8; letter-spacing:.4px;
-  margin:2px 0 10px 0;
+  text-align: center;
+  font-weight: 800; font-size: 2.2rem;
+  color: #2075C8; letter-spacing: .4px;
+  margin: 4px 0 12px 0;
 }
 
-/* Campos menores */
+/* Campos compactos */
 .login-form .stTextInput>div>div>input,
 .login-form .stPassword>div>div>input{
-  font-size:.97rem;
-  height:38px;                      /* <= mais baixo */
-  padding-left:2.0rem;              /* espaço pro ícone */
+  font-size: .97rem; height: 38px; padding-left: 2rem;
 }
 
-/* Ícone à esquerda dos inputs */
-.icon-left{ position:relative; }
+/* Ícones à esquerda dos inputs */
+.icon-left{ position: relative; }
 .icon-left:before{
   content: attr(data-ico);
-  position:absolute; left:.55rem; top:.38rem;
-  font-size:1rem; opacity:.65;
+  position: absolute; left: .55rem; top: .38rem;
+  font-size: 1rem; opacity: .65;
 }
 
-/* Botão mais baixo e 100% largura */
+/* Botão de acessar */
 .login-btn .stButton>button{
-  width:100%; height:40px; border-radius:10px;
-  font-weight:700; background:#165DAA;
+  width: 100%; height: 40px; border-radius: 10px;
+  font-weight: 700; background: #165DAA;
 }
 </style>
 """
