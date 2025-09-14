@@ -63,48 +63,66 @@ st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
 CSS = """
 <style>
 /* ==================== BASE / TIPOGRAFIA ==================== */
+:root { --base-font: 17px; }  /* aumente para 18/19/20px se quiser */
 
-/* Fonte levemente mais forte no app todo */
-html, body, [data-testid="stAppViewContainer"] * { font-weight: 520; }
+html, body, [data-testid="stAppViewContainer"] {
+  font-size: var(--base-font);
+  line-height: 1.45;
+}
 
-/* Títulos realmente em negrito */
-h1, h2, h3, .page-title { font-weight: 700 !important; }
+/* Títulos mais fortes e maiores */
+.page-title, h1 { font-size: 2.0rem; font-weight: 800 !important; }
+h2 { font-size: 1.45rem; font-weight: 750; }
+h3 { font-size: 1.25rem; font-weight: 700; }
 
-/* Título da página */
-.page-title { font-size: 1.9rem; margin: 0 0 0.6rem 0; letter-spacing: .2px; }
+/* ==================== WIDGETS / TEXTOS ==================== */
+[data-testid="stSidebar"] * { font-size: 1.02rem; }
+label, [data-testid="stWidgetLabel"] { font-size: 1.02rem; }
 
-/* ==================== MÉTRICAS ==================== */
-[data-testid="stMetricValue"] { font-size: 1.6rem !important; font-weight: 750 !important; }
-[data-testid="stMetricLabel"] { opacity: .75; }
+/* Inputs (texto, número, data, selects) um pouco maiores */
+.stTextInput input,
+.stNumberInput input,
+.stDateInput input,
+.stSelectbox div,
+.stMultiSelect div {
+  font-size: 1.02rem !important;
+}
 
 /* ==================== TABELAS / EDITOR ==================== */
-/* Aviso: as classes .st-emotion-* podem mudar conforme a versão do Streamlit */
-/* Suas classes atuais (ok manter): */
-.st-emotion-cache-1v0mbdj, .st-emotion-cache-16txtl3 { border-radius: 12px; }
-.st-emotion-cache-1wmy9hl { border-radius: 14px; }
-/* Fallback mais estável: */
-[data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; box-shadow: 0 2px 10px rgba(10,10,35,.03); }
+/* Aviso: classes .st-emotion-* mudam conforme a versão do Streamlit. */
+[data-testid="stDataFrame"] * { font-size: 1.0rem; }      /* DataFrame */
+[data-testid="stDataEditor"] * { font-size: 1.02rem; }     /* Data Editor */
+
+/* ==================== MÉTRICAS ==================== */
+[data-testid="stMetricValue"] {
+  font-size: 1.8rem !important;
+  font-weight: 750 !important;
+}
+[data-testid="stMetricLabel"] { font-size: 1.0rem; opacity: .8; }
 
 /* ==================== BOTÕES ==================== */
-button[kind="primary"], button[kind="secondary"], .stButton > button, .stDownloadButton > button {
-  border-radius: 12px !important; font-weight: 650;
+.stButton > button, .stDownloadButton > button {
+  font-size: 1.02rem;
+  border-radius: 14px;
+  font-weight: 650;
 }
-.stButton > button:hover, .stDownloadButton > button:hover { filter: brightness(0.98); }
 
 /* ==================== CARTÕES ESTATÍSTICOS ==================== */
-.stat-card { background: #fff; border: 1px solid #e9e9ee; border-radius: 16px; padding: 14px 16px; box-shadow: 0 2px 8px rgba(10,10,35,.04); }
-.stat-label { font-size: .85rem; opacity: .75; }
-.stat-value { font-size: 1.05rem; font-weight: 700; margin-top: .2rem; }
+.stat-card {
+  background: #fff; border: 1px solid #e9e9ee; border-radius: 16px;
+  padding: 14px 16px;
+}
+.stat-label { font-size: .92rem; opacity: .75; }
+.stat-value { font-size: 1.12rem; font-weight: 700; margin-top: .2rem; }
 
 /* ==================== SIDEBAR ==================== */
-[data-testid="stSidebar"] { background: linear-gradient(180deg, #f7f7fb 0%, #f2f3f9 100%); }
+[data-testid="stSidebar"] {
+  background: linear-gradient(180deg, #f7f7fb 0%, #f2f3f9 100%);
+}
 [data-testid="stSidebar"] .block-container { padding-top: 1rem; }
 
-/* ==================== PEQUENOS AJUSTES ==================== */
-hr { opacity: .6; } /* dividers */
-.stTextInput > div > div > input, .stNumberInput input, .stDateInput input {
-  border-radius: 10px !important;
-}
+/* ==================== AJUSTES LEVES ==================== */
+hr { opacity: .6; }
 </style>
 """
 
