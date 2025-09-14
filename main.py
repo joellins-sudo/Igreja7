@@ -2495,7 +2495,7 @@ def main():
     try:
         ensure_seed()
 
-        # ------ sessão / cookies ------
+        # -------- sessão / cookies --------
         try:
             cm = get_cookie_manager()
             tok = cm.get(COOKIE_NAME)
@@ -2511,19 +2511,19 @@ def main():
         except Exception:
             pass
 
-        # ------ auth ------
+        # -------- auth --------
         user = current_user()
         if not user:
             login_ui()
             return
 
-        # ------ força redesenho do menu nesta execução ------
-        st.session_state.pop("sidebar_rendered", None)   # <<< linha chave
+        # Força o menu a ser redesenhado a cada execução
+        st.session_state["sidebar_rendered"] = False
 
-        # ------ menu lateral (desenha 1x e devolve a página escolhida) ------
+        # -------- menu lateral (uma vez) --------
         page = sidebar_common(user)
 
-        # ------ roteamento ------
+        # -------- roteamento --------
         if page == "Lançamentos":
             page_lancamentos(user)
         elif page == "Relatório de Entrada":
@@ -2533,7 +2533,7 @@ def main():
         elif page == "Relatório de Dizimistas":
             page_relatorio_dizimistas(user)
         elif page == "Relatório de Missões":
-            if user.role == "TESOUREIRO":
+            if getattr(user, "role", "") == "TESOUREIRO":
                 page_relatorio_missoes_congregacao(user)
             else:
                 page_relatorio_missoes(user)
