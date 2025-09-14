@@ -459,21 +459,23 @@ def order_congs_sede_first(congs: List[Congregation]) -> List[Congregation]:
 
 def sidebar_common(user: "User") -> str:
     """
-    Desenha a sidebar e retorna a página selecionada.
-    Garante que o menu seja desenhado apenas UMA vez por rerun.
-    Chamadas subsequentes só retornam a última seleção.
+    Desenha o menu lateral UMA vez por execução e retorna a página escolhida.
+    Nas chamadas seguintes (vindas das páginas), não redesenha o menu nem duplica.
     """
-    # Se já desenhamos o menu neste rerun, só devolve a seleção armazenada
-    if st.session_state.get("__menu_rendered_once", False):
+    # Se já desenhou nesta execução, só devolve a última seleção
+    if st.session_state.get("sidebar_rendered", False):
         return st.session_state.get("main_menu_page", "Visão Geral")
 
     with st.sidebar:
-        # Identidade
-        if os.path.exists(LOGO_PATH):
-            st.image(LOGO_PATH, use_column_width=True)
-        st.write(f"👤 **{user.username}** — *{user.role}*")
+        # Identidade / logo
+        try:
+            if os.path.exists(LOGO_PATH):
+                st.image(LOGO_PATH, use_column_width=True)
+        except Exception:
+            pass
+        st.write(f"👤 **{getattr(user, 'username', 'Usuário')}** — *{getattr(user, 'role', '')}*")
 
-        # Ícones do menu
+        # Ícones e opções por perfil
         MENU_ICONS = {
             "Lançamentos": "📥",
             "Relatório de Entrada": "📊",
@@ -484,26 +486,26 @@ def sidebar_common(user: "User") -> str:
             "Cadastro": "🛠️",
         }
 
-        # Opções por perfil
-        if user.role == "SEDE":
+        role = getattr(user, "role", "")
+        if role == "SEDE":
             menu_options_plain = [
                 "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
                 "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Cadastro"
             ]
-        elif user.role == "TESOUREIRO":
+        elif role == "TESOUREIRO":
             menu_options_plain = [
                 "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
                 "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"
             ]
-        elif user.role == "TESOUREIRO MISSIONÁRIO":
+        elif role == "TESOUREIRO MISSIONÁRIO":
             menu_options_plain = ["Relatório de Missões"]
         else:
             menu_options_plain = ["Visão Geral"]
 
-        # Labels bonitos com ícones (mostra para o usuário)
+        # Labels bonitos com ícones
         menu_labels_pretty = [f"{MENU_ICONS.get(opt, '•')} {opt}" for opt in menu_options_plain]
 
-        # Mantém seleção anterior
+        # Seleção padrão baseada na última escolhida
         prev_page = st.session_state.get("main_menu_page")
         default_index = menu_options_plain.index(prev_page) if prev_page in menu_options_plain else 0
 
@@ -511,22 +513,21 @@ def sidebar_common(user: "User") -> str:
             "Menu",
             options=menu_labels_pretty,
             index=default_index,
-            key="main_menu_nav",          # mantenha esta key única
-            label_visibility="collapsed", # esconde o texto "Menu"
+            key=f"main_menu_nav_{getattr(user, 'id', 'anon')}",
+            label_visibility="visible",   # deixa o título "Menu" visível
         )
 
-        # Converte de label com ícone -> valor puro
-        sel_index = menu_labels_pretty.index(sel_label)
-        page = menu_options_plain[sel_index]
+        page = menu_options_plain[menu_labels_pretty.index(sel_label)]
         st.session_state["main_menu_page"] = page
 
         st.divider()
-        if st.button("Sair", key="btn_logout"):
+        if st.button("Sair", key=f"btn_logout_{getattr(user, 'id', 'anon')}"):
             logout()
 
-    # Marca que já renderizamos o menu neste rerun
-    st.session_state["__menu_rendered_once"] = True
-    return page
+        # Marca que o sidebar já foi desenhado nesta execução
+        st.session_state["sidebar_rendered"] = True
+
+        return page
 
 
 # ======= NOVO: helper padrão para botões 'Salvar alterações' =======
