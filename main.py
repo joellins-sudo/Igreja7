@@ -251,6 +251,54 @@ FORM_BUTTONS_CSS = """
 }
 </style>
 """
+# === Cores dos botões por formulário (compat com chamada antiga BUTTONS_CSS) ===
+FORM_BUTTONS_CSS = """
+<style>
+.adrf-entrada .stButton>button,
+.adrf-dizimo .stButton>button,
+.adrf-saida .stButton>button{
+  border-width:1px !important;
+  font-weight:700 !important;
+}
+
+/* ENTRADAS = verde */
+.adrf-entrada .stButton>button{
+  background:#16a34a !important;
+  border-color:#16a34a !important;
+  color:#fff !important;
+}
+.adrf-entrada .stButton>button:hover{
+  background:#15803d !important;
+  border-color:#15803d !important;
+}
+
+/* DIZIMISTAS = azul */
+.adrf-dizimo .stButton>button{
+  background:#1d4ed8 !important;
+  border-color:#1d4ed8 !important;
+  color:#fff !important;
+}
+.adrf-dizimo .stButton>button:hover{
+  background:#1e40af !important;
+  border-color:#1e40af !important;
+}
+
+/* SAÍDAS = vermelho */
+.adrf-saida .stButton>button{
+  background:#dc2626 !important;
+  border-color:#dc2626 !important;
+  color:#fff !important;
+}
+.adrf-saida .stButton>button:hover{
+  background:#b91c1c !important;
+  border-color:#b91c1c !important;
+}
+</style>
+"""
+
+# Alias para manter compatibilidade com a linha 256
+BUTTONS_CSS = FORM_BUTTONS_CSS
+
 st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)
 
 st.markdown(BUTTONS_CSS, unsafe_allow_html=True)
@@ -272,6 +320,7 @@ CSS_TABLE_BOOST = """
 }
 </style>
 """
+
 st.markdown(CSS_TABLE_BOOST, unsafe_allow_html=True)
 
 st.markdown(CSS, unsafe_allow_html=True)
@@ -1562,6 +1611,68 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, is_all: bool =
 # ===================== PAGE: LANÇAMENTOS =====================
 def page_lancamentos(user: "User"):
     ensure_seed()
+
+    # --- CSS local desta página (cores dos botões + cartão HTML) ---
+    _LAN_CSS = """
+    <style>
+      /* Cartões e layout */
+      .adrf-card{
+        background:#fff;
+        border:1px solid #e9e9ee;
+        border-radius:14px;
+        padding:16px 18px;
+        margin-bottom:18px;
+        box-shadow:0 2px 10px rgba(16,24,40,.06);
+      }
+      .adrf-section-title{
+        margin:0 0 10px 0;
+        font-weight:800;
+      }
+
+      /* Cores dos botões por seção */
+      .adrf-entrada .stButton>button{
+        background:#16a34a !important;   /* verde */
+        border-color:#16a34a !important;
+        color:#fff !important;
+        font-weight:700 !important;
+      }
+      .adrf-entrada .stButton>button:hover{
+        background:#15803d !important;
+        border-color:#15803d !important;
+      }
+
+      .adrf-dizimo .stButton>button{
+        background:#1d4ed8 !important;   /* azul */
+        border-color:#1d4ed8 !important;
+        color:#fff !important;
+        font-weight:700 !important;
+      }
+      .adrf-dizimo .stButton>button:hover{
+        background:#1e40af !important;
+        border-color:#1e40af !important;
+      }
+
+      .adrf-saida .stButton>button{
+        background:#dc2626 !important;   /* vermelho */
+        border-color:#dc2626 !important;
+        color:#fff !important;
+        font-weight:700 !important;
+      }
+      .adrf-saida .stButton>button:hover{
+        background:#b91c1c !important;
+        border-color:#b91c1c !important;
+      }
+
+      /* Inputs um pouco mais compactos nesta página */
+      .adrf-card [data-testid="stForm"] input,
+      .adrf-card [data-testid="stForm"] select,
+      .adrf-card [data-testid="stForm"] textarea{
+        font-size:1rem;
+      }
+    </style>
+    """
+    st.markdown(_LAN_CSS, unsafe_allow_html=True)
+
     with SessionLocal() as db:
         sidebar_common(user)
 
@@ -1569,23 +1680,36 @@ def page_lancamentos(user: "User"):
 
         congs = cong_options_for(user, db)
         if not congs:
-            st.info("Nenhuma congregação disponível."); return
+            st.info("Nenhuma congregação disponível.")
+            return
 
         if user.role == "SEDE":
             congs_ordered = order_congs_sede_first(congs)
-            cong_sel = st.selectbox("Selecione a congregação", [c.name for c in congs_ordered], key="lan_cong_sel")
+            cong_sel = st.selectbox(
+                "Selecione a congregação",
+                [c.name for c in congs_ordered],
+                key="lan_cong_sel"
+            )
             cong_obj = next(c for c in congs_ordered if c.name == cong_sel)
         else:
             cong_obj = congs[0]
 
-        st.markdown(f"<div class='cong-title'>CONGREGAÇÃO: {cong_obj.name.upper()}</div>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div class='cong-title'>CONGREGAÇÃO: {cong_obj.name.upper()}</div>",
+            unsafe_allow_html=True
+        )
 
-        # ENTRADA
-        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
-        st.subheader("Lançar ENTRADA (Doação)")
+        # ===================== ENTRADA (Doação) — VERDE =====================
+        st.markdown('<div class="adrf-card adrf-entrada">', unsafe_allow_html=True)
+        st.markdown("<h3 class='adrf-section-title'>Lançar ENTRADA (Doação)</h3>", unsafe_allow_html=True)
         with st.form("form_entrada", clear_on_submit=True):
-            c1,c2,c3 = st.columns([1.1,1.4,2])
-            ent_data = st.date_input("Data do Culto", value=today_bahia(), key="ent_data", format="DD/MM/YYYY")
+            c1, c2, c3 = st.columns([1.1, 1.4, 2])
+            ent_data = st.date_input(
+                "Data do Culto",
+                value=today_bahia(),
+                key="ent_data",
+                format="DD/MM/YYYY"
+            )
             with c2:
                 cats_in = categories_for_type(db, TYPE_IN)
                 cats_in = [c for c in cats_in if "ajuste" not in _norm(c.name)]
@@ -1595,10 +1719,23 @@ def page_lancamentos(user: "User"):
                 top = [n for n in cat_names_in if _norm(n) in desired_norm]
                 rest = [n for n in cat_names_in if _norm(n) not in desired_norm]
                 cat_display = top + rest
-                ent_cat = st.selectbox("Categoria (ordem: Dízimo, Oferta, Missões)", cat_display, key="ent_cat")
+                ent_cat = st.selectbox(
+                    "Categoria (ordem: Dízimo, Oferta, Missões)",
+                    cat_display,
+                    key="ent_cat"
+                )
+
             ent_desc = st.text_input("Descrição (opcional)", key="ent_desc")
-            ent_flag_missoes = _norm(ent_cat) == "oferta" and st.checkbox("Oferta de missões?", key="ent_flag_missoes")
-            ent_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="ent_valor")
+            ent_flag_missoes = _norm(ent_cat) == "oferta" and st.checkbox(
+                "Oferta de missões?",
+                key="ent_flag_missoes"
+            )
+            ent_valor = st.number_input(
+                "Valor (R$)",
+                min_value=0.0, step=1.0,
+                format="%.2f",
+                key="ent_valor"
+            )
 
             if st.form_submit_button("Salvar ENTRADA", type="primary"):
                 with SessionLocal() as _db:
@@ -1606,10 +1743,14 @@ def page_lancamentos(user: "User"):
                     if ent_flag_missoes:
                         cat_name = "Missões"
                         if not _db.scalar(select(Category).where(Category.name == "Missões")):
-                            _db.add(Category(name="Missões", type=TYPE_IN)); _db.commit()
+                            _db.add(Category(name="Missões", type=TYPE_IN))
+                            _db.commit()
+
                     cat_obj = _db.scalar(select(Category).where(Category.name == cat_name))
                     if not cat_obj:
-                        st.error("Informe a categoria."); return
+                        st.error("Informe a categoria.")
+                        st.stop()
+
                     _db.add(Transaction(
                         date=ent_data, type=TYPE_IN, category_id=cat_obj.id,
                         amount=ent_valor, description=(ent_desc or None),
@@ -1617,22 +1758,39 @@ def page_lancamentos(user: "User"):
                     ))
                     _db.commit()
                     st.success("Entrada registrada.")
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
         st.markdown("---")
 
-        # DÍZIMOS
-        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
-        st.subheader("Salvar DIZIMISTA")
+        # ===================== DÍZIMOS — AZUL =====================
+        st.markdown('<div class="adrf-card adrf-dizimo">', unsafe_allow_html=True)
+        st.markdown("<h3 class='adrf-section-title'>Salvar DIZIMISTA</h3>", unsafe_allow_html=True)
         with st.form("form_dizimo", clear_on_submit=True):
-            dz_data = st.date_input("Data do Culto", value=today_bahia(), key="dz_data", format="DD/MM/YYYY")
+            dz_data = st.date_input(
+                "Data do Culto",
+                value=today_bahia(),
+                key="dz_data",
+                format="DD/MM/YYYY"
+            )
             dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
-            dz_valor = st.number_input("Valor dízimo (R$)", min_value=0.0, step=1.0, format="%.2f", key="dz_valor")
-            dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX"], key="dz_payment_method")
+            dz_valor = st.number_input(
+                "Valor dízimo (R$)",
+                min_value=0.0, step=1.0,
+                format="%.2f",
+                key="dz_valor"
+            )
+            dz_payment = st.selectbox(
+                "Forma de Pagamento",
+                ["Dinheiro", "PIX"],
+                key="dz_payment_method"
+            )
 
             if st.form_submit_button("Salvar DIZIMISTA", type="primary"):
                 nome = (dz_nome or "").strip()
                 if not nome:
-                    st.error("Informe o nome do dizimista."); return
+                    st.error("Informe o nome do dizimista.")
+                    st.stop()
+
                 with SessionLocal() as _db:
                     _db.add(Tithe(
                         date=dz_data, tither_name=nome, amount=float(dz_valor),
@@ -1640,32 +1798,49 @@ def page_lancamentos(user: "User"):
                     ))
                     _db.commit()
                     st.success("Dízimo registrado.")
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
         st.markdown("---")
 
-        # SAÍDA
-        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
-        st.subheader("Lançar SAÍDA")
+        # ===================== SAÍDA — VERMELHO =====================
+        st.markdown('<div class="adrf-card adrf-saida">', unsafe_allow_html=True)
+        st.markdown("<h3 class='adrf-section-title'>Lançar SAÍDA</h3>", unsafe_allow_html=True)
         with st.form("form_saida", clear_on_submit=True):
-            sai_data = st.date_input("Data", value=today_bahia(), key="sai_data", format="DD/MM/YYYY")
+            sai_data = st.date_input(
+                "Data",
+                value=today_bahia(),
+                key="sai_data",
+                format="DD/MM/YYYY"
+            )
             cats_out = categories_for_type(db, TYPE_OUT)
-            sai_cat = st.selectbox("Tipo da saída (Categoria)", [c.name for c in cats_out] or ["—"], key="sai_cat")
+            sai_cat = st.selectbox(
+                "Tipo da saída (Categoria)",
+                [c.name for c in cats_out] or ["—"],
+                key="sai_cat"
+            )
             sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
-            sai_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="sai_valor")
+            sai_valor = st.number_input(
+                "Valor (R$)",
+                min_value=0.0, step=1.0,
+                format="%.2f",
+                key="sai_valor"
+            )
 
             if st.form_submit_button("Salvar SAÍDA", type="primary"):
                 with SessionLocal() as _db:
                     cat_obj = _db.scalar(select(Category).where(Category.name == sai_cat))
                     if not cat_obj:
-                        st.error("Informe o tipo de saída."); return
+                        st.error("Informe o tipo de saída.")
+                        st.stop()
+
                     _db.add(Transaction(
                         date=sai_data, type=TYPE_OUT, category_id=cat_obj.id,
                         amount=sai_valor, description=(sai_desc or None),
-                        congregation_id=cong_obj.id,
+                        congregation_id=cong_obj.id
                     ))
                     _db.commit()
                     st.success("Saída registrada.")
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 def page_relatorio_entrada(user: "User"):
