@@ -64,56 +64,63 @@ st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
 
 # ================== CSS do cartão de login (estilo SEI) ==================
 # ================== CSS do cartão de login (estilo ADRF) ==================
-ADRF_LOGIN_CSS = """
+# ================== LOGIN SEI: CSS/HTML (trabalhando com Streamlit) ==================
+SEI_LOGIN_CSS = """
 <style>
   :root{
-    --adrf: #1F6FEB;       /* primária ADRF */
-    --adrf-ink:#0E3A75;    /* títulos */
-    --adrf-soft:#E8F1FF;   /* foco */
-    --bg:#f5f7fb;
-    --card:#ffffff;
-    --text:#344054;
+    --azul-1:#1f6feb;        /* azul botão */
+    --azul-2:#185fcd;        /* azul gradiente */
+    --azul-esc:#0b4b9a;      /* hover */
+    --cinza-bg:#f0f0f0;      /* fundo da página */
+    --cinza-borda:#dfe3ea;   /* borda inputs */
+    --cinza-ico:#e9ecef;     /* caixinha do ícone */
+    --texto:#344054;
   }
-  body{ background:var(--bg); }
 
-  /* Barra superior */
-  .adrf-topbar{
-    background: linear-gradient(90deg, var(--adrf) 0%, #205fee 100%);
-    color:#fff; padding:10px 16px; display:flex; gap:12px; align-items:center;
-    box-shadow: 0 2px 8px rgba(0,0,0,.08);
-  }
-  .adrf-topbar .brand{ font-weight:800; letter-spacing:.2px; }
-  .adrf-topbar .sub{ margin-left:auto; opacity:.9; font-size:.92rem; }
+  body{ background:var(--cinza-bg); }
 
-  /* Área central / cartão */
-  .login-wrap{ min-height: calc(100vh - 52px); display:grid; place-items:center; padding:32px 16px; }
-  .login-card{
-    width:100%; max-width:520px; background:#fff;
-    border:1px solid #E6E8F0; border-radius:14px;
-    box-shadow: 0 8px 30px rgba(16,24,40,.08);
-    padding: 28px 26px 22px; position:relative;
+  /* Área central e cartão */
+  .sei-wrap{ min-height:calc(100vh - 0px); display:grid; place-items:center; padding:24px 12px; }
+  .sei-card{
+    width:100%; max-width:540px; background:#fff; border:1px solid rgba(0,0,0,.07);
+    border-radius:.5rem; box-shadow:0 10px 26px rgba(16,24,40,.08);
   }
-  .login-card::after{
-    content:"ADRF"; position:absolute; right:12px; bottom:8px;
-    font-weight:800; letter-spacing:.2px; font-size:26px; color:var(--adrf); opacity:.06;
-  }
-  .login-logo{ display:flex; align-items:center; justify-content:center; margin-bottom: 10px; }
-  .login-title{ text-align:center; font-weight:900; font-size:1.9rem; color:var(--adrf-ink); margin: 6px 0 2px; }
-  .login-subtitle{ text-align:center; color:#475467; font-size:.98rem; margin:0 0 16px; }
+  .sei-card .body{ padding:26px 24px 18px; }
 
-  /* Deixa inputs do Streamlit com cara de ADRF quando dentro de .login-form */
-  .login-form .stTextInput>div>div>input,
-  .login-form .stPassword>div>div>input{
-    font-size:1.02rem; padding: 10px 12px; border:1px solid #E5E7EB !important; border-radius:12px !important;
+  /* Logo "sei!" */
+  .sei-logo{ display:flex; align-items:center; justify-content:center; margin:14px 0 18px; }
+  .sei-logo img{ height:58px; }
+
+  /* Grupos com ícone à esquerda (imitando input-group do HTML que você mandou) */
+  .sei-form .group{ display:flex; align-items:stretch; margin-bottom:12px; }
+  .sei-form .ico{
+    flex:0 0 46px; display:flex; align-items:center; justify-content:center;
+    background:var(--cinza-ico); border:1px solid var(--cinza-borda);
+    border-right:none; border-radius:.25rem 0 0 .25rem;
+    color:#6b7280; font-size:18px;
   }
-  .login-form .stTextInput>div>div:focus-within,
-  .login-form .stPassword>div>div:focus-within{
-    box-shadow: 0 0 0 3px var(--adrf-soft) !important; border-color: var(--adrf) !important;
+  .sei-form .field [data-testid="stTextInput"]>div>div>input,
+  .sei-form .field [data-testid="stPassword"]>div>div>input,
+  .sei-form .field [data-testid="stSelectbox"]>div>div>div>div{
+    height:44px; border:1px solid var(--cinza-borda); border-left:none; border-radius:0 .25rem .25rem 0 !important;
+    font-size:1rem;
   }
-  .login-btn .stButton>button{
-    width:100%; height:46px; border-radius:12px; font-weight:800; letter-spacing:.2px;
-    box-shadow: 0 6px 16px rgba(31,111,235,.25);
+  /* remove o label do Streamlit dentro do grupo */
+  .sei-form .field [data-testid="stWidgetLabel"]{ display:none; }
+
+  /* botão ACESSAR com gradiente */
+  .sei-btn .stButton>button{
+    width:100%; height:44px; border:none; color:#fff; font-weight:700; letter-spacing:.3px;
+    border-radius:.25rem;
+    background:linear-gradient(180deg, var(--azul-1) 0%, var(--azul-2) 100%);
+    box-shadow:0 6px 16px rgba(24,95,205,.25);
   }
+  .sei-btn .stButton>button:hover{ background:linear-gradient(180deg, var(--azul-2) 0%, var(--azul-esc) 100%); }
+
+  /* link 2FA */
+  .sei-2fa{ text-align:right; margin-top:6px; }
+  .sei-2fa a{ color:#0d6efd; font-size:.92rem; text-decoration:none; }
+  .sei-2fa a:hover{ text-decoration:underline; }
 </style>
 """
 
@@ -527,57 +534,92 @@ def current_user():
         return db.get(User, uid)
 
 def login_ui():
-    # injeta o CSS do login ADRF
-    st.markdown(ADRF_LOGIN_CSS, unsafe_allow_html=True)
+    # CSS do layout SEI
+    st.markdown(SEI_LOGIN_CSS, unsafe_allow_html=True)
 
-    # Barra superior ADRF
-    st.markdown(
-        "<div class='adrf-topbar'><div class='brand'>ADRF</div><div class='sub'>Acesso ao sistema</div></div>",
-        unsafe_allow_html=True
-    )
+    # Container central (cartão)
+    st.markdown("<div class='sei-wrap'><div class='sei-card'><div class='body'>", unsafe_allow_html=True)
 
-    # Card + título
-    st.markdown("<div class='login-wrap'><div class='login-card'>", unsafe_allow_html=True)
+    # Logo (usa assets/logo.png se existir; senão mostra o texto 'sei!')
+    st.markdown("<div class='sei-logo'>", unsafe_allow_html=True)
+    try:
+        if os.path.exists(LOGO_PATH):
+            st.image(LOGO_PATH, caption=None, use_container_width=False)
+        else:
+            st.markdown("<div style='font:800 54px/1.1 Inter,system-ui; color:#1f6feb;'>sei<span style='color:#74b816'>!</span></div>", unsafe_allow_html=True)
+    except Exception:
+        st.markdown("<div style='font:800 54px/1.1 Inter,system-ui; color:#1f6feb;'>sei<span style='color:#74b816'>!</span></div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # --- Formulário com grupos de ícone à esquerda (igual ao HTML enviado) ---
+    st.markdown("<div class='sei-form'>", unsafe_allow_html=True)
+
+    # Usuário
+    st.markdown("<div class='group'>", unsafe_allow_html=True)
+    st.markdown("<div class='ico'>👤</div>", unsafe_allow_html=True)
     with st.container():
-        # Logo (opcional) — usa o mesmo LOGO_PATH já definido no seu código
-        st.markdown("<div class='login-logo'>", unsafe_allow_html=True)
-        try:
-            if os.path.exists(LOGO_PATH):
-                st.image(LOGO_PATH, width=96)
-        except Exception:
-            pass
+        st.markdown("<div class='field'>", unsafe_allow_html=True)
+        u = st.text_input("Usuário", key="sei_user", label_visibility="collapsed", placeholder="Usuário")
         st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown("<div class='login-title'>ADRF</div>", unsafe_allow_html=True)
-        st.markdown("<div class='login-subtitle'>Entre com suas credenciais</div>", unsafe_allow_html=True)
-
-        # Formulário (usa seus campos usuais)
-        st.markdown("<div class='login-form'>", unsafe_allow_html=True)
-        u = st.text_input("Usuário", key="adrf_user")
-        p = st.text_input("Senha", type="password", key="adrf_pass")
+    # Senha
+    st.markdown("<div class='group'>", unsafe_allow_html=True)
+    st.markdown("<div class='ico'>🔒</div>", unsafe_allow_html=True)
+    with st.container():
+        st.markdown("<div class='field'>", unsafe_allow_html=True)
+        p = st.text_input("Senha", type="password", key="sei_pass", label_visibility="collapsed", placeholder="Senha")
         st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-        # Botão Entrar (mantém sua lógica de autenticação)
-        col = st.container()
-        with col:
-            click = st.button("Acessar", type="primary", use_container_width=True)
-            if click:
-                with SessionLocal() as db:
-                    user = db.scalar(select(User).where(User.username == u))
-                    if user and verify_password(p, user.password_hash):
-                        st.session_state.uid = user.id
-                        # cookies/token (como no seu código)
-                        try:
-                            cm = get_cookie_manager()
-                            token = _make_token({"uid": int(user.id)})
-                            cm.set(COOKIE_NAME, token, expires_at=datetime.utcnow()+timedelta(days=30), key="auth_set")
-                            _update_last_active(cm)
-                        except Exception:
-                            st.warning("Login salvo só na sessão atual. Instale 'extra-streamlit-components' para lembrar o login.")
-                        st.rerun()
-                    else:
-                        st.error("Usuário ou senha inválidos.")
+    # "Órgão" do mock (apenas visual como no HTML; não altera seu backend)
+    # Aqui eu uso as congregações do seu banco só para preencher a lista (fica igual ao select da imagem).
+    try:
+        with SessionLocal() as _db:
+            nomes_cong = [c.name for c in _db.scalars(select(Congregation).order_by(Congregation.name)).all()]
+        if not nomes_cong:
+            nomes_cong = ["Sede"]
+    except Exception:
+        nomes_cong = ["Sede"]
+    st.markdown("<div class='group'>", unsafe_allow_html=True)
+    st.markdown("<div class='ico'>🏢</div>", unsafe_allow_html=True)
+    with st.container():
+        st.markdown("<div class='field'>", unsafe_allow_html=True)
+        orgao = st.selectbox("Órgão", options=nomes_cong, index=0, key="sei_orgao", label_visibility="collapsed", placeholder="Órgão")
+        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
+    # Botão ACESSAR
+    st.markdown("<div class='sei-btn'>", unsafe_allow_html=True)
+    clicked = st.button("ACESSAR")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # Link 2FA (somente visual)
+    st.markdown("<div class='sei-2fa'><a href='#' id='link2fa'>Autenticação em dois fatores</a></div>", unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)  # fecha .sei-form
+
+    # --- Lógica de autenticação (igual à sua original) ---
+    if clicked:
+        with SessionLocal() as db:
+            user = db.scalar(select(User).where(User.username == u))
+            if user and verify_password(p, user.password_hash):
+                st.session_state.uid = user.id
+                # cookies/token como no seu código
+                try:
+                    cm = get_cookie_manager()
+                    token = _make_token({"uid": int(user.id)})
+                    cm.set(COOKIE_NAME, token, expires_at=datetime.utcnow()+timedelta(days=30), key="auth_set")
+                    _update_last_active(cm)
+                    # (opcional) guardar o "órgão" escolhido por 1 ano só para lembrar visualmente
+                    cm.set("SEI_ORGAO", orgao, expires_at=datetime.utcnow()+timedelta(days=365), key="org_set")
+                except Exception:
+                    st.warning("Login salvo só na sessão atual. Instale 'extra-streamlit-components' para lembrar o login.")
+                st.rerun()
+            else:
+                st.error("Usuário ou senha inválidos.")
+
+    # Fecha cartão
     st.markdown("</div></div>", unsafe_allow_html=True)
 
 # ===================== HELPERS =====================
