@@ -523,6 +523,21 @@ def current_user():
 def login_ui():
     # CSS ADRF
     st.markdown(ADRF_LOGIN_CSS, unsafe_allow_html=True)
+    # Centraliza o conteúdo na viewport e remove espaços do Streamlit
+CENTER_LOGIN_CSS = """
+<style>
+  html, body, [data-testid="stAppViewContainer"]{ height:100%; }
+  /* faz a área principal virar um container centralizado */
+  [data-testid="stAppViewContainer"] > .main{
+    display:flex; align-items:center; justify-content:center;
+    min-height:100vh; padding:0 !important;
+  }
+  /* opcional: some com header/rodapé do Streamlit na tela de login */
+  header[data-testid="stHeader"]{ display:none; }
+  footer { visibility:hidden; }
+</style>
+"""
+st.markdown(CENTER_LOGIN_CSS, unsafe_allow_html=True)
 
     # cartão
     st.markdown("<div class='adrf-wrap'><div class='adrf-card'><div class='body'>", unsafe_allow_html=True)
