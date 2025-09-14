@@ -336,55 +336,52 @@ st.markdown(CSS, unsafe_allow_html=True)
 # === Cores dos botões de submit pelos KEYS dos botões ===
 SUBMIT_COLORS_CSS = """
 <style>
-/* ===== ENTRADA (form_entrada) — VERDE ===== */
-[data-testid="stForm"][data-st-key="form_entrada"] [data-testid="baseButton-primary"],
-[data-testid="stForm"][data-st-key="form_entrada"] button[kind="primary"],
-[data-testid="stForm"][data-st-key="form_entrada"] .stButton>button{
+/* ===== ENTRADA — VERDE (key: sb_entrada) ===== */
+div[data-testid="stFormSubmitButton"][data-st-key="sb_entrada"] [data-testid="baseButton-primary"],
+div[data-testid="stFormSubmitButton"][data-st-key="sb_entrada"] button,
+div[data-testid="stForm"][data-st-key="form_entrada"] button[kind="primary"]{
   background:#16a34a !important;
   border-color:#16a34a !important;
   color:#fff !important;
   font-weight:700 !important;
   border-radius:14px !important;
 }
-[data-testid="stForm"][data-st-key="form_entrada"] [data-testid="baseButton-primary"]:hover,
-[data-testid="stForm"][data-st-key="form_entrada"] button[kind="primary"]:hover,
-[data-testid="stForm"][data-st-key="form_entrada"] .stButton>button:hover{
-  background:#15803d !important;
-  border-color:#15803d !important;
+div[data-testid="stFormSubmitButton"][data-st-key="sb_entrada"] [data-testid="baseButton-primary"]:hover,
+div[data-testid="stFormSubmitButton"][data-st-key="sb_entrada"] button:hover,
+div[data-testid="stForm"][data-st-key="form_entrada"] button[kind="primary"]:hover{
+  background:#15803d !important; border-color:#15803d !important;
 }
 
-/* ===== DÍZIMO (form_dizimo) — AZUL ===== */
-[data-testid="stForm"][data-st-key="form_dizimo"] [data-testid="baseButton-primary"],
-[data-testid="stForm"][data-st-key="form_dizimo"] button[kind="primary"],
-[data-testid="stForm"][data-st-key="form_dizimo"] .stButton>button{
+/* ===== DÍZIMO — AZUL (key: sb_dizimo) ===== */
+div[data-testid="stFormSubmitButton"][data-st-key="sb_dizimo"] [data-testid="baseButton-primary"],
+div[data-testid="stFormSubmitButton"][data-st-key="sb_dizimo"] button,
+div[data-testid="stForm"][data-st-key="form_dizimo"] button[kind="primary"]{
   background:#1d4ed8 !important;
   border-color:#1d4ed8 !important;
   color:#fff !important;
   font-weight:700 !important;
   border-radius:14px !important;
 }
-[data-testid="stForm"][data-st-key="form_dizimo"] [data-testid="baseButton-primary"]:hover,
-[data-testid="stForm"][data-st-key="form_dizimo"] button[kind="primary"]:hover,
-[data-testid="stForm"][data-st-key="form_dizimo"] .stButton>button:hover{
-  background:#1e40af !important;
-  border-color:#1e40af !important;
+div[data-testid="stFormSubmitButton"][data-st-key="sb_dizimo"] [data-testid="baseButton-primary"]:hover,
+div[data-testid="stFormSubmitButton"][data-st-key="sb_dizimo"] button:hover,
+div[data-testid="stForm"][data-st-key="form_dizimo"] button[kind="primary"]:hover{
+  background:#1e40af !important; border-color:#1e40af !important;
 }
 
-/* ===== SAÍDA (form_saida) — VERMELHO ===== */
-[data-testid="stForm"][data-st-key="form_saida"] [data-testid="baseButton-primary"],
-[data-testid="stForm"][data-st-key="form_saida"] button[kind="primary"],
-[data-testid="stForm"][data-st-key="form_saida"] .stButton>button{
+/* ===== SAÍDA — VERMELHO (key: sb_saida) ===== */
+div[data-testid="stFormSubmitButton"][data-st-key="sb_saida"] [data-testid="baseButton-primary"],
+div[data-testid="stFormSubmitButton"][data-st-key="sb_saida"] button,
+div[data-testid="stForm"][data-st-key="form_saida"] button[kind="primary"]{
   background:#dc2626 !important;
   border-color:#dc2626 !important;
   color:#fff !important;
   font-weight:700 !important;
   border-radius:14px !important;
 }
-[data-testid="stForm"][data-st-key="form_saida"] [data-testid="baseButton-primary"]:hover,
-[data-testid="stForm"][data-st-key="form_saida"] button[kind="primary"]:hover,
-[data-testid="stForm"][data-st-key="form_saida"] .stButton>button:hover{
-  background:#b91c1c !important;
-  border-color:#b91c1c !important;
+div[data-testid="stFormSubmitButton"][data-st-key="sb_saida"] [data-testid="baseButton-primary"]:hover,
+div[data-testid="stFormSubmitButton"][data-st-key="sb_saida"] button:hover,
+div[data-testid="stForm"][data-st-key="form_saida"] button[kind="primary"]:hover{
+  background:#b91c1c !important; border-color:#b91c1c !important;
 }
 </style>
 """
