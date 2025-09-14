@@ -17,6 +17,8 @@ try:
     import streamlit_antd_components as sac  # pip install streamlit-antd-components
 except Exception:
     sac = None  # fallback p/ radio padrão
+import hashlib
+from sqlalchemy import select
 
 import os
 from datetime import date, timedelta, datetime
@@ -59,6 +61,31 @@ ADJ_OUT_AGG_DESC   = "[Ajuste total de saídas (mês, sede)]"
 # ===================== ST CONFIG / THEME =====================
 
 st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
+
+# ================== CSS do cartão de login (estilo SEI) ==================
+LOGIN_CSS = """
+<style>
+.login-wrap { min-height: calc(100vh - 4rem); display: grid; place-items: center; }
+.login-card {
+  width: 100%; max-width: 520px; background: #fff; border: 1px solid #E6E8F0;
+  border-radius: 14px; box-shadow: 0 6px 22px rgba(16,24,40,.06); padding: 28px 26px 22px;
+}
+.login-logo { display:flex; align-items:center; justify-content:center; margin-bottom: 18px; }
+.login-title { text-align:center; font-weight: 800; font-size: 2rem; color:#2075C8; letter-spacing:.2px; }
+.login-subtitle { text-align:center; margin-top: -6px; color:#475467; font-size:.95rem; }
+
+.login-form .stTextInput>div>div>input,
+.login-form .stPassword>div>div>input { font-size: 1.02rem; padding-left: 2.2rem; }
+
+.icon-left{ position: relative; }
+.icon-left:before{
+  content: attr(data-ico);
+  position:absolute; left:.55rem; top:.48rem; font-size: 1.05rem; opacity:.65;
+}
+
+.login-btn .stButton>button{ width:100%; height:44px; font-weight:700; border-radius: 10px; }
+</style>
+"""
 
 CSS = """
 <style>
@@ -161,7 +188,7 @@ CSS_TABLE_BOOST = """
 [data-testid="stDataFrame"] [role="gridcell"] *,
 [data-testid="stDataEditor"] [role="gridcell"] *{
   font-size: 1.18rem !important;   /* ajuste aqui: 1.10–1.30rem */
-  line-height: 4.55 !important;
+  line-height: 1.55 !important;
 }
 
 /* Cabeçalhos das colunas um pouco maiores e mais fortes */
@@ -245,6 +272,7 @@ def _to_date(obj: Any) -> date:
         return datetime.strptime(s, "%Y-%m-%d").date()
     except Exception:
         return today_bahia()
+    
 
 def _to_float_brl(x: Any) -> float:
     if x is None:
@@ -258,6 +286,21 @@ def _to_float_brl(x: Any) -> float:
         return float(s)
     except Exception:
         return 0.0
+def _validate_password(user_obj, raw_password: str) -> bool:
+    """Valida por texto puro (user.password) OU sha256 (user.password_hash)."""
+    if hasattr(user_obj, "password") and user_obj.password is not None:
+        return str(user_obj.password) == str(raw_password)
+    if hasattr(user_obj, "password_hash") and user_obj.password_hash:
+        h = hashlib.sha256(raw_password.encode("utf-8")).hexdigest()
+        return str(user_obj.password_hash) == h
+    return False
+
+def _find_user_by_username(db, username: str):
+    try:
+        return db.scalar(select(User).where(User.username == username))
+    except Exception:
+        return None
+
 
 # ===================== DB BASE & MODELS =====================
 # ===================== DB BASE & MODELS =====================
@@ -470,29 +513,70 @@ def current_user():
         return db.get(User, uid)
 
 def login_ui():
-    col_logo, col_title = st.columns([1, 3])
-    if os.path.exists(LOGO_PATH):
-        with col_logo:
-            st.image(LOGO_PATH, use_container_width=True)
-    with col_title:
-        st.markdown(f"<h1 class='page-title'>{APP_NAME}</h1>", unsafe_allow_html=True)
-    u = st.text_input("Usuário")
-    p = st.text_input("Senha", type="password")
-    if st.button("Entrar", type="primary"):
-        with SessionLocal() as db:
-            user = db.scalar(select(User).where(User.username == u))
-            if user and verify_password(p, user.password_hash):
-                st.session_state.uid = user.id
-                try:
-                    cm = get_cookie_manager()
-                    token = _make_token({"uid": int(user.id)})
-                    cm.set(COOKIE_NAME, token, expires_at=datetime.utcnow()+timedelta(days=30), key="auth_set")
-                    _update_last_active(cm)
-                except Exception:
-                    st.warning("Login salvo só na sessão atual. Instale 'extra-streamlit-components' para lembrar o login.")
-                st.rerun()
-            else:
-                st.error("Usuário ou senha inválidos.")
+    st.markdown(LOGIN_CSS, unsafe_allow_html=True)
+
+    st.markdown('<div class="login-wrap">', unsafe_allow_html=True)
+    st.markdown('<div class="login-card">', unsafe_allow_html=True)
+
+    # Logo / título (usa seu LOGO_PATH se existir; senão, mostra "sei!")
+    showed_logo = False
+    try:
+        if os.path.exists(LOGO_PATH):
+            st.markdown('<div class="login-logo">', unsafe_allow_html=True)
+            st.image(LOGO_PATH, width=120)
+            st.markdown('</div>', unsafe_allow_html=True)
+            showed_logo = True
+    except Exception:
+        pass
+    if not showed_logo:
+        st.markdown('<div class="login-title">sei!</div>', unsafe_allow_html=True)
+    st.markdown('<div class="login-subtitle">Acesse sua conta</div>', unsafe_allow_html=True)
+
+    # Formulário: somente Usuário e Senha
+    with st.form("login_form_simple", clear_on_submit=False):
+        st.markdown('<div class="login-form">', unsafe_allow_html=True)
+
+        st.markdown('<div class="icon-left" data-ico="👤">', unsafe_allow_html=True)
+        username = st.text_input("Usuário", key="login_username")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown('<div class="icon-left" data-ico="🔒">', unsafe_allow_html=True)
+        password = st.text_input("Senha", type="password", key="login_password")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown('</div>', unsafe_allow_html=True)  # fecha .login-form
+
+        submit = st.form_submit_button("ACESSAR", use_container_width=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)  # fecha .login-card
+    st.markdown('</div>', unsafe_allow_html=True)  # fecha .login-wrap
+
+    # Processa o login
+    if submit:
+        if not username or not password:
+            st.warning("Informe usuário e senha.")
+            return
+        user_obj = None
+        try:
+            with SessionLocal() as db:
+                user_obj = _find_user_by_username(db, username)
+                if not user_obj or not _validate_password(user_obj, password):
+                    user_obj = None
+        except Exception:
+            user_obj = None
+
+        if user_obj:
+            try:
+                cm = get_cookie_manager()
+                token = _write_token({"uid": int(user_obj.id)})
+                cm.set(COOKIE_NAME, token)
+            except Exception:
+                pass
+            st.session_state.uid = int(user_obj.id)
+            st.success("Login realizado com sucesso.")
+            st.rerun()
+        else:
+            st.error("Usuário ou senha inválidos.")
 
 # ===================== HELPERS =====================
 def is_admin_general(user: "User") -> bool:
