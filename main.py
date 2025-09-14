@@ -28,7 +28,7 @@ import streamlit as st
 
 from sqlalchemy import select, func, String, Date, Float, ForeignKey, create_engine, and_
 from sqlalchemy.orm import relationship, Mapped, mapped_column, sessionmaker, joinedload, Session
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import DeclarativeBase
 import unicodedata as ud
 import hashlib
 import json, base64, hmac, time
@@ -194,7 +194,9 @@ def _to_float_brl(x: Any) -> float:
         return 0.0
 
 # ===================== DB BASE & MODELS =====================
-Base = declarative_base()
+# ===================== DB BASE & MODELS =====================
+class Base(DeclarativeBase):
+    pass
 
 class User(Base):
     __tablename__ = "users"
