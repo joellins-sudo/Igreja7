@@ -663,7 +663,7 @@ except Exception:
       /* esconde sidebar no login */
       [data-testid="stSidebar"]{ display:none; }
 
-      /* centraliza todo o conteúdo na página */
+      /* centraliza o conteúdo da página */
       .block-container{
         min-height:100vh;
         display:flex;
@@ -674,7 +674,7 @@ except Exception:
 
       /* cartão do login */
       .login-card{
-        width: 420px;               /* deixe 360–480px se quiser menor/maior */
+        width: 420px;               /* ajuste aqui: 360–480px */
         max-width: 92vw;
         background:#fff;
         border:1px solid #e8eaf1;
@@ -684,7 +684,7 @@ except Exception:
       }
 
       .login-title{
-        font-size: 48px;            /* título maior */
+        font-size: 48px;
         font-weight: 800;
         color:#1a73e8;               /* azul */
         text-align:center;
@@ -703,6 +703,7 @@ except Exception:
       .stTextInput > div > div > input{
         height: 40px;
         font-size: 16px;
+        border-radius: 10px;
       }
 
       /* botão */
@@ -722,18 +723,19 @@ except Exception:
     st.markdown('<div class="login-sub">Faça login para continuar</div>', unsafe_allow_html=True)
 
     usuario = st.text_input("Usuário", placeholder="Seu usuário", key="login_user")
-    senha   = st.text_input("Senha",   type="password", placeholder="Sua senha", key="login_pwd")
+    senha   = st.text_input("Senha", type="password", placeholder="Sua senha", key="login_pwd")
 
     if st.button("ACESSAR", use_container_width=True, key="btn_login"):
-        # Chame sua função de autenticação existente aqui:
+        # Chame sua função de autenticação existente
         if "do_login" in globals():
-            do_login(usuario, senha)           # se você já usa essa função
+            do_login(usuario, senha)
         elif "login" in globals():
-            login(usuario, senha)              # ou essa
+            login(usuario, senha)
         else:
             st.warning("Implemente a autenticação aqui (ex.: do_login(usuario, senha)).")
 
     st.markdown('</div>', unsafe_allow_html=True)
+
 
     # ===================== HELPERS =====================
     def is_admin_general(user: "User") -> bool:
