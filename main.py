@@ -326,7 +326,7 @@ CSS_TABLE_BOOST = """
   font-size: 1.08rem !important;
   font-weight: 700 !important;
 }
-</style>
+</style>    
 """
 
 st.markdown(CSS_TABLE_BOOST, unsafe_allow_html=True)
@@ -461,8 +461,24 @@ def _to_float_brl(x: Any) -> float:
 
 # ===================== DB BASE & MODELS =====================
 # ===================== DB BASE & MODELS =====================
+# ===================== DB BASE & MODELS (fix MappedAnnotationError) =====================
 class Base(DeclarativeBase):
     pass
+
+class Congregation(Base):
+    __tablename__ = "congregations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String, unique=True, index=True)
+    users: Mapped[list["User"]] = relationship(back_populates="congregation")
+    transactions: Mapped[list["Transaction"]] = relationship(back_populates="congregation")
+    tithes: Mapped[list["Tithe"]] = relationship(back_populates="congregation")
+
+class Category(Base):
+    __tablename__ = "categories"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String, unique=True, index=True)
+    type: Mapped[str] = mapped_column(String)  # 'DOAÇÃO' ou 'SAÍDA'
+    transactions: Mapped[list["Transaction"]] = relationship(back_populates="category")
 
 class User(Base):
     __tablename__ = "users"
@@ -470,23 +486,8 @@ class User(Base):
     username: Mapped[str] = mapped_column(String, unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String)
     role: Mapped[str] = mapped_column(String)  # 'SEDE', 'TESOUREIRO', 'TESOUREIRO MISSIONÁRIO'
-    congregation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("congregations.id"))
-    congregation: Mapped[Optional["Congregation"]] = relationship(back_populates="users")
-
-class Congregation(Base):
-    __tablename__ = "congregations"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String, unique=True, index=True)
-    users: Mapped[List["User"]] = relationship(back_populates="congregation")
-    transactions: Mapped[List["Transaction"]] = relationship(back_populates="congregation")
-    tithes: Mapped[List["Tithe"]] = relationship(back_populates="congregation")
-
-class Category(Base):
-    __tablename__ = "categories"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String, unique=True, index=True)
-    type: Mapped[str] = mapped_column(String)  # 'DOAÇÃO' ou 'SAÍDA'
-    transactions: Mapped[List["Transaction"]] = relationship(back_populates="category")
+    congregation_id: Mapped[int | None] = mapped_column(ForeignKey("congregations.id"), nullable=True)
+    congregation: Mapped["Congregation" | None] = relationship(back_populates="users")
 
 class Transaction(Base):
     __tablename__ = "transactions"
@@ -495,9 +496,10 @@ class Transaction(Base):
     type: Mapped[str] = mapped_column(String)  # 'DOAÇÃO' ou 'SAÍDA'
     category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"))
     amount: Mapped[float] = mapped_column(Float)
-    description: Mapped[Optional[str]] = mapped_column(String)
+    description: Mapped[str | None] = mapped_column(String, nullable=True)
     congregation_id: Mapped[int] = mapped_column(ForeignKey("congregations.id"))
-    payment_method: Mapped[Optional[str]] = mapped_column(String, default=None)
+    payment_method: Mapped[str | None] = mapped_column(String, default=None)
+
     category: Mapped["Category"] = relationship(back_populates="transactions", lazy="joined")
     congregation: Mapped["Congregation"] = relationship(back_populates="transactions")
 
@@ -508,7 +510,7 @@ class Tithe(Base):
     tither_name: Mapped[str] = mapped_column(String)
     amount: Mapped[float] = mapped_column(Float)
     congregation_id: Mapped[int] = mapped_column(ForeignKey("congregations.id"))
-    payment_method: Mapped[Optional[str]] = mapped_column(String, default=None)
+    payment_method: Mapped[str | None] = mapped_column(String, default=None)
     congregation: Mapped["Congregation"] = relationship(back_populates="tithes")
 
 # ===================== ENGINE / SESSION =====================
