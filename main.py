@@ -525,34 +525,40 @@ def login_ui():
     st.markdown(ADRF_LOGIN_CSS, unsafe_allow_html=True)
 
     # === Centraliza a viewport e transforma o st.form em um "card" ===
-    LOGIN_CARD_CSS = """
-    <style>
-      /* centraliza tudo vertical/horizontal */
-      [data-testid="stAppViewContainer"] > .main{
-        display:flex; align-items:center; justify-content:center;
-        min-height:100vh; padding:0 !important;
-      }
-      header[data-testid="stHeader"]{ display:none; }
-      footer{ visibility:hidden; }
+    LOGIN_CARD_FIX_CSS = """
+<style>
+  /* centraliza a página de login */
+  [data-testid="stAppViewContainer"] > .main{
+    display:flex; align-items:center; justify-content:center;
+    min-height:100vh; padding:0 !important;
+  }
+  header[data-testid="stHeader"]{ display:none; }
+  footer{ visibility:hidden; }
 
-      /* deixa o formulário com cara de cartão e largura fixa */
-      form[data-testid="stForm"]{
-        width:520px; max-width:92vw; margin:0 auto;
-        background:#fff; border:1px solid #E6E8F0; border-radius:14px;
-        box-shadow:0 10px 30px rgba(16,24,40,.08);
-        padding:28px 22px;
-      }
-      /* inputs e botão mais bonitos dentro do card */
-      form[data-testid="stForm"] .stTextInput>div>div>input,
-      form[data-testid="stForm"] .stPassword>div>div>input{
-        height:44px; font-size:1rem;
-      }
-      form[data-testid="stForm"] .stButton>button{
-        width:100%; height:44px; font-weight:700; border-radius:10px;
-      }
-    </style>
-    """
-    st.markdown(LOGIN_CARD_CSS, unsafe_allow_html=True)
+  /* === AQUI: largura fixa do seu formulário de login ===
+     usamos o nome da chave do form: "adrf_login_form" */
+  form[aria-label="adrf_login_form"]{
+    width: 420px;            /* ajuste aqui (ex.: 380–520px) */
+    max-width: 92vw;         /* não estoura em telas pequenas */
+    margin: 0 auto;
+    background:#fff;
+    border:1px solid #E6E8F0;
+    border-radius:14px;
+    box-shadow:0 10px 30px rgba(16,24,40,.08);
+    padding:24px 18px;
+  }
+
+  /* inputs e botão ocupam só a largura do card */
+  form[aria-label="adrf_login_form"] .stTextInput>div>div>input,
+  form[aria-label="adrf_login_form"] .stPassword>div>div>input{
+    height:44px; font-size:1rem;
+  }
+  form[aria-label="adrf_login_form"] .stButton>button{
+    width:100%; height:44px; font-weight:700; border-radius:10px;
+  }
+</style>
+"""
+st.markdown(LOGIN_CARD_FIX_CSS, unsafe_allow_html=True)
 
     # === (REMOVA) Qualquer wrapper HTML aberto antes tipo:
     # st.markdown("<div class='adrf-wrap'><div class='adrf-card'><div class='body'>", unsafe_allow_html=True)
