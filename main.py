@@ -91,7 +91,7 @@ CSS = """
 /* ==================== BASE / TIPOGRAFIA ==================== */
 :root{
   --base-font: 17px;              /* aumente para 18/19/20px se quiser */
-  --table-font-size: 1.12rem;     /* fonte das células */
+  --table-font-size: 1.17rem;     /* fonte das células */
   --table-header-size: 1.08rem;   /* fonte dos cabeçalhos */
 }
 
