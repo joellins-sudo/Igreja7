@@ -1,88 +1,7 @@
 # main.py — AD Relatório Financeiro — v13.3
 # M
 
-import os
-from datetime import date, timedelta, datetime
-from typing import Optional, List, Tuple, Dict, Any
-from collections import defaultdict, Counter
-import locale as _locale
-import pandas as pd
-import streamlit as st
-
-from sqlalchemy import select, func, String, Date, Float, ForeignKey, create_engine, and_
-from sqlalchemy.orm import relationship, Mapped, mapped_column, sessionmaker, joinedload, Session
-from sqlalchemy.orm import DeclarativeBase
-import unicodedata as ud
-import hashlib
-import json, base64, hmac, time
-
-# PDF
-from io import BytesIO
-from reportlab.lib.pagesizes import A4, portrait
-from reportlab.lib import colors
-from reportlab.lib.units import cm
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer
-from reportlab.lib.enums import TA_CENTER
-
-# TZ Bahia/BR
-try:
-    from zoneinfo import ZoneInfo
-    TZ_BA = ZoneInfo("America/Bahia")
-except Exception:
-    TZ_BA = None
-
-APP_NAME = "AD Relatório Financeiro"
-ADJ_ENTRY_DESC = "[Ajuste via relatório de entrada]"
-ADJ_MISS_IN_DESC = "[Ajuste Missões por Congregação]"
-ADJ_ENTRY_AGG_DESC = "[Ajuste total de entradas (mês, sede)]"
-ADJ_OUT_AGG_DESC   = "[Ajuste total de saídas (mês, sede)]"
-
-# ===================== ST CONFIG / THEME =====================
-# ===================== ST CONFIG / THEME =====================
-
-st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
-
-# ================== CSS do cartão de login (estilo SEI) ==================
-# ================== CSS do cartão de login (estilo ADRF) ==================
-# ================== LOGIN SEI: CSS/HTML (trabalhando com Streamlit) ==================
-# ================== LOGIN ADRF: CSS/HTML ==================
-ADRF_LOGIN_CSS = """
-<style>
-  :root{
-    --azul-1:#1f6feb; --azul-2:#185fcd; --azul-esc:#0b4b9a;
-    --cinza-bg:#f0f0f0; --cinza-borda:#dfe3ea; --cinza-ico:#e9ecef; --texto:#344054;
-  }
-  body{ background:var(--cinza-bg); }
-
-  .adrf-wrap{ min-height:calc(100vh - 0px); display:grid; place-items:center; padding:24px 12px; }
-  .adrf-card{ width:100%; max-width:540px; background:#fff; border:1px solid rgba(0,0,0,.07);
-              border-radius:.5rem; box-shadow:0 10px 26px rgba(16,24,40,.08); }
-  .adrf-card .body{ padding:26px 24px 18px; }
-
-  .adrf-logo{ display:flex; align-items:center; justify-content:center; margin:14px 0 18px; }
-  .adrf-logo img{ height:58px; }
-
-  .adrf-form .group{ display:flex; align-items:stretch; margin-bottom:12px; }
-  .adrf-form .ico{
-    flex:0 0 46px; display:flex; align-items:center; justify-content:center;
-    background:var(--cinza-ico); border:1px solid var(--cinza-borda);
-    border-right:none; border-radius:.25rem 0 0 .25rem; color:#6b7280; font-size:18px;
-  }
-  .adrf-form .field [data-testid="stTextInput"]>div>div>input,
-  .adrf-form .field [data-testid="stPassword"]>div>div>input,
-  .adrf-form .field [data-testid="stSelectbox"]>div>div>div>div{
-    height:44px; border:1px solid var(--cinza-borda); border-left:none; border-radius:0 .25rem .25rem 0 !important;
-    font-size:1rem;
-  }
-  .adrf-form .field [data-testid="stWidgetLabel"]{ display:none; }
-
-  .adrf-btn .stButton>button{
-    width:100%; height:44px; border:none; color:#fff; font-weight:700; letter-spacing:.3px; border-radius:.25rem;
-    background:linear-gradient(180deg, var(--azul-1) 0%, var(--azul-2) 100%);
-    box-shadow:0 6px 16px rgba(24,95,205,.25);
-  }
-  .adrf-btn .stButton>button:hover{
+imp========
     background:linear-gradient(180deg, var(--azul-2) 0%, var(--azul-esc) 100%);
   }
 
@@ -240,7 +159,7 @@ def format_currency(value: float) -> str:
         v = 0.0
     return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-def format_date(d: date) -> str:
+          def format_date(d: date) -> str:
     return d.strftime("%d/%m/%Y")
 
 def _norm(s: str) -> str:
