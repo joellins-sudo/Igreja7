@@ -2732,22 +2732,11 @@ def page_cadastro(user: "User"):
             "Congregação": (db.get(Congregation, u.congregation_id).name if u.congregation_id else "—")
         } for u in users])
         if not dfu.empty:
-            st.dataframe(dfu, use_container_width=True, hide_index=True, height=200)
-
-        with st.expander("Excluir usuários"):
-            st.caption("Não é permitido excluir o usuário atualmente logado.")
-            ids_u = st.multiselect("IDs de usuários para excluir", dfu["ID"].tolist(), key="cad_del_users_ids")
-            ids_u = [i for i in ids_u if i != user.id]
-            confu = st.text_input("Digite EXCLUIR para confirmar", key="cad_del_users_conf")
-            btn_disabled = (not ids_u) or (not _confirm_ok(confu))
-            if st.button("Excluir usuários selecionadas", disabled=btn_disabled, key="cad_del_users_btn"):
-                with SessionLocal() as _db:
-                    _db.query(User).filter(User.id.in_(ids_u)).delete(synchronize_session=False)
-                    _db.commit()
+      
                 st.success(f"{len(ids_u)} usuário(s) excluído(s)."); st.rerun()
 
 # ===================== MAIN =====================
-def main():
+      def main():
     try:
         ensure_seed()
 
@@ -2763,44 +2752,7 @@ def main():
                         st.session_state.uid = u.id
             if st.session_state.get("uid"):
                 _check_inactivity_and_logout(cm)
-                _update_last_active(cm)
-        except Exception:
-            pass
-
-        # -------- auth --------
-        user = current_user()
-        if not user:
-            login_ui()
-            return
-
-        # Força o menu a ser redesenhado a cada execução
-        st.session_state["sidebar_rendered"] = False
-
-        # -------- menu lateral (uma vez) --------
-        page = sidebar_common(user)
-
-        # -------- roteamento --------
-        if page == "Lançamentos":
-            page_lancamentos(user)
-        elif page == "Relatório de Entrada":
-            page_relatorio_entrada(user)
-        elif page == "Relatório de Saída":
-            page_relatorio_saida(user)
-        elif page == "Relatório de Dizimistas":
-            page_relatorio_dizimistas(user)
-        elif page == "Relatório de Missões":
-            if getattr(user, "role", "") == "TESOUREIRO":
-                page_relatorio_missoes_congregacao(user)
-            else:
-                page_relatorio_missoes(user)
-        elif page == "Visão Geral":
-            page_visao_geral(user)
-        elif page == "Cadastro":
-            page_cadastro(user)
-        else:
-            st.warning("Seleção de página inválida.")
-    except Exception as e:
-        st.error("Ocorreu um erro ao renderizar a aplicação.")
+         
         st.exception(e)
 
 if __name__ == "__main__":
