@@ -10,6 +10,9 @@
 #
 # Obs.: Todo o restante do seu código foi preservado. Itens que você pediu antes
 # (ex.: esconder "ajuste" na ENTRADA, relatórios agregados editáveis da SEDE, etc.) continuam iguais.
+TYPE_IN  = "DOAÇÃO"
+TYPE_OUT = "SAÍDA"
+LEGACY_TYPES = {"DOAÇÃO": ["RECEITA"], "SAÍDA": ["DESPESA"]}
 
 from __future__ import annotations
 # ===== UI extra (menu bonito com fallback) =====
