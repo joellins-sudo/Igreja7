@@ -288,20 +288,52 @@ MENU_TILES_CSS = """
   .menu-title{
     text-align:center; font-weight:800; letter-spacing:.6px;
     background:#1f6feb; color:#fff; padding:.45rem .8rem;
-    display:inline-block; margin:6px auto 18px; border-radius:.3rem;
+    display:inline-block; margin:6px auto 18px; border-radius:.4rem;
   }
-  .tiles{ display:grid; grid-template-columns: repeat(3, minmax(220px, 1fr)); gap:18px; }
+
+  /* grid responsiva */
+  .tiles{
+    display:grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 20px;
+  }
+
+  /* cartão do tile */
   .tile{
-    background:#fff; border:1px solid #e6e8f0; border-radius:12px;
-    box-shadow:0 10px 26px rgba(16,24,40,.06); padding:12px; text-align:center;
+    background: linear-gradient(180deg,#ffffff 0%, #f8fafc 100%);
+    border:1px solid #e6e8f0;
+    border-radius:16px;
+    padding:16px;
+    box-shadow:0 6px 16px rgba(16,24,40,.06);
+    transition: transform .12s ease, box-shadow .12s ease;
   }
+  .tile:hover{
+    transform: translateY(-2px);
+    box-shadow:0 14px 26px rgba(16,24,40,.12);
+  }
+
+  /* botão moderno dentro do tile */
   .tile .stButton>button{
-    width:100%; height:56px; font-weight:700; border-radius:10px;
-    background:#1f6feb; border-color:#1f6feb; color:#fff;
+    width:100%; height:56px;
+    border:0; border-radius:12px;
+    font-weight:800; letter-spacing:.2px;
+    color:#fff;
+    background: linear-gradient(135deg, #1f6feb, #0ea5e9);
+    box-shadow: 0 10px 22px rgba(31,111,235,.28);
+    transition: transform .08s ease, filter .08s ease, box-shadow .2s ease;
   }
-  .tile .stButton>button:hover{ filter:brightness(.93); }
+  .tile .stButton>button:hover{
+    filter: brightness(.96);
+    transform: translateY(-1px);
+    box-shadow: 0 14px 28px rgba(31,111,235,.35);
+  }
+  .tile .stButton>button:active{
+    transform: translateY(0);
+    filter: brightness(.93);
+  }
 </style>
 """
+
 st.markdown(MENU_TILES_CSS, unsafe_allow_html=True)
 
 def _tile(col, label: str, target_page: str):
