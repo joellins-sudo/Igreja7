@@ -1857,7 +1857,7 @@ def page_lancamentos(user: "User"):
 
             return  # fim do modo tabela
 
-        # ===================== FORMULÁRIOS ÚNICOS (mantidos) =====================
+        # ===================== FORMULÁRIOS ÚNICOS (coloridos) =====================
         st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
         st.subheader("Lançar ENTRADA (Doação)")
         with st.form("form_entrada", clear_on_submit=True):
@@ -1878,7 +1878,9 @@ def page_lancamentos(user: "User"):
             ent_flag_missoes = _norm(ent_cat) == "oferta" and st.checkbox("Oferta de missões?", key="ent_flag_missoes")
             ent_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="ent_valor")
 
-            if st.form_submit_button("Salvar ENTRADA", type="primary"):
+            # --- botão submit colorido (verde) ---
+            ok = _submit_btn("Salvar ENTRADA", "submit_entrada", theme="entrada")
+            if ok:
                 with SessionLocal() as _db:
                     cat_name = "Missões" if ent_flag_missoes else ent_cat
                     if ent_flag_missoes and not _db.scalar(select(Category).where(Category.name == "Missões")):
@@ -1905,7 +1907,9 @@ def page_lancamentos(user: "User"):
             dz_valor = st.number_input("Valor dízimo (R$)", min_value=0.0, step=1.0, format="%.2f", key="dz_valor")
             dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX"], key="dz_payment_method")
 
-            if st.form_submit_button("Salvar DIZIMISTA", type="primary"):
+            # --- botão submit colorido (azul) ---
+            ok = _submit_btn("Salvar DIZIMISTA", "submit_dizimista", theme="dizimista")
+            if ok:
                 nome = (dz_nome or "").strip()
                 if not nome:
                     st.error("Informe o nome do dizimista.")
@@ -1929,7 +1933,9 @@ def page_lancamentos(user: "User"):
             sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
             sai_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="sai_valor")
 
-            if st.form_submit_button("Salvar SAÍDA", type="primary"):
+            # --- botão submit colorido (vermelho) ---
+            ok = _submit_btn("Salvar SAÍDA", "submit_saida", theme="saida")
+            if ok:
                 with SessionLocal() as _db:
                     cat_obj = _db.scalar(select(Category).where(Category.name == sai_cat))
                     if not cat_obj:
