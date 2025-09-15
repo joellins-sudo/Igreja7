@@ -1858,17 +1858,37 @@ def page_lancamentos(user: "User"):
             return  # fim do modo tabela
 
         # ===================== FORMULÁRIOS ÚNICOS (mantidos) =====================
-        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
-        st.subheader("Lançar ENTRADA (Doação)")
-        with st.form("form_entrada", clear_on_submit=True):
-    # ... seus campos ...
+        # ================== FORMULÁRIO: ENTRADA ==================
+st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
+st.subheader("Lançar ENTRADA (Doação)")
+with st.form("form_entrada", clear_on_submit=True):
+    c1, c2, c3 = st.columns([1.1, 1.6, 2])
+
+    ent_data = st.date_input("Data do Culto", value=today_bahia(), key="ent_data", format="DD/MM/YYYY")
+
+    with c2:
+        cats_in = categories_for_type(db, TYPE_IN)
+        cats_in = [c for c in cats_in if "ajuste" not in _norm(c.name)]
+        cat_names_in = [c.name for c in cats_in] or ["—"]
+        desired = ["Dízimo", "Oferta", "Missões"]
+        desired_norm = [_norm(x) for x in desired]
+        top = [n for n in cat_names_in if _norm(n) in desired_norm]
+        rest = [n for n in cat_names_in if _norm(n) not in desired_norm]
+        cat_display = top + rest
+        ent_cat = st.selectbox("Categoria", cat_display, key="ent_cat")
+
+    ent_desc = st.text_input("Descrição (opcional)", key="ent_desc")
+    ent_flag_missoes = _norm(ent_cat) == "oferta" and st.checkbox("Oferta de missões?", key="ent_flag_missoes")
+    ent_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="ent_valor")
+
+    # BOTÃO VERDE
     ok = _submit_btn("Salvar ENTRADA", "submit_entrada", theme="entrada")
     if ok:
-        # (seu salvamento atual)
         with SessionLocal() as _db:
             cat_name = "Missões" if ent_flag_missoes else ent_cat
             if ent_flag_missoes and not _db.scalar(select(Category).where(Category.name == "Missões")):
-                _db.add(Category(name="Missões", type=TYPE_IN)); _db.commit()
+                _db.add(Category(name="Missões", type=TYPE_IN))
+                _db.commit()
             cat_obj = _db.scalar(select(Category).where(Category.name == cat_name))
             if not cat_obj:
                 st.error("Informe a categoria.")
@@ -1880,14 +1900,20 @@ def page_lancamentos(user: "User"):
                 ))
                 _db.commit()
                 st.success("Entrada registrada.")
-
         st.markdown('</div>', unsafe_allow_html=True)
         st.markdown("---")
 
-        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
-        st.subheader("Salvar DIZIMISTA")
-        with st.form("form_dizimo", clear_on_submit=True):
-    # ... seus campos ...
+
+        # ================== FORMULÁRIO: DÍZIMISTA ==================
+st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
+st.subheader("Salvar DIZIMISTA")
+with st.form("form_dizimo", clear_on_submit=True):
+    dz_data = st.date_input("Data do Culto", value=today_bahia(), key="dz_data", format="DD/MM/YYYY")
+    dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
+    dz_valor = st.number_input("Valor dízimo (R$)", min_value=0.0, step=1.0, format="%.2f", key="dz_valor")
+    dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX"], key="dz_payment_method")
+
+    # BOTÃO AZUL
     ok = _submit_btn("Salvar DIZIMISTA", "submit_dizimista", theme="dizimista")
     if ok:
         nome = (dz_nome or "").strip()
@@ -1904,10 +1930,18 @@ def page_lancamentos(user: "User"):
         st.markdown('</div>', unsafe_allow_html=True)
         st.markdown("---")
 
-        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
-        st.subheader("Lançar SAÍDA")
-        with st.form("form_saida", clear_on_submit=True):
-    # ... seus campos ...
+
+        # ================== FORMULÁRIO: SAÍDA ==================
+st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
+st.subheader("Lançar SAÍDA")
+with st.form("form_saida", clear_on_submit=True):
+    sai_data = st.date_input("Data", value=today_bahia(), key="sai_data", format="DD/MM/YYYY")
+    cats_out = categories_for_type(db, TYPE_OUT)
+    sai_cat = st.selectbox("Tipo da saída (Categoria)", [c.name for c in cats_out] or ["—"], key="sai_cat")
+    sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
+    sai_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="sai_valor")
+
+    # BOTÃO VERMELHO
     ok = _submit_btn("Salvar SAÍDA", "submit_saida", theme="saida")
     if ok:
         with SessionLocal() as _db:
@@ -1922,7 +1956,7 @@ def page_lancamentos(user: "User"):
                 ))
                 _db.commit()
                 st.success("Saída registrada.")
-        st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 def page_relatorio_entrada(user: "User"):
