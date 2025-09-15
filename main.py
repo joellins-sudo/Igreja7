@@ -1878,22 +1878,24 @@ def page_lancamentos(user: "User"):
             ent_flag_missoes = _norm(ent_cat) == "oferta" and st.checkbox("Oferta de missões?", key="ent_flag_missoes")
             ent_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="ent_valor")
 
-            if st.form_submit_button("Salvar ENTRADA", type="primary"):
-                with SessionLocal() as _db:
-                    cat_name = "Missões" if ent_flag_missoes else ent_cat
-                    if ent_flag_missoes and not _db.scalar(select(Category).where(Category.name == "Missões")):
-                        _db.add(Category(name="Missões", type=TYPE_IN)); _db.commit()
-                    cat_obj = _db.scalar(select(Category).where(Category.name == cat_name))
-                    if not cat_obj:
-                        st.error("Informe a categoria.")
-                    else:
-                        _db.add(Transaction(
-                            date=ent_data, type=TYPE_IN, category_id=cat_obj.id,
-                            amount=float(ent_valor), description=(ent_desc or None),
-                            congregation_id=cong_obj.id, payment_method=None
-                        ))
-                        _db.commit()
-                        st.success("Entrada registrada.")
+            ok = _submit_btn("Salvar ENTRADA", "submit_entrada", theme="entrada")
+if ok:
+    with SessionLocal() as _db:
+        cat_name = "Missões" if ent_flag_missoes else ent_cat
+        if ent_flag_missoes and not _db.scalar(select(Category).where(Category.name == "Missões")):
+            _db.add(Category(name="Missões", type=TYPE_IN)); _db.commit()
+        cat_obj = _db.scalar(select(Category).where(Category.name == cat_name))
+        if not cat_obj:
+            st.error("Informe a categoria.")
+        else:
+            _db.add(Transaction(
+                date=ent_data, type=TYPE_IN, category_id=cat_obj.id,
+                amount=float(ent_valor), description=(ent_desc or None),
+                congregation_id=cong_obj.id, payment_method=None
+            ))
+            _db.commit()
+            st.success("Entrada registrada.")
+
         st.markdown('</div>', unsafe_allow_html=True)
         st.markdown("---")
 
