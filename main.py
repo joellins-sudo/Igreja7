@@ -272,6 +272,91 @@ st.markdown(CSS, unsafe_allow_html=True)
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
+# ==== Menu (tiles) ====
+MENU_TILE_IMAGES = {
+    "Lançamentos":           os.path.join(ASSETS_DIR, "tile_lancamentos.png"),
+    "Relatório de Entrada":  os.path.join(ASSETS_DIR, "tile_entrada.png"),
+    "Relatório de Saída":    os.path.join(ASSETS_DIR, "tile_saida.png"),
+    "Relatório de Missões":  os.path.join(ASSETS_DIR, "tile_missoes.png"),
+    "Relatório de Dizimistas": os.path.join(ASSETS_DIR, "tile_dizimistas.png"),
+    "Visão Geral":           os.path.join(ASSETS_DIR, "tile_visao.png"),
+    "Cadastro":              os.path.join(ASSETS_DIR, "tile_cadastro.png"),
+}
+
+MENU_TILES_CSS = """
+<style>
+  .menu-title{
+    text-align:center; font-weight:800; letter-spacing:.6px;
+    background:#1f6feb; color:#fff; padding:.45rem .8rem;
+    display:inline-block; margin:6px auto 18px; border-radius:.3rem;
+  }
+  .tiles{ display:grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap:18px; }
+  @media (min-width: 1000px){ .tiles{ grid-template-columns: repeat(3, minmax(220px, 1fr)); } }
+  .tile{
+    background:#fff; border:1px solid #e6e8f0; border-radius:12px;
+    box-shadow:0 10px 26px rgba(16,24,40,.06); padding:16px; text-align:center;
+  }
+  .tile img{ width:150px; height:150px; object-fit:contain; margin:6px auto 10px; display:block; }
+  .tile .stButton>button{
+    width:100%; height:44px; font-weight:700; border-radius:10px;
+    background:#1f6feb; border-color:#1f6feb; color:#fff;
+  }
+  .tile .stButton>button:hover{ filter:brightness(.93); }
+  .tile .fallback{
+    width:150px; height:150px; margin:6px auto 10px; display:grid; place-items:center;
+    background:#f1f4f9; border:1px dashed #d7dbe5; color:#6b7280; border-radius:12px; font-size:42px;
+  }
+</style>
+"""
+st.markdown(MENU_TILES_CSS, unsafe_allow_html=True)
+
+def _tile(col, label: str, target_page: str):
+    with col:
+        st.markdown("<div class='tile'>", unsafe_allow_html=True)
+        img_path = MENU_TILE_IMAGES.get(label)
+        if img_path and os.path.exists(img_path):
+            st.image(img_path)
+        else:
+            # fallback simples (emoji muda por página)
+            emoji = {
+                "Lançamentos":"📥","Relatório de Entrada":"📊","Relatório de Saída":"📉",
+                "Relatório de Missões":"🌍","Relatório de Dizimistas":"🧾",
+                "Visão Geral":"🏁","Cadastro":"🛠️"
+            }.get(label,"📦")
+            st.markdown(f"<div class='fallback'>{emoji}</div>", unsafe_allow_html=True)
+        if st.button(label, key=f"tile_{_norm(label)}"):
+            st.session_state["main_menu_page"] = target_page
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+def page_menu(user: "User"):
+    st.markdown("<h2 class='menu-title'>ESCOLHA O AMBIENTE</h2>", unsafe_allow_html=True)
+
+    # opções por perfil (mesmo conjunto do seu app)
+    role = getattr(user, "role", "")
+    if role == "SEDE":
+        items = [
+            "Lançamentos","Relatório de Entrada","Relatório de Saída",
+            "Relatório de Missões","Relatório de Dizimistas","Visão Geral","Cadastro"
+        ]
+    elif role == "TESOUREIRO":
+        items = [
+            "Lançamentos","Relatório de Entrada","Relatório de Saída",
+            "Relatório de Missões","Relatório de Dizimistas","Visão Geral"
+        ]
+    elif role == "TESOUREIRO MISSIONÁRIO":
+        items = ["Relatório de Missões"]
+    else:
+        items = ["Visão Geral"]
+
+    # grid responsiva (2 colunas no tablet, 3 no desktop)
+    st.markdown("<div class='tiles'>", unsafe_allow_html=True)
+    cols = st.columns(3, gap="large")
+    for i, label in enumerate(items):
+        _tile(cols[i % 3], label, label)
+        if (i % 3) == 2 and i != len(items)-1:
+            cols = st.columns(3, gap="large")
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # ===================== LOCALE (fallback) =====================
 def _set_locale_ptbr():
@@ -677,7 +762,7 @@ def sidebar_common(user: "User") -> str:
     """
     # Se já desenhou nesta execução, só devolve a última seleção
     if st.session_state.get("sidebar_rendered", False):
-        return st.session_state.get("main_menu_page", "Visão Geral")
+        return st.session_state.get("main_menu_page", "Menu")
 
     with st.sidebar:
         # Identidade / logo
@@ -688,8 +773,9 @@ def sidebar_common(user: "User") -> str:
             pass
         st.write(f"👤 **{getattr(user, 'username', 'Usuário')}** — *{getattr(user, 'role', '')}*")
 
-        # Ícones
+        # Ícones (agora inclui 'Menu')
         MENU_ICONS = {
+            "Menu": "🏠",
             "Lançamentos": "📥",
             "Relatório de Entrada": "📊",
             "Relatório de Saída": "📉",
@@ -699,22 +785,24 @@ def sidebar_common(user: "User") -> str:
             "Cadastro": "🛠️",
         }
 
-        # Opções conforme o papel
+        # Opções conforme o papel (agora com 'Menu' no topo)
         role = getattr(user, "role", "")
         if role == "SEDE":
             menu_options_plain = [
+                "Menu",
                 "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
                 "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Cadastro"
             ]
         elif role == "TESOUREIRO":
             menu_options_plain = [
+                "Menu",
                 "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
                 "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"
             ]
         elif role == "TESOUREIRO MISSIONÁRIO":
-            menu_options_plain = ["Relatório de Missões"]
+            menu_options_plain = ["Menu", "Relatório de Missões"]
         else:
-            menu_options_plain = ["Visão Geral"]
+            menu_options_plain = ["Menu", "Visão Geral"]
 
         # Labels com ícones
         menu_labels_pretty = [f"{MENU_ICONS.get(opt, '•')} {opt}" for opt in menu_options_plain]
@@ -724,7 +812,6 @@ def sidebar_common(user: "User") -> str:
 
         # Define valor inicial só uma vez (sem passar index no radio)
         if state_key not in st.session_state:
-            # usa última página escolhida, se houver
             prev_page = st.session_state.get("main_menu_page")
             if prev_page in menu_options_plain:
                 init_label = f"{MENU_ICONS.get(prev_page, '•')} {prev_page}"
@@ -740,7 +827,7 @@ def sidebar_common(user: "User") -> str:
         )
 
         # Converte label -> página “pura”
-        sel_index = menu_labels_pretty.index(sel_label)
+        sel_index = menu_labels_prety.index(sel_label) if False else menu_labels_pretty.index(sel_label)  # garante nome correto
         page = menu_options_plain[sel_index]
         st.session_state["main_menu_page"] = page
 
@@ -752,6 +839,7 @@ def sidebar_common(user: "User") -> str:
         st.session_state["sidebar_rendered"] = True
 
         return page
+
 
 
 # ======= NOVO: helper padrão para botões 'Salvar alterações' =======
@@ -2955,61 +3043,125 @@ def page_cadastro(user: "User"):
                 st.success(f"{len(ids_u)} usuário(s) excluído(s)."); st.rerun()
 
 # ===================== MAIN =====================
-def main():
+def page_menu(user: "User"):
+    """
+    Tela inicial com botões grandes para navegar pelas páginas.
+    As opções exibidas respeitam o perfil do usuário.
+    """
+    ensure_seed()
+    # desenha/atualiza a sidebar e mantém consistência visual
+    sidebar_common(user)
+
+    st.markdown("<h1 class='page-title'>Menu</h1>", unsafe_allow_html=True)
+
+    # Logo central (opcional)
     try:
-        ensure_seed()
+        if os.path.exists(LOGO_PATH):
+            st.image(LOGO_PATH, width=160)
+    except Exception:
+        pass
 
-        # -------- sessão / cookies --------
-        try:
-            cm = get_cookie_manager()
-            tok = cm.get(COOKIE_NAME)
-            data = _read_token(tok)
-            if data and not st.session_state.get("uid"):
-                with SessionLocal() as db:
-                    u = db.get(User, int(data["uid"]))
-                    if u:
-                        st.session_state.uid = u.id
-            if st.session_state.get("uid"):
-                _check_inactivity_and_logout(cm)
-                _update_last_active(cm)
-        except Exception:
-            pass
+    # --- Paleta de cores dos botões (gradiente leve) ---
+    COLORS = {
+        "Lançamentos":            ("#7c3aed", "#6d28d9"),  # violeta
+        "Relatório de Entrada":   ("#16a34a", "#15803d"),  # verde
+        "Relatório de Saída":     ("#dc2626", "#b91c1c"),  # vermelho
+        "Relatório de Missões":   ("#2563eb", "#1d4ed8"),  # azul
+        "Relatório de Dizimistas":("#0891b2", "#0e7490"),  # ciano
+        "Visão Geral":            ("#0ea5e9", "#0284c7"),  # sky
+        "Cadastro":               ("#a16207", "#854d0e"),  # âmbar escuro
+    }
 
-        # -------- auth --------
-        user = current_user()
-        if not user:
-            login_ui()
-            return
+    ICONS = {
+        "Lançamentos": "📥",
+        "Relatório de Entrada": "📊",
+        "Relatório de Saída": "📉",
+        "Relatório de Missões": "🌍",
+        "Relatório de Dizimistas": "🧾",
+        "Visão Geral": "🏁",
+        "Cadastro": "🛠️",
+    }
 
-        # Força o menu a ser redesenhado a cada execução
-        st.session_state["sidebar_rendered"] = False
+    # Itens visíveis por perfil (sem o próprio "Menu")
+    role = getattr(user, "role", "")
+    if role == "SEDE":
+        items = [
+            "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
+            "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Cadastro"
+        ]
+    elif role == "TESOUREIRO":
+        items = [
+            "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
+            "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"
+        ]
+    elif role == "TESOUREIRO MISSIONÁRIO":
+        items = ["Relatório de Missões"]
+    else:
+        items = ["Visão Geral"]
 
-        # -------- menu lateral (uma vez) --------
-        page = sidebar_common(user)
+    # CSS base dos azulejos/botões
+    st.markdown("""
+    <style>
+      .menu-grid { margin-top: 8px; }
+      .menu-tile button {
+        height: 78px;
+        border-radius: 16px !important;
+        font-weight: 800 !important;
+        font-size: 1.08rem !important;
+        letter-spacing: .2px;
+        box-shadow: 0 8px 18px rgba(0,0,0,.10);
+        border: none;
+      }
+      .menu-caption {
+        margin-top: 10px; color: #6b7280; font-size: .95rem;
+      }
+    </style>
+    """, unsafe_allow_html=True)
 
-        # -------- roteamento --------
-        if page == "Lançamentos":
-            page_lancamentos(user)
-        elif page == "Relatório de Entrada":
-            page_relatorio_entrada(user)
-        elif page == "Relatório de Saída":
-            page_relatorio_saida(user)
-        elif page == "Relatório de Dizimistas":
-            page_relatorio_dizimistas(user)
-        elif page == "Relatório de Missões":
-            if getattr(user, "role", "") == "TESOUREIRO":
-                page_relatorio_missoes_congregacao(user)
-            else:
-                page_relatorio_missoes(user)
-        elif page == "Visão Geral":
-            page_visao_geral(user)
-        elif page == "Cadastro":
-            page_cadastro(user)
-        else:
-            st.warning("Seleção de página inválida.")
-    except Exception as e:
-        st.error("Ocorreu um erro ao renderizar a aplicação.")
-        st.exception(e)
+    def tile(label: str, icon: str, c1: str, c2: str, key: str) -> bool:
+        # Marcador para escopar o CSS do botão específico
+        st.markdown(f'<div id="tile-{key}" class="menu-grid"></div>', unsafe_allow_html=True)
+        clicked = st.button(f"{icon}  {label}", key=f"btn_menu_{key}", use_container_width=True, type="primary")
+        st.markdown(f"""
+        <style>
+          #tile-{key} ~ div[data-testid="stButton"] > button {{
+            background: linear-gradient(180deg, {c1} 0%, {c2} 100%) !important;
+            color: #fff !important;
+          }}
+          #tile-{key} ~ div[data-testid="stButton"] > button:hover {{
+            filter: brightness(.94);
+            transform: translateY(-1px);
+          }}
+        </style>
+        """, unsafe_allow_html=True)
+        return clicked
 
-if __name__ == "__main__":
-    main()
+    # Grade responsiva: 3 colunas (ou 2/1 se faltar espaço)
+    n = len(items)
+    cols_per_row = 3 if n >= 3 else max(1, n)
+    rows = (n + cols_per_row - 1) // cols_per_row
+
+    idx = 0
+    for _ in range(rows):
+        cols = st.columns(cols_per_row, gap="large")
+        for col in cols:
+            if idx >= n:
+                break
+            label = items[idx]
+            icon = ICONS.get(label, "•")
+            c1, c2 = COLORS.get(label, ("#1f6feb", "#0b4b9a"))
+            with col:
+                st.markdown('<div class="menu-tile">', unsafe_allow_html=True)
+                if tile(label, icon, c1, c2, key=f"{idx}_{label.replace(' ','_')}"):
+                    # Navega definindo a página e rerodando
+                    st.session_state["main_menu_page"] = label
+                    st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
+            idx += 1
+
+    # Texto de apoio (opcional)
+    st.markdown(
+        "<div class='menu-caption'>Dica: você pode voltar a este menu pela barra lateral (🏠 Menu).</div>",
+        unsafe_allow_html=True
+    )
+
