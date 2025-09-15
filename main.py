@@ -337,17 +337,20 @@ MENU_TILES_CSS = """
 st.markdown(MENU_TILES_CSS, unsafe_allow_html=True)
 
 def _tile(col, label: str, target_page: str):
+    def _go(to_page: str):
+        # grava a página alvo
+        st.session_state["main_menu_page"] = to_page
+        # sincroniza o radio da sidebar (se existir)
+        sk = st.session_state.get("__menu_state_key")
+        opts = st.session_state.get("__menu_options_plain", [])
+        if sk and to_page in opts:
+            st.session_state[sk] = to_page
+        st.rerun()
+
     with col:
         st.markdown("<div class='tile'>", unsafe_allow_html=True)
         if st.button(label, key=f"tile_{_norm(label)}"):
-            # atualiza a página “principal”
-            st.session_state["main_menu_page"] = target_page
-            # sincroniza o radio da sidebar (sem ícones!)
-            sk = st.session_state.get("__menu_state_key")
-            opts = st.session_state.get("__menu_options_plain", [])
-            if sk and target_page in opts:
-                st.session_state[sk] = target_page
-            st.rerun()
+            _go(target_page)
         st.markdown("</div>", unsafe_allow_html=True)
 
 def page_menu(user: "User"):
@@ -2502,17 +2505,44 @@ def build_consolidated_pdf(agg_total: list, ref: date) -> bytes:
     return buf.getvalue()
 
 # ===================== HELPER: STAT CARD =====================
-def render_stat_card(col, label: str, full_text: str):
-    col.markdown(
-        f"""
-        <div class="stat-card">
-          <div class="stat-label">{label}</div>
-          <div class="stat-value">{full_text}</div>
-          <div class="tooltip">{full_text}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+def render_current_page(user: "User"):
+    # Garante que a sidebar exista e determine/mostre a página atual
+    page_from_sidebar = sidebar_common(user)
+    page = st.session_state.get("main_menu_page", page_from_sidebar)
+
+    # Mapa de páginas
+    pages = {
+        "Menu": page_menu,
+        "Lançamentos": page_lancamentos,
+        "Relatório de Entrada": page_relatorio_entrada,
+        "Relatório de Saída": page_relatorio_saida,
+        "Relatório de Missões": page_relatorio_missoes,            # SEDE e Tes. Missionário
+        "Relatório de Dizimistas": page_relatorio_dizimistas,
+        "Visão Geral": page_visao_geral,
+        "Cadastro": page_cadastro,
+    }
+
+    # Fallback seguro
+    pages.get(page, page_menu)(user)
+
+
+# ====== MAIN ======
+def main():
+    ensure_seed()
+    user = current_user()
+    if not user:
+        login_ui()
+        return
+
+    # primeira página padrão
+    st.session_state.setdefault("main_menu_page", "Menu")
+
+    render_current_page(user)
+
+
+if __name__ == "__main__":
+    main()
+
 
 # ===================== PAGE: VISÃO GERAL =====================
 def page_visao_geral(user: "User"):
