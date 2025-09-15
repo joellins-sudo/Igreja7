@@ -206,111 +206,6 @@ label, [data-testid="stWidgetLabel"]{ font-size: 1.02rem; }
 hr{ opacity: .6; }
 </style>
 """
-# === Cores dos botões por formulário (Lançamentos) — mapeado pelos keys dos forms ===
-
-# === Cores por formulário (Lançamentos) ===
-
-# Alias para manter compatibilidade com a linha 256
-APP_BUTTON_COLORS_CSS = """
-<style>
-/* ===================== PALETA (mude aqui as cores) ===================== */
-:root{
-  /* cor padrão para botões "Salvar alterações" e demais primários fora das seções */
-  --btn-primary:        #0ea5e9;
-  --btn-primary-hover:  #0284c7;
-
-  /* ENTRADA (verdinho) */
-  --btn-entrada:        #16a34a;
-  --btn-entrada-hover:  #15803d;
-
-  /* DÍZIMO (azul) */
-  --btn-dizimo:         #1d4ed8;
-  --btn-dizimo-hover:   #1e40af;
-
-  /* SAÍDA (vermelho) */
-  --btn-saida:          #dc2626;
-  --btn-saida-hover:    #b91c1c;
-}
-
-/* ===================== BASE: todos os botões PRIMARY ===================== */
-/* Corrige seletor: Streamlit usa atributo kind="primary" no <button> */
-.stButton > button[kind="primary"]{
-  background: var(--btn-primary) !important;
-  border-color: var(--btn-primary) !important;
-  color:#fff !important;
-  font-weight:700 !important;
-  border-radius:14px !important;
-  box-shadow:0 6px 16px rgba(0,0,0,.08) !important;
-}
-.stButton > button[kind="primary"]:hover{
-  background: var(--btn-primary-hover) !important;
-  border-color: var(--btn-primary-hover) !important;
-}
-
-/* ===================== ESPECÍFICOS POR SEÇÃO ===================== */
-/* IMPORTANTE: você já envolve os formulários com .adrf-entrada / .adrf-dizimo / .adrf-saida.
-   Usamos isso para aplicar as cores certas sem depender de chaves ou texto do botão. */
-
-/* ENTRADA */
-.adrf-entrada .stButton > button[kind="primary"]{
-  background: var(--btn-entrada) !important;
-  border-color: var(--btn-entrada) !important;
-}
-.adrf-entrada .stButton > button[kind="primary"]:hover{
-  background: var(--btn-entrada-hover) !important;
-  border-color: var(--btn-entrada-hover) !important;
-}
-
-/* DÍZIMO */
-.adrf-dizimo .stButton > button[kind="primary"]{
-  background: var(--btn-dizimo) !important;
-  border-color: var(--btn-dizimo) !important;
-}
-.adrf-dizimo .stButton > button[kind="primary"]:hover{
-  background: var(--btn-dizimo-hover) !important;
-  border-color: var(--btn-dizimo-hover) !important;
-}
-
-/* SAÍDA */
-.adrf-saida .stButton > button[kind="primary"]{
-  background: var(--btn-saida) !important;
-  border-color: var(--btn-saida) !important;
-}
-.adrf-saida .stButton > button[kind="primary"]:hover{
-  background: var(--btn-saida-hover) !important;
-  border-color: var(--btn-saida-hover) !important;
-}
-
-/* ===================== AJUSTES LEVES (opcionais) ===================== */
-/* Secundários um pouco mais fortes */
-.stButton > button[kind="secondary"]{
-  font-weight:650 !important;
-  border-radius:14px !important;
-}
-
-/* Botões dentro do DataFrame/DataEditor que porventura sejam "primary" */
-[data-testid="stDataFrame"] button[kind="primary"],
-[data-testid="stDataEditor"] button[kind="primary"]{
-  background: var(--btn-primary) !important;
-  border-color: var(--btn-primary) !important;
-  color:#fff !important;
-}
-[data-testid="stDataFrame"] button[kind="primary"]:hover,
-[data-testid="stDataEditor"] button[kind="primary"]:hover{
-  background: var(--btn-primary-hover) !important;
-  border-color: var(--btn-primary-hover) !important;
-}
-
-/* Download buttons (apenas estética) */
-.stDownloadButton > button{
-  border-radius:14px !important;
-  font-weight:650 !important;
-}
-</style>
-"""
-st.markdown(APP_BUTTON_COLORS_CSS, unsafe_allow_html=True)
-
-
 CSS_TABLE_BOOST = """
 <style>
 /* Aumenta o tamanho da fonte APENAS do conteúdo das células */
@@ -326,66 +221,14 @@ CSS_TABLE_BOOST = """
   font-size: 1.08rem !important;
   font-weight: 700 !important;
 }
-</style>    
+</style>
 """
-
 st.markdown(CSS_TABLE_BOOST, unsafe_allow_html=True)
 
 st.markdown(CSS, unsafe_allow_html=True)
 
-# === Cores dos botões de submit pelos KEYS dos botões ===
-SUBMIT_COLORS_CSS = """
-<style>
-/* ===== ENTRADA — VERDE (key: sb_entrada) ===== */
-div[data-testid="stFormSubmitButton"][data-st-key="sb_entrada"] [data-testid="baseButton-primary"],
-div[data-testid="stFormSubmitButton"][data-st-key="sb_entrada"] button,
-div[data-testid="stForm"][data-st-key="form_entrada"] button[kind="primary"]{
-  background:#16a34a !important;
-  border-color:#16a34a !important;
-  color:#fff !important;
-  font-weight:700 !important;
-  border-radius:14px !important;
-}
-div[data-testid="stFormSubmitButton"][data-st-key="sb_entrada"] [data-testid="baseButton-primary"]:hover,
-div[data-testid="stFormSubmitButton"][data-st-key="sb_entrada"] button:hover,
-div[data-testid="stForm"][data-st-key="form_entrada"] button[kind="primary"]:hover{
-  background:#15803d !important; border-color:#15803d !important;
-}
-
-/* ===== DÍZIMO — AZUL (key: sb_dizimo) ===== */
-div[data-testid="stFormSubmitButton"][data-st-key="sb_dizimo"] [data-testid="baseButton-primary"],
-div[data-testid="stFormSubmitButton"][data-st-key="sb_dizimo"] button,
-div[data-testid="stForm"][data-st-key="form_dizimo"] button[kind="primary"]{
-  background:#1d4ed8 !important;
-  border-color:#1d4ed8 !important;
-  color:#fff !important;
-  font-weight:700 !important;
-  border-radius:14px !important;
-}
-div[data-testid="stFormSubmitButton"][data-st-key="sb_dizimo"] [data-testid="baseButton-primary"]:hover,
-div[data-testid="stFormSubmitButton"][data-st-key="sb_dizimo"] button:hover,
-div[data-testid="stForm"][data-st-key="form_dizimo"] button[kind="primary"]:hover{
-  background:#1e40af !important; border-color:#1e40af !important;
-}
-
-/* ===== SAÍDA — VERMELHO (key: sb_saida) ===== */
-div[data-testid="stFormSubmitButton"][data-st-key="sb_saida"] [data-testid="baseButton-primary"],
-div[data-testid="stFormSubmitButton"][data-st-key="sb_saida"] button,
-div[data-testid="stForm"][data-st-key="form_saida"] button[kind="primary"]{
-  background:#dc2626 !important;
-  border-color:#dc2626 !important;
-  color:#fff !important;
-  font-weight:700 !important;
-  border-radius:14px !important;
-}
-div[data-testid="stFormSubmitButton"][data-st-key="sb_saida"] [data-testid="baseButton-primary"]:hover,
-div[data-testid="stFormSubmitButton"][data-st-key="sb_saida"] button:hover,
-div[data-testid="stForm"][data-st-key="form_saida"] button[kind="primary"]:hover{
-  background:#b91c1c !important; border-color:#b91c1c !important;
-}
-</style>
-"""
-st.markdown(SUBMIT_COLORS_CSS, unsafe_allow_html=True)
+ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
 
 # ===================== LOCALE (fallback) =====================
 def _set_locale_ptbr():
@@ -469,25 +312,8 @@ def _to_float_brl(x: Any) -> float:
 
 # ===================== DB BASE & MODELS =====================
 # ===================== DB BASE & MODELS =====================
-# ===================== DB BASE & MODELS (fix MappedAnnotationError) =====================
-# ===================== DB BASE & MODELS (fix MappedAnnotationError) =====================
 class Base(DeclarativeBase):
     pass
-
-class Congregation(Base):
-    __tablename__ = "congregations"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String, unique=True, index=True)
-    users: Mapped[list["User"]] = relationship(back_populates="congregation")
-    transactions: Mapped[list["Transaction"]] = relationship(back_populates="congregation")
-    tithes: Mapped[list["Tithe"]] = relationship(back_populates="congregation")
-
-class Category(Base):
-    __tablename__ = "categories"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String, unique=True, index=True)
-    type: Mapped[str] = mapped_column(String)  # 'DOAÇÃO' ou 'SAÍDA'
-    transactions: Mapped[list["Transaction"]] = relationship(back_populates="category")
 
 class User(Base):
     __tablename__ = "users"
@@ -495,8 +321,23 @@ class User(Base):
     username: Mapped[str] = mapped_column(String, unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String)
     role: Mapped[str] = mapped_column(String)  # 'SEDE', 'TESOUREIRO', 'TESOUREIRO MISSIONÁRIO'
-    congregation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("congregations.id"), nullable=True)
+    congregation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("congregations.id"))
     congregation: Mapped[Optional["Congregation"]] = relationship(back_populates="users")
+
+class Congregation(Base):
+    __tablename__ = "congregations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String, unique=True, index=True)
+    users: Mapped[List["User"]] = relationship(back_populates="congregation")
+    transactions: Mapped[List["Transaction"]] = relationship(back_populates="congregation")
+    tithes: Mapped[List["Tithe"]] = relationship(back_populates="congregation")
+
+class Category(Base):
+    __tablename__ = "categories"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String, unique=True, index=True)
+    type: Mapped[str] = mapped_column(String)  # 'DOAÇÃO' ou 'SAÍDA'
+    transactions: Mapped[List["Transaction"]] = relationship(back_populates="category")
 
 class Transaction(Base):
     __tablename__ = "transactions"
@@ -505,10 +346,9 @@ class Transaction(Base):
     type: Mapped[str] = mapped_column(String)  # 'DOAÇÃO' ou 'SAÍDA'
     category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"))
     amount: Mapped[float] = mapped_column(Float)
-    description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(String)
     congregation_id: Mapped[int] = mapped_column(ForeignKey("congregations.id"))
     payment_method: Mapped[Optional[str]] = mapped_column(String, default=None)
-
     category: Mapped["Category"] = relationship(back_populates="transactions", lazy="joined")
     congregation: Mapped["Congregation"] = relationship(back_populates="transactions")
 
@@ -1673,36 +1513,6 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, is_all: bool =
 # ===================== PAGE: LANÇAMENTOS =====================
 def page_lancamentos(user: "User"):
     ensure_seed()
-
-    # --- CSS local desta página (cores dos botões + cartão HTML) ---
-    _LAN_CSS = """
-    <style>
-      /* Cartões e layout */
-      .adrf-card{
-        background:#fff;
-        border:1px solid #e9e9ee;
-        border-radius:14px;
-        padding:16px 18px;
-        margin-bottom:18px;
-        box-shadow:0 2px 10px rgba(16,24,40,.06);
-      }
-      .adrf-section-title{
-        margin:0 0 10px 0;
-        font-weight:800;
-      }
-
-      /* Cores dos botões por seção */
-
-      /* Inputs um pouco mais compactos nesta página */
-      .adrf-card [data-testid="stForm"] input,
-      .adrf-card [data-testid="stForm"] select,
-      .adrf-card [data-testid="stForm"] textarea{
-        font-size:1rem;
-      }
-    </style>
-    """
-    st.markdown(_LAN_CSS, unsafe_allow_html=True)
-
     with SessionLocal() as db:
         sidebar_common(user)
 
@@ -1710,225 +1520,22 @@ def page_lancamentos(user: "User"):
 
         congs = cong_options_for(user, db)
         if not congs:
-            st.info("Nenhuma congregação disponível.")
-            return
+            st.info("Nenhuma congregação disponível."); return
 
         if user.role == "SEDE":
             congs_ordered = order_congs_sede_first(congs)
-            cong_sel = st.selectbox(
-                "Selecione a congregação",
-                [c.name for c in congs_ordered],
-                key="lan_cong_sel"
-            )
+            cong_sel = st.selectbox("Selecione a congregação", [c.name for c in congs_ordered], key="lan_cong_sel")
             cong_obj = next(c for c in congs_ordered if c.name == cong_sel)
         else:
             cong_obj = congs[0]
 
-        st.markdown(
-            f"<div class='cong-title'>CONGREGAÇÃO: {cong_obj.name.upper()}</div>",
-            unsafe_allow_html=True
-        )
-        
+        st.markdown(f"<div class='cong-title'>CONGREGAÇÃO: {cong_obj.name.upper()}</div>", unsafe_allow_html=True)
 
-        st.markdown("---")
-# ===================== ENTRADAS EM TABELA (Dízimo & Oferta) =====================
-st.markdown('<div class="adrf-card adrf-entrada">', unsafe_allow_html=True)
-st.markdown("<h3 class='adrf-section-title'>Lançar ENTRADAS em Tabela (Dízimo & Oferta)</h3>", unsafe_allow_html=True)
-
-with st.form("form_entrada_grid", clear_on_submit=True):
-    # linhas iniciais (pode editar/adicionar/remover à vontade)
-    init_rows = [
-        {"Data do Culto": today_bahia(), "Dízimo (R$)": 0.0, "PIX no Dízimo?": False, "Oferta (R$)": 0.0},
-        {"Data do Culto": today_bahia(), "Dízimo (R$)": 0.0, "PIX no Dízimo?": False, "Oferta (R$)": 0.0},
-        {"Data do Culto": today_bahia(), "Dízimo (R$)": 0.0, "PIX no Dízimo?": False, "Oferta (R$)": 0.0},
-    ]
-
-    df_grid = st.data_editor(
-        pd.DataFrame(init_rows),
-        use_container_width=True,
-        hide_index=True,
-        num_rows="dynamic",
-        column_config={
-            "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
-            "Dízimo (R$)": st.column_config.NumberColumn("Dízimo (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
-            "PIX no Dízimo?": st.column_config.CheckboxColumn("PIX no Dízimo?", default=False),
-            "Oferta (R$)": st.column_config.NumberColumn("Oferta (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
-        },
-        key="entrada_grid_editor",
-    )
-
-    ok_grid = st.form_submit_button("Salvar ENTRADAS da Tabela", type="primary", key="sb_entrada_grid")
-
-if ok_grid:
-    with SessionLocal() as _db:
-        # garante categorias Dízimo/Oferta
-        cats_in = categories_for_type(_db, TYPE_IN)
-        cat_diz = next((c for c in cats_in if _norm(c.name) in ("dizimo","dízimo")), None)
-        cat_ofe = next((c for c in cats_in if _norm(c.name) == "oferta"), None)
-        if not (cat_diz and cat_ofe):
-            st.error("Categorias 'Dízimo' e/ou 'Oferta' não encontradas.")
-            st.stop()
-
-        inseridos = 0
-        for _, r in df_grid.iterrows():
-            d = _to_date(r.get("Data do Culto"))
-            diz = float(_to_float_brl(r.get("Dízimo (R$)", 0.0)))
-            ofe = float(_to_float_brl(r.get("Oferta (R$)", 0.0)))
-            pix = bool(r.get("PIX no Dízimo?", False))
-
-            # Dízimo (Transaction) — payment_method="PIX" quando marcado
-            if diz > 0:
-                _db.add(Transaction(
-                    date=d, type=TYPE_IN, category_id=cat_diz.id, amount=diz,
-                    description=None, congregation_id=cong_obj.id,
-                    payment_method=("PIX" if pix else None)
-                ))
-                inseridos += 1
-
-            # Oferta (Transaction)
-            if ofe > 0:
-                _db.add(Transaction(
-                    date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=ofe,
-                    description=None, congregation_id=cong_obj.id
-                ))
-                inseridos += 1
-
-        _db.commit()
-    st.success(f"{inseridos} lançamento(s) inserido(s) com sucesso.")
-    st.rerun()
-
-st.markdown("</div>", unsafe_allow_html=True)
-
-        # ===================== DÍZIMOS — AZUL =====================
-        st.markdown('<div class="adrf-card adrf-dizimo">', unsafe_allow_html=True)
-        st.markdown("<h3 class='adrf-section-title'>Salvar DIZIMISTA</h3>", unsafe_allow_html=True)
-        with st.form("form_dizimo", clear_on_submit=True):
-            dz_data = st.date_input(
-                "Data do Culto",
-                value=today_bahia(),
-                key="dz_data",
-                format="DD/MM/YYYY"
-            )
-            dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
-            dz_valor = st.number_input(
-                "Valor dízimo (R$)",
-                min_value=0.0, step=1.0,
-                format="%.2f",
-                key="dz_valor"
-            )
-            dz_payment = st.selectbox(
-                "Forma de Pagamento",
-                ["Dinheiro", "PIX"],
-                key="dz_payment_method"
-            )
-
-            if st.form_submit_button("Salvar DIZIMISTA", type="primary", key="sb_dizimo"):
-                nome = (dz_nome or "").strip()
-                if not nome:
-                    st.error("Informe o nome do dizimista.")
-                    st.stop()
-
-                with SessionLocal() as _db:
-                    _db.add(Tithe(
-                        date=dz_data, tither_name=nome, amount=float(dz_valor),
-                        congregation_id=cong_obj.id, payment_method=dz_payment
-                    ))
-                    _db.commit()
-                    st.success("Dízimo registrado.")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        st.markdown("---")
-
-        # ===================== SAÍDA — VERMELHO =====================
-        st.markdown('<div class="adrf-card adrf-saida">', unsafe_allow_html=True)
-        st.markdown("<h3 class='adrf-section-title'>Lançar SAÍDA</h3>", unsafe_allow_html=True)
-        with st.form("form_saida", clear_on_submit=True):
-            sai_data = st.date_input(
-                "Data",
-                value=today_bahia(),
-                key="sai_data",
-                format="DD/MM/YYYY"
-            )
-            cats_out = categories_for_type(db, TYPE_OUT)
-            sai_cat = st.selectbox(
-                "Tipo da saída (Categoria)",
-                [c.name for c in cats_out] or ["—"],
-                key="sai_cat"
-            )
-            sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
-            sai_valor = st.number_input(
-                "Valor (R$)",
-                min_value=0.0, step=1.0,
-                format="%.2f",
-                key="sai_valor"
-            )
-
-            if st.form_submit_button("Salvar SAÍDA", type="primary", key="sb_saida"):
-                with SessionLocal() as _db:
-                    cat_obj = _db.scalar(select(Category).where(Category.name == sai_cat))
-                    if not cat_obj:
-                        st.error("Informe o tipo de saída.")
-                        st.stop()
-
-                    _db.add(Transaction(
-                        date=sai_data, type=TYPE_OUT, category_id=cat_obj.id,
-                        amount=sai_valor, description=(sai_desc or None),
-                        congregation_id=cong_obj.id
-                    ))
-                    _db.commit()
-                    st.success("Saída registrada.")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-# ===================== PAGE: RELATÓRIO DE ENTRADA =====================
-def page_lancamentos(user: "User"):
-    ensure_seed()
-
-    # --- CSS local desta página (cores dos botões + cartão HTML) ---
-    _LAN_CSS = """
-    <style>
-      .adrf-card{
-        background:#fff; border:1px solid #e9e9ee; border-radius:14px;
-        padding:16px 18px; margin-bottom:18px; box-shadow:0 2px 10px rgba(16,24,40,.06);
-      }
-      .adrf-section-title{ margin:0 0 10px 0; font-weight:800; }
-      .adrf-card [data-testid="stForm"] input,
-      .adrf-card [data-testid="stForm"] select,
-      .adrf-card [data-testid="stForm"] textarea{ font-size:1rem; }
-    </style>
-    """
-    st.markdown(_LAN_CSS, unsafe_allow_html=True)
-
-    with SessionLocal() as db:
-        sidebar_common(user)
-
-        st.markdown(f"<h1 class='page-title'>Lançamentos</h1>", unsafe_allow_html=True)
-
-        congs = cong_options_for(user, db)
-        if not congs:
-            st.info("Nenhuma congregação disponível.")
-            return
-
-        if user.role == "SEDE":
-            congs_ordered = order_congs_sede_first(congs)
-            cong_sel = st.selectbox(
-                "Selecione a congregação",
-                [c.name for c in congs_ordered],
-                key="lan_cong_sel"
-            )
-            cong_obj = next(c for c in congs_ordered if c.name == cong_sel)
-        else:
-            cong_obj = congs[0]
-
-        st.markdown(
-            f"<div class='cong-title'>CONGREGAÇÃO: {cong_obj.name.upper()}</div>",
-            unsafe_allow_html=True
-        )
-
-        # ===================== ENTRADA (Doação) — VERDE =====================
-        st.markdown('<div class="adrf-card adrf-entrada">', unsafe_allow_html=True)
-        st.markdown("<h3 class='adrf-section-title'>Lançar ENTRADA (Doação)</h3>", unsafe_allow_html=True)
+        # ENTRADA
+        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
+        st.subheader("Lançar ENTRADA (Doação)")
         with st.form("form_entrada", clear_on_submit=True):
-            c1, c2, c3 = st.columns([1.1, 1.4, 2])
+            c1,c2,c3 = st.columns([1.1,1.4,2])
             ent_data = st.date_input("Data do Culto", value=today_bahia(), key="ent_data", format="DD/MM/YYYY")
             with c2:
                 cats_in = categories_for_type(db, TYPE_IN)
@@ -1940,19 +1547,20 @@ def page_lancamentos(user: "User"):
                 rest = [n for n in cat_names_in if _norm(n) not in desired_norm]
                 cat_display = top + rest
                 ent_cat = st.selectbox("Categoria (ordem: Dízimo, Oferta, Missões)", cat_display, key="ent_cat")
-
             ent_desc = st.text_input("Descrição (opcional)", key="ent_desc")
             ent_flag_missoes = _norm(ent_cat) == "oferta" and st.checkbox("Oferta de missões?", key="ent_flag_missoes")
             ent_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="ent_valor")
 
-            if st.form_submit_button("Salvar ENTRADA", type="primary", key="sb_entrada"):
+            if st.form_submit_button("Salvar ENTRADA", type="primary"):
                 with SessionLocal() as _db:
-                    cat_name = "Missões" if ent_flag_missoes else ent_cat
-                    if cat_name == "Missões" and not _db.scalar(select(Category).where(Category.name == "Missões")):
-                        _db.add(Category(name="Missões", type=TYPE_IN)); _db.commit()
+                    cat_name = ent_cat
+                    if ent_flag_missoes:
+                        cat_name = "Missões"
+                        if not _db.scalar(select(Category).where(Category.name == "Missões")):
+                            _db.add(Category(name="Missões", type=TYPE_IN)); _db.commit()
                     cat_obj = _db.scalar(select(Category).where(Category.name == cat_name))
                     if not cat_obj:
-                        st.error("Informe a categoria."); st.stop()
+                        st.error("Informe a categoria."); return
                     _db.add(Transaction(
                         date=ent_data, type=TYPE_IN, category_id=cat_obj.id,
                         amount=ent_valor, description=(ent_desc or None),
@@ -1960,81 +1568,22 @@ def page_lancamentos(user: "User"):
                     ))
                     _db.commit()
                     st.success("Entrada registrada.")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # ===================== ENTRADAS EM TABELA (Dízimo & Oferta) =====================
-        st.markdown('<div class="adrf-card adrf-entrada">', unsafe_allow_html=True)
-        st.markdown("<h3 class='adrf-section-title'>Lançar ENTRADAS em Tabela (Dízimo & Oferta)</h3>", unsafe_allow_html=True)
-
-        with st.form("form_entrada_grid", clear_on_submit=True):
-            init_rows = [
-                {"Data do Culto": today_bahia(), "Dízimo (R$)": 0.0, "PIX no Dízimo?": False, "Oferta (R$)": 0.0},
-                {"Data do Culto": today_bahia(), "Dízimo (R$)": 0.0, "PIX no Dízimo?": False, "Oferta (R$)": 0.0},
-                {"Data do Culto": today_bahia(), "Dízimo (R$)": 0.0, "PIX no Dízimo?": False, "Oferta (R$)": 0.0},
-            ]
-            df_grid = st.data_editor(
-                pd.DataFrame(init_rows),
-                use_container_width=True,
-                hide_index=True,
-                num_rows="dynamic",
-                column_config={
-                    "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
-                    "Dízimo (R$)": st.column_config.NumberColumn("Dízimo (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
-                    "PIX no Dízimo?": st.column_config.CheckboxColumn("PIX no Dízimo?", default=False),
-                    "Oferta (R$)": st.column_config.NumberColumn("Oferta (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
-                },
-                key="entrada_grid_editor",
-            )
-            ok_grid = st.form_submit_button("Salvar ENTRADAS da Tabela", type="primary", key="sb_entrada_grid")
-
-        if ok_grid:
-            with SessionLocal() as _db:
-                cats_in = categories_for_type(_db, TYPE_IN)
-                cat_diz = next((c for c in cats_in if _norm(c.name) in ("dizimo","dízimo")), None)
-                cat_ofe = next((c for c in cats_in if _norm(c.name) == "oferta"), None)
-                if not (cat_diz and cat_ofe):
-                    st.error("Categorias 'Dízimo' e/ou 'Oferta' não encontradas."); st.stop()
-
-                inseridos = 0
-                for _, r in df_grid.iterrows():
-                    d   = _to_date(r.get("Data do Culto"))
-                    diz = float(_to_float_brl(r.get("Dízimo (R$)", 0.0)))
-                    ofe = float(_to_float_brl(r.get("Oferta (R$)", 0.0)))
-                    pix = bool(r.get("PIX no Dízimo?", False))
-
-                    if diz > 0:
-                        _db.add(Transaction(
-                            date=d, type=TYPE_IN, category_id=cat_diz.id, amount=diz,
-                            description=None, congregation_id=cong_obj.id,
-                            payment_method=("PIX" if pix else None)
-                        ))
-                        inseridos += 1
-                    if ofe > 0:
-                        _db.add(Transaction(
-                            date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=ofe,
-                            description=None, congregation_id=cong_obj.id
-                        ))
-                        inseridos += 1
-                _db.commit()
-            st.success(f"{inseridos} lançamento(s) inserido(s) com sucesso.")
-            st.rerun()
-
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
         st.markdown("---")
 
-        # ===================== DÍZIMOS — AZUL =====================
-        st.markdown('<div class="adrf-card adrf-dizimo">', unsafe_allow_html=True)
-        st.markdown("<h3 class='adrf-section-title'>Salvar DIZIMISTA</h3>", unsafe_allow_html=True)
+        # DÍZIMOS
+        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
+        st.subheader("Salvar DIZIMISTA")
         with st.form("form_dizimo", clear_on_submit=True):
             dz_data = st.date_input("Data do Culto", value=today_bahia(), key="dz_data", format="DD/MM/YYYY")
             dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
             dz_valor = st.number_input("Valor dízimo (R$)", min_value=0.0, step=1.0, format="%.2f", key="dz_valor")
             dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX"], key="dz_payment_method")
 
-            if st.form_submit_button("Salvar DIZIMISTA", type="primary", key="sb_dizimo"):
+            if st.form_submit_button("Salvar DIZIMISTA", type="primary"):
                 nome = (dz_nome or "").strip()
                 if not nome:
-                    st.error("Informe o nome do dizimista."); st.stop()
+                    st.error("Informe o nome do dizimista."); return
                 with SessionLocal() as _db:
                     _db.add(Tithe(
                         date=dz_data, tither_name=nome, amount=float(dz_valor),
@@ -2042,13 +1591,12 @@ def page_lancamentos(user: "User"):
                     ))
                     _db.commit()
                     st.success("Dízimo registrado.")
-        st.markdown("</div>", unsafe_allow_html=True)
-
+        st.markdown('</div>', unsafe_allow_html=True)
         st.markdown("---")
 
-        # ===================== SAÍDA — VERMELHO =====================
-        st.markdown('<div class="adrf-card adrf-saida">', unsafe_allow_html=True)
-        st.markdown("<h3 class='adrf-section-title'>Lançar SAÍDA</h3>", unsafe_allow_html=True)
+        # SAÍDA
+        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
+        st.subheader("Lançar SAÍDA")
         with st.form("form_saida", clear_on_submit=True):
             sai_data = st.date_input("Data", value=today_bahia(), key="sai_data", format="DD/MM/YYYY")
             cats_out = categories_for_type(db, TYPE_OUT)
@@ -2056,19 +1604,164 @@ def page_lancamentos(user: "User"):
             sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
             sai_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="sai_valor")
 
-            if st.form_submit_button("Salvar SAÍDA", type="primary", key="sb_saida"):
+            if st.form_submit_button("Salvar SAÍDA", type="primary"):
                 with SessionLocal() as _db:
                     cat_obj = _db.scalar(select(Category).where(Category.name == sai_cat))
                     if not cat_obj:
-                        st.error("Informe o tipo de saída."); st.stop()
+                        st.error("Informe o tipo de saída."); return
                     _db.add(Transaction(
                         date=sai_data, type=TYPE_OUT, category_id=cat_obj.id,
                         amount=sai_valor, description=(sai_desc or None),
-                        congregation_id=cong_obj.id
+                        congregation_id=cong_obj.id,
                     ))
                     _db.commit()
                     st.success("Saída registrada.")
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# ===================== PAGE: RELATÓRIO DE ENTRADA =====================
+def page_relatorio_entrada(user: "User"):
+    ensure_seed()
+    with SessionLocal() as db:
+        sidebar_common(user)
+
+        st.markdown("<h1 class='page-title'>Relatório de Entrada</h1>", unsafe_allow_html=True)
+        ref = get_month_selector()
+        start, end = month_bounds(ref)
+
+        congs = cong_options_for(user, db)
+        if user.role == "SEDE":
+            ordered = order_congs_sede_first(congs)
+            esc_opt = ["Todas as congregações"] + [c.name for c in ordered]
+            esc = st.selectbox("Escopo", esc_opt, key="re_in_allopt")
+            is_all = (esc == "Todas as congregações")
+            cong_obj = None if is_all else next(c for c in ordered if c.name == esc)
+        else:
+            is_all = False
+            cong_obj = congs[0] if congs else None
+
+        # === MODO SEDE: TODAS AS CONGREGAÇÕES ===
+        if is_all:
+            st.info("Escopo: **Todas as congregações** — edite o total de entradas mensal por congregação abaixo.")
+            _editor_entradas_agg_all(ordered, start, end)
+
+            # Total geral de ENTRADAS (todas as congregações) em destaque
+            with SessionLocal() as _db_tot_in:
+                total_geral_in = 0.0
+                for _c in ordered:
+                    _t = _collect_month_data(_db_tot_in, _c.id, start, end)["totals"]
+                    total_geral_in += float(_t["entradas_total_sem_missoes"])
+            st.metric("Total geral de entradas (todas as congregações)", format_currency(total_geral_in))
+            return
+
+        # === CONGREGAÇÃO ESPECÍFICA ===
+        if not cong_obj:
+            st.info("Selecione uma congregação."); 
+            return
+
+        st.info(f"Escopo: **{cong_obj.name}**")
+
+        base_df = _entrada_summary_df(db, cong_obj.id, start, end)
+        if base_df.empty:
+            base_df = pd.DataFrame(columns=["Data do Culto","Dízimo","Oferta","Total"])
+        view_df = base_df.copy()
+
+        edited = st.data_editor(
+            view_df,
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            column_config={
+                "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
+                "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", min_value=-999999999.0, step=1.0, format="R$ %.2f"),
+                "Oferta": st.column_config.NumberColumn("Oferta (R$)", min_value=-999999999.0, step=1.0, format="R$ %.2f"),
+                "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
+            },
+            key="re_entrada_sum_editor",
+        )
+
+        # Recalcula a coluna Total (visual)
+        if not edited.empty:
+            try:
+                edited["Total"] = edited["Dízimo"].map(_to_float_brl) + edited["Oferta"].map(_to_float_brl)
+            except Exception:
+                pass
+
+        # === TOTAL DO MÊS EM DESTAQUE (abaixo da tabela) ===
+        try:
+            _sum_total_mes = 0.0
+            if isinstance(edited, pd.DataFrame) and not edited.empty and {"Dízimo","Oferta"}.issubset(set(edited.columns)):
+                _calc = edited.copy()
+                _calc["Dízimo"] = _calc["Dízimo"].map(_to_float_brl)
+                _calc["Oferta"] = _calc["Oferta"].map(_to_float_brl)
+                _calc["Total"]  = _calc["Dízimo"] + _calc["Oferta"]
+                _sum_total_mes = float(_calc["Total"].sum())
+        except Exception:
+            _sum_total_mes = 0.0
+
+        st.metric("Total de Entradas (Dízimo + Oferta) no mês", format_currency(_sum_total_mes))
+
+        # Botão Salvar (persiste no banco via _apply_entrada_summary_changes)
+        def _save_sum():
+            _apply_entrada_summary_changes(cong_obj.id, start, end, edited)
+            st.toast("💾 Alterações salvas.", icon="✅")
+            st.rerun()
+
+        _save_btn(_save_sum, "entrada_sum")
+
+        # === [BLOCO: Apagar linhas do resumo de entrada] — logo após o botão Salvar ===
+        if isinstance(edited, pd.DataFrame) and not edited.empty and ("Data do Culto" in edited.columns):
+            try:
+                # Converte as datas e cria rótulos "dd/mm/aaaa"
+                _datas_ord = sorted({_to_date(d) for d in edited["Data do Culto"].tolist() if pd.notna(d)})
+                _label_map = {format_date(d): d for d in _datas_ord}  # "dd/mm/aaaa" -> date
+                _rotulos = list(_label_map.keys())
+            except Exception:
+                _rotulos = []
+                _label_map = {}
+
+            _sel_del = st.multiselect(
+                "Selecione as datas que deseja APAGAR desta tabela-resumo",
+                options=_rotulos,
+                key="re_entrada_sum_del_dates"
+            )
+
+            def _delete_selected_rows():
+                if not _sel_del:
+                    st.warning("Selecione ao menos uma data para apagar.")
+                    return
+
+                # Datas selecionadas (tipo date)
+                to_drop = {_label_map[x] for x in _sel_del if x in _label_map}
+
+                # Remove linhas com essas datas e salva
+                edited_clean = edited.copy()
+                edited_clean["Data do Culto"] = edited_clean["Data do Culto"].map(_to_date)
+                edited_clean = edited_clean[~edited_clean["Data do Culto"].isin(to_drop)]
+
+                _apply_entrada_summary_changes(cong_obj.id, start, end, edited_clean)
+                st.toast("🗑️ Linhas apagadas com sucesso.", icon="✅")
+                st.rerun()
+
+            st.button(
+                "🗑️ Apagar linhas selecionadas",
+                type="secondary",
+                on_click=_delete_selected_rows,
+                key="btn_del_entrada_sum"
+            )
+        # === [FIM: Apagar linhas] ===
+
+        st.divider()
+
+        # Download CSV do período
+        csv = edited.assign(**{
+            "Data do Culto": edited["Data do Culto"].map(lambda d: _to_date(d).strftime("%Y-%m-%d")),
+        }).to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            "⬇️ Baixar CSV (Entradas do período)",
+            data=csv,
+            file_name=f"entradas_resumo_{start.strftime('%Y-%m')}.csv",
+            mime="text/csv"
+        )
 
 # ===================== PAGE: RELATÓRIO DE SAÍDA =====================
 def page_relatorio_saida(user: "User"):
@@ -2648,44 +2341,26 @@ def page_visao_geral(user: "User"):
 
 # ===================== COLETA MISSÕES =====================
 def _collect_missions_data(db: Session, start: date, end: date, only_cong_id: Optional[int] = None):
-    # ENTRADAS: Missões (qualquer variação de acento/caso)
-    q_in = (
-        select(Transaction)
-        .options(joinedload(Transaction.congregation), joinedload(Transaction.category))
-        .join(Category, Transaction.category_id == Category.id)
-        .where(
-            Transaction.date >= start,
-            Transaction.date < end,
-            Transaction.type == TYPE_IN,
-            func.lower(Category.name).in_(("missões", "missoes"))
-        )
-        .order_by(Transaction.date)
-    )
+    q_in = select(Transaction).options(joinedload(Transaction.congregation), joinedload(Transaction.category)).where(
+        Transaction.date >= start,
+        Transaction.date < end,
+        Transaction.type == TYPE_IN,
+        Transaction.category.has(Category.name.in_(("Missões", "missões")))
+    ).order_by(Transaction.date)
     if only_cong_id:
         q_in = q_in.where(Transaction.congregation_id == only_cong_id)
     entradas_missoes = db.scalars(q_in).all()
-
-    # SAÍDAS: Missões (Saída) – cobre acentos/sem acentos
-    saida_variants = (
-        "missões (saída)", "missoes (saida)",
-        "missões (saida)", "missoes (saída)"
-    )
-    q_out = (
-        select(Transaction)
-        .options(joinedload(Transaction.congregation), joinedload(Transaction.category))
-        .join(Category, Transaction.category_id == Category.id)
-        .where(
-            Transaction.date >= start,
-            Transaction.date < end,
-            Transaction.type == TYPE_OUT,
-            func.lower(Category.name).in_(saida_variants)
-        )
-        .order_by(Transaction.date)
-    )
+    
+    q_out = select(Transaction).options(joinedload(Transaction.congregation), joinedload(Transaction.category)).where(
+        Transaction.date >= start,
+        Transaction.date < end,
+        Transaction.type == TYPE_OUT,
+        Transaction.category.has(Category.name.in_(("Missões (Saída)", "missões (saída)")))
+    ).order_by(Transaction.date)
     if only_cong_id:
         q_out = q_out.where(Transaction.congregation_id == only_cong_id)
     saidas_missoes = db.scalars(q_out).all()
-
+    
     return entradas_missoes, saidas_missoes
 
 def build_missions_report_pdf(ref: date, entradas: list, saidas: list) -> bytes:
