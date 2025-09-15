@@ -1,22 +1,6 @@
 
 import os
-from datetime import date, timedelta, datetime
-from typing import Optional, List, Tuple, Dict, Any
-from collections import defaultdict, Counter
-import locale as _locale
-import pandas as pd
-import streamlit as st
-
-from sqlalchemy import select, func, String, Date, Float, ForeignKey, create_engine, and_
-from sqlalchemy.orm import relationship, Mapped, mapped_column, sessionmaker, joinedload, Session
-from sqlalchemy.orm import DeclarativeBase
-import unicodedata as ud
-import hashlib
-import json, base64, hmac, time
-
-# PDF
-from io import BytesIO
-from reportlab.lib.pagesizes import A4, portrait
+from dA4, portrait
 from reportlab.lib import colors
 from reportlab.lib.units import cm
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
