@@ -340,31 +340,34 @@ def _tile(col, label: str, target_page: str):
     with col:
         st.markdown("<div class='tile'>", unsafe_allow_html=True)
         if st.button(label, key=f"tile_{_norm(label)}"):
+            # atualiza a página “principal”
             st.session_state["main_menu_page"] = target_page
+            # sincroniza o radio da sidebar (sem ícones!)
+            sk = st.session_state.get("__menu_state_key")
+            opts = st.session_state.get("__menu_options_plain", [])
+            if sk and target_page in opts:
+                st.session_state[sk] = target_page
             st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
 def page_menu(user: "User"):
+    ensure_seed()
+    sidebar_common(user)
+
     st.markdown("<h2 class='menu-title'>ESCOLHA O AMBIENTE</h2>", unsafe_allow_html=True)
 
-    # opções por perfil (mesmo conjunto do seu app)
     role = getattr(user, "role", "")
     if role == "SEDE":
-        items = [
-            "Lançamentos","Relatório de Entrada","Relatório de Saída",
-            "Relatório de Missões","Relatório de Dizimistas","Visão Geral","Cadastro"
-        ]
+        items = ["Lançamentos","Relatório de Entrada","Relatório de Saída",
+                 "Relatório de Missões","Relatório de Dizimistas","Visão Geral","Cadastro"]
     elif role == "TESOUREIRO":
-        items = [
-            "Lançamentos","Relatório de Entrada","Relatório de Saída",
-            "Relatório de Missões","Relatório de Dizimistas","Visão Geral"
-        ]
+        items = ["Lançamentos","Relatório de Entrada","Relatório de Saída",
+                 "Relatório de Missões","Relatório de Dizimistas","Visão Geral"]
     elif role == "TESOUREIRO MISSIONÁRIO":
         items = ["Relatório de Missões"]
     else:
         items = ["Visão Geral"]
 
-    # grid responsiva (2 colunas no tablet, 3 no desktop)
     st.markdown("<div class='tiles'>", unsafe_allow_html=True)
     cols = st.columns(3, gap="large")
     for i, label in enumerate(items):
@@ -771,6 +774,7 @@ def order_congs_sede_first(congs: List[Congregation]) -> List[Congregation]:
     return (sede + others) if sede else others
 
 def sidebar_common(user: "User") -> str:
+    """Menu lateral simples (sem ícones) e expõe a chave do radio para o menu de tiles."""
     if st.session_state.get("sidebar_rendered", False):
         return st.session_state.get("main_menu_page", "Menu")
 
@@ -784,40 +788,33 @@ def sidebar_common(user: "User") -> str:
 
         role = getattr(user, "role", "")
         if role == "SEDE":
-            menu_options_plain = [
-                "Lançamentos","Relatório de Entrada","Relatório de Saída",
-                "Relatório de Missões","Relatório de Dizimistas","Visão Geral","Cadastro"
-            ]
+            menu_options = ["Menu","Lançamentos","Relatório de Entrada","Relatório de Saída",
+                            "Relatório de Missões","Relatório de Dizimistas","Visão Geral","Cadastro"]
         elif role == "TESOUREIRO":
-            menu_options_plain = [
-                "Lançamentos","Relatório de Entrada","Relatório de Saída",
-                "Relatório de Missões","Relatório de Dizimistas","Visão Geral"
-            ]
+            menu_options = ["Menu","Lançamentos","Relatório de Entrada","Relatório de Saída",
+                            "Relatório de Missões","Relatório de Dizimistas","Visão Geral"]
         elif role == "TESOUREIRO MISSIONÁRIO":
-            menu_options_plain = ["Relatório de Missões"]
+            menu_options = ["Menu","Relatório de Missões"]
         else:
-            menu_options_plain = ["Visão Geral"]
+            menu_options = ["Menu","Visão Geral"]
 
-        # <<< só nomes
-        menu_labels_pretty = menu_options_plain
-
-        state_key = f"main_menu_nav_{getattr(user, 'id', 'anon')}"
+        state_key = f"main_menu_nav_{getattr(user,'id','anon')}"
         if state_key not in st.session_state:
-            prev_page = st.session_state.get("main_menu_page")
-            st.session_state[state_key] = prev_page if prev_page in menu_options_plain else menu_options_plain[0]
+            prev = st.session_state.get("main_menu_page", "Menu")
+            st.session_state[state_key] = prev if prev in menu_options else "Menu"
 
-        sel_label = st.radio("Menu", options=menu_labels_pretty, key=state_key, label_visibility="visible")
+        sel = st.radio("Menu", options=menu_options, key=state_key, label_visibility="visible")
+        st.session_state["main_menu_page"] = sel
 
-        # rótulo == página
-        page = sel_label
-        st.session_state["main_menu_page"] = page
-
-        st.divider()
         if st.button("Sair", key=f"btn_logout_{getattr(user, 'id', 'anon')}"):
             logout()
 
+        # ---- expõe para o menu de tiles conseguir mudar o radio ----
+        st.session_state["__menu_state_key"] = state_key
+        st.session_state["__menu_options_plain"] = menu_options
+
         st.session_state["sidebar_rendered"] = True
-        return page
+        return sel
 
 # ======= NOVO: helper padrão para botões 'Salvar alterações' =======
 # ====== CORES P/ BOTÕES ======
