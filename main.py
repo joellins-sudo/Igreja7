@@ -2636,26 +2636,29 @@ def main():
         # -------- menu lateral (uma vez) --------
         page = sidebar_common(user)
 
-        # -------- roteamento --------
-        if page == "Lançamentos":
-            page_lancamentos(user)
-        elif page == "Relatório de Entrada":
-            page_relatorio_entrada(user)
-        elif page == "Relatório de Saída":
-            page_relatorio_saida(user)
-        elif page == "Relatório de Dizimistas":
-            page_relatorio_dizimistas(user)
-        elif page == "Relatório de Missões":
-            if getattr(user, "role", "") == "TESOUREIRO":
-                page_relatorio_missoes_congregacao(user)
-            else:
-                page_relatorio_missoes(user)
-        elif page == "Visão Geral":
-            page_visao_geral(user)
-        elif page == "Cadastro":
-            page_cadastro(user)
+        # -------- roteamento (robusto a funções ausentes) --------
+        miss_fn = globals().get("page_relatorio_missoes_congregacao") if getattr(user, "role", "") == "TESOUREIRO" \
+                  else globals().get("page_relatorio_missoes")
+
+        pages = {
+            "Lançamentos": globals().get("page_lancamentos"),
+            "Relatório de Entrada": globals().get("page_relatorio_entrada"),
+            "Relatório de Saída": globals().get("page_relatorio_saida"),
+            "Relatório de Dizimistas": globals().get("page_relatorio_dizimistas"),
+            "Relatório de Missões": miss_fn,
+            "Visão Geral": globals().get("page_visao_geral"),
+            "Cadastro": globals().get("page_cadastro"),
+        }
+
+        fn = pages.get(page)
+        if callable(fn):
+            fn(user)
         else:
-            st.warning("Seleção de página inválida.")
+            st.error(f"❌ Página “{page}” indisponível (função não encontrada).")
+            disponiveis = [k for k, v in pages.items() if callable(v)]
+            if disponiveis:
+                st.info("Páginas disponíveis: " + ", ".join(disponiveis))
+
     except Exception as e:
         st.error("Ocorreu um erro ao renderizar a aplicação.")
         st.exception(e)
