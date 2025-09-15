@@ -1512,6 +1512,9 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, is_all: bool =
 
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS (com modo Tabela fora do form) =====================
+d# ...
+# ===================== PAGE: LANÇAMENTOS =====================
+# ===================== PAGE: LANÇAMENTOS (com modo Tabela fora do form) =====================
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1532,131 +1535,131 @@ def page_lancamentos(user: "User"):
             cong_obj = congs[0]
 
         st.markdown(f"<div class='cong-title'>CONGREGAÇÃO: {cong_obj.name.upper()}</div>", unsafe_allow_html=True)
+        
+        # O modo de lançamento será substituído por um popover (botão "Abrir Tabela")
+        # st.radio será removido/comentado.
+        # mode = st.radio(
+        #     "Como deseja lançar?",
+        #     ["Formulário único", "Inserir na tabela (Dízimo + Oferta)"],
+        #     horizontal=True,
+        #     key=f"lan_mode_{cong_obj.id}"
+        # )
 
-        # --------- NOVO: Modo de lançamento ---------
-        mode = st.radio(
-            "Como deseja lançar?",
-            ["Formulário único", "Inserir na tabela (Dízimo + Oferta)"],
-            horizontal=True,
-            key=f"lan_mode_{cong_obj.id}"
-        )
+        # NOVO: Botão para abrir o "Pop-up" com a tabela de Dízimo/Oferta
+        st.subheader("Lançamento Agregado Diário")
+        
+        # Tabela dentro do POP-UP (st.popover)
+        with st.popover("➕ Abrir Tabela Dízimo/Oferta (por Data)", use_container_width=True):
+            st.markdown("### Tabela Dízimo e Oferta")
+            st.info(f"Escopo: **{cong_obj.name}** — edite as linhas abaixo.")
 
-        # ===================== MODO TABELA =====================
-        if mode == "Inserir na tabela (Dízimo + Oferta)":
-            with st.expander("Inserir pela Tabela — Dízimo e Oferta", expanded=True):
-                st.info(f"Escopo: **{cong_obj.name}** — edite as linhas abaixo. "
-                        f"O campo **Total** é calculado automaticamente.")
+            ref_tab = get_month_selector("Mês da tabela")
+            start_tab, end_tab = month_bounds(ref_tab)
 
-                ref_tab = get_month_selector("Mês da tabela")
-                start_tab, end_tab = month_bounds(ref_tab)
+            df = _entrada_summary_df(db, cong_obj.id, start_tab, end_tab)
+            if df.empty:
+                df = pd.DataFrame([{
+                    "Data do Culto": today_bahia(),
+                    "Dízimo": 0.0,
+                    "Oferta": 0.0,
+                    "Total": 0.0
+                }])
+            df = df.copy()
+            try:
+                df["Dízimo"] = df["Dízimo"].map(float)
+                df["Oferta"] = df["Oferta"].map(float)
+            except Exception:
+                pass
+            df["Total"] = df["Dízimo"] + df["Oferta"]
 
-                df = _entrada_summary_df(db, cong_obj.id, start_tab, end_tab)
-                if df.empty:
-                    df = pd.DataFrame([{
-                        "Data do Culto": today_bahia(),
-                        "Dízimo": 0.0,
-                        "Oferta": 0.0,
-                        "Total": 0.0
-                    }])
-                df = df.copy()
-                try:
-                    df["Dízimo"] = df["Dízimo"].map(float)
-                    df["Oferta"] = df["Oferta"].map(float)
-                except Exception:
-                    pass
-                df["Total"] = df["Dízimo"] + df["Oferta"]
+            edited_tab = st.data_editor(
+                df[["Data do Culto", "Dízimo", "Oferta", "Total"]],
+                use_container_width=True,
+                hide_index=True,
+                num_rows="dynamic",
+                column_config={
+                    "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
+                    "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
+                    "Oferta": st.column_config.NumberColumn("Oferta (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
+                    "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
+                },
+                key=f"lan_tab_editor_{cong_obj.id}_{start_tab:%Y_%m}",
+            )
 
-                edited_tab = st.data_editor(
-                    df[["Data do Culto", "Dízimo", "Oferta", "Total"]],
-                    use_container_width=True,
-                    hide_index=True,
-                    num_rows="dynamic",
-                    column_config={
-                        "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
-                        "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
-                        "Oferta": st.column_config.NumberColumn("Oferta (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
-                        "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
-                    },
-                    key=f"lan_tab_editor_{cong_obj.id}_{start_tab:%Y_%m}",
+            try:
+                _sum_total_mes = float(
+                    edited_tab.assign(
+                        **{
+                            "Dízimo": edited_tab["Dízimo"].map(_to_float_brl),
+                            "Oferta": edited_tab["Oferta"].map(_to_float_brl)
+                        }
+                    ).eval("Dízimo + Oferta").sum()
                 )
+            except Exception:
+                _sum_total_mes = 0.0
+            
+            st.metric("Total de Entradas (Dízimo + Oferta) no mês", format_currency(_sum_total_mes))
 
-                # métrica do mês
-                try:
-                    _sum_total_mes = float(
-                        edited_tab.assign(
-                            **{
-                                "Dízimo": edited_tab["Dízimo"].map(_to_float_brl),
-                                "Oferta": edited_tab["Oferta"].map(_to_float_brl)
-                            }
-                        ).eval("Dízimo + Oferta").sum()
-                    )
-                except Exception:
-                    _sum_total_mes = 0.0
-                st.metric("Total de Entradas (Dízimo + Oferta) no mês", format_currency(_sum_total_mes))
+            def _save_tab():
+                _apply_entrada_summary_changes(cong_obj.id, start_tab, end_tab, edited_tab)
+                st.toast("💾 Tabela salva com sucesso.", icon="✅")
+                # Sem st.rerun() dentro do popover, para não fechá-lo imediatamente após salvar.
+                # O usuário pode fechar e reabrir o popover.
+            
+            # Reposiciona o botão Salvar dentro do popover.
+            st.divider()
+            _save_btn(_save_tab, f"lan_tab_{cong_obj.id}_{start_tab:%Y_%m}")
+            st.caption("Feche o pop-up e atualize a página para ver os dados salvos em relatórios.")
 
-                # salvar no banco (usa o mesmo motor do Relatório de Entrada)
-                def _save_tab():
-                    _apply_entrada_summary_changes(cong_obj.id, start_tab, end_tab, edited_tab)
-                    st.toast("💾 Tabela salva com sucesso.", icon="✅")
-                    st.rerun()
-                _save_btn(_save_tab, f"lan_tab_{cong_obj.id}_{start_tab:%Y_%m}")
+            # CSV do que está na tela (removido do popover para simplificar)
 
-                # CSV do que está na tela
-                _csv = edited_tab.assign(
-                    **{"Data do Culto": edited_tab["Data do Culto"].map(lambda d: _to_date(d).strftime("%Y-%m-%d")),
-                       "Total": edited_tab["Dízimo"].map(_to_float_brl) + edited_tab["Oferta"].map(_to_float_brl)}
-                ).to_csv(index=False).encode("utf-8-sig")
-                st.download_button(
-                    "⬇️ Baixar CSV da tabela",
-                    data=_csv,
-                    file_name=f"entradas_tabela_{_norm(cong_obj.name)}_{start_tab:%Y-%m}.csv",
-                    mime="text/csv"
-                )
+        st.markdown("---")
 
-            st.markdown("---")
-
+        # Os demais formulários (Entrada, Dízimo, Saída) continuam como "Formulário único"
+        
         # ===================== MODO FORM (item único) =====================
-        if mode == "Formulário único":
-            st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
-            st.subheader("Lançar ENTRADA (Doação)")
+        # Removido o IF: if mode == "Formulário único":
+        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
+        st.subheader("Lançar ENTRADA (Doação)")
 
-            with st.form("form_entrada", clear_on_submit=True):
-                c1, c2, c3 = st.columns([1.1, 1.6, 2])
-                ent_data = st.date_input("Data do Culto", value=today_bahia(), key="ent_data", format="DD/MM/YYYY")
+        with st.form("form_entrada", clear_on_submit=True):
+            # ... resto do código do formulário de entrada (Entrada, Dízimos, Saída)
+            c1, c2, c3 = st.columns([1.1, 1.6, 2])
+            ent_data = st.date_input("Data do Culto", value=today_bahia(), key="ent_data", format="DD/MM/YYYY")
 
-                with c2:
-                    cats_in = categories_for_type(db, TYPE_IN)
-                    cats_in = [c for c in cats_in if "ajuste" not in _norm(c.name)]
-                    cat_names_in = [c.name for c in cats_in] or ["—"]
-                    desired = ["Dízimo", "Oferta", "Missões"]
-                    desired_norm = [_norm(x) for x in desired]
-                    top = [n for n in cat_names_in if _norm(n) in desired_norm]
-                    rest = [n for n in cat_names_in if _norm(n) not in desired_norm]
-                    cat_display = top + rest
-                    ent_cat = st.selectbox("Categoria", cat_display, key="ent_cat")
+            with c2:
+                cats_in = categories_for_type(db, TYPE_IN)
+                cats_in = [c for c in cats_in if "ajuste" not in _norm(c.name)]
+                cat_names_in = [c.name for c in cats_in] or ["—"]
+                desired = ["Dízimo", "Oferta", "Missões"]
+                desired_norm = [_norm(x) for x in desired]
+                top = [n for n in cat_names_in if _norm(n) in desired_norm]
+                rest = [n for n in cat_names_in if _norm(n) not in desired_norm]
+                cat_display = top + rest
+                ent_cat = st.selectbox("Categoria", cat_display, key="ent_cat")
 
-                ent_desc = st.text_input("Descrição (opcional)", key="ent_desc")
-                ent_flag_missoes = _norm(ent_cat) == "oferta" and st.checkbox("Oferta de missões?", key="ent_flag_missoes")
-                ent_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="ent_valor")
+            ent_desc = st.text_input("Descrição (opcional)", key="ent_desc")
+            ent_flag_missoes = _norm(ent_cat) == "oferta" and st.checkbox("Oferta de missões?", key="ent_flag_missoes")
+            ent_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="ent_valor")
 
-                if st.form_submit_button("Salvar ENTRADA", type="primary"):
-                    with SessionLocal() as _db:
-                        cat_name = "Missões" if ent_flag_missoes else ent_cat
-                        if ent_flag_missoes and not _db.scalar(select(Category).where(Category.name == "Missões")):
-                            _db.add(Category(name="Missões", type=TYPE_IN)); _db.commit()
-                        cat_obj = _db.scalar(select(Category).where(Category.name == cat_name))
-                        if not cat_obj:
-                            st.error("Informe a categoria.")
-                        else:
-                            _db.add(Transaction(
-                                date=ent_data, type=TYPE_IN, category_id=cat_obj.id,
-                                amount=float(ent_valor), description=(ent_desc or None),
-                                congregation_id=cong_obj.id, payment_method=None
-                            ))
-                            _db.commit()
-                            st.success("Entrada registrada.")
-            st.markdown('</div>', unsafe_allow_html=True)
-            st.markdown("---")
+            if st.form_submit_button("Salvar ENTRADA", type="primary"):
+                with SessionLocal() as _db:
+                    cat_name = "Missões" if ent_flag_missoes else ent_cat
+                    if ent_flag_missoes and not _db.scalar(select(Category).where(Category.name == "Missões")):
+                        _db.add(Category(name="Missões", type=TYPE_IN)); _db.commit()
+                    cat_obj = _db.scalar(select(Category).where(Category.name == cat_name))
+                    if not cat_obj:
+                        st.error("Informe a categoria.")
+                    else:
+                        _db.add(Transaction(
+                            date=ent_data, type=TYPE_IN, category_id=cat_obj.id,
+                            amount=float(ent_valor), description=(ent_desc or None),
+                            congregation_id=cong_obj.id, payment_method=None
+                        ))
+                        _db.commit()
+                        st.success("Entrada registrada.")
+        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("---")
 
         # ================= DÍZIMOS (form nominal) =================
         st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
