@@ -756,10 +756,11 @@ def sidebar_common(user: "User") -> str:
 
 # ======= NOVO: helper padrão para botões 'Salvar alterações' =======
 # ====== CORES P/ BOTÕES ======
+# ======= NOVO: helper padrão para botões 'Salvar alterações' =======
 BTN_COLORS = {
     "entrada":  "#16a34a",  # verde
     "dizimista":"#2563eb",  # azul
-    "saida":    "#dc2626",  # vermelha
+    "saida":    "#dc2626",  # vermelho
     "neutral":  "#1f6feb",  # fallback (azul padrão)
 }
 
@@ -769,22 +770,25 @@ def _save_btn(on_click, key_suffix: str, theme: str = "neutral", label: str = "S
       - 'entrada'  -> verde
       - 'dizimista'-> azul
       - 'saida'    -> vermelho
-      - 'neutral'  -> cor padrão
+      - 'neutral'  -> cor padrão (azul)
     """
     color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
     with st.container():
-        # marcador p/ escopar o CSS desse botão apenas
-        st.markdown(f'<div id="mark-{key_suffix}"></div>', unsafe_allow_html=True)
+        # 👇 criamos um wrapper para escopar o CSS via SELETOR DE DESCENDENTE (mais confiável que "~")
+        st.markdown(f'<div id="wrap-{key_suffix}">', unsafe_allow_html=True)
         st.button(label, key=f"btn_save_{key_suffix}", type="primary", on_click=on_click)
+        st.markdown("</div>", unsafe_allow_html=True)
+
         st.markdown(
             f"""
             <style>
-              /* pinta SOMENTE o botão dentro deste bloco */
-              #mark-{key_suffix} ~ div[data-testid="stButton"] > button {{
+              /* pinta SOMENTE o botão dentro deste wrapper */
+              #wrap-{key_suffix} [data-testid="stButton"] > button {{
                 background: {color} !important;
                 border-color: {color} !important;
+                color: #fff !important;
               }}
-              #mark-{key_suffix} ~ div[data-testid="stButton"] > button:hover {{
+              #wrap-{key_suffix} [data-testid="stButton"] > button:hover {{
                 filter: brightness(0.93);
               }}
             </style>
@@ -799,19 +803,21 @@ def _submit_btn(label: str, key_suffix: str, theme: str = "neutral") -> bool:
     """
     color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
     with st.container():
-        st.markdown(f'<div id="mark-{key_suffix}"></div>', unsafe_allow_html=True)
+        st.markdown(f'<div id="wrap-submit-{key_suffix}">', unsafe_allow_html=True)
         clicked = st.form_submit_button(label, type="primary")
+        st.markdown("</div>", unsafe_allow_html=True)
+
         st.markdown(
             f"""
             <style>
-              /* cobre tanto submit de form quanto um fallback de stButton */
-              #mark-{key_suffix} ~ div[data-testid="stFormSubmitButton"] > button,
-              #mark-{key_suffix} ~ div[data-testid="stButton"] > button {{
+              #wrap-submit-{key_suffix} [data-testid="stFormSubmitButton"] > button,
+              #wrap-submit-{key_suffix} [data-testid="stButton"] > button {{
                 background: {color} !important;
                 border-color: {color} !important;
+                color: #fff !important;
               }}
-              #mark-{key_suffix} ~ div[data-testid="stFormSubmitButton"] > button:hover,
-              #mark-{key_suffix} ~ div[data-testid="stButton"] > button:hover {{
+              #wrap-submit-{key_suffix} [data-testid="stFormSubmitButton"] > button:hover,
+              #wrap-submit-{key_suffix} [data-testid="stButton"] > button:hover {{
                 filter: brightness(0.93);
               }}
             </style>
