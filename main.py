@@ -1858,7 +1858,7 @@ def page_lancamentos(user: "User"):
             return  # fim do modo tabela
 
         # ===================== FORMULÁRIOS ÚNICOS (coloridos) =====================
-        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
+        st.markdown('<div class="st-container-card adrf-entrada">', unsafe_allow_html=True)
         st.subheader("Lançar ENTRADA (Doação)")
         with st.form("form_entrada", clear_on_submit=True):
             c1, c2, c3 = st.columns([1.1, 1.6, 2])
@@ -1899,7 +1899,7 @@ def page_lancamentos(user: "User"):
         st.markdown('</div>', unsafe_allow_html=True)
         st.markdown("---")
 
-        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
+        st.markdown('<div class="st-container-card adrf-dizimo">', unsafe_allow_html=True)
         st.subheader("Salvar DIZIMISTA")
         with st.form("form_dizimo", clear_on_submit=True):
             dz_data = st.date_input("Data do Culto", value=today_bahia(), key="dz_data", format="DD/MM/YYYY")
@@ -1924,7 +1924,7 @@ def page_lancamentos(user: "User"):
         st.markdown('</div>', unsafe_allow_html=True)
         st.markdown("---")
 
-        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
+        st.markdown('<div class="st-container-card adrf-saida">', unsafe_allow_html=True)
         st.subheader("Lançar SAÍDA")
         with st.form("form_saida", clear_on_submit=True):
             sai_data = st.date_input("Data", value=today_bahia(), key="sai_data", format="DD/MM/YYYY")
