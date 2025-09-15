@@ -1,29 +1,4 @@
-# main.py — AD Relatório Financeiro — v13.3
-# Melhorias deste commit (apenas estas):
-# 1) Adicionado botão "Salvar alterações" abaixo de TODAS as tabelas editáveis.
-# 2) Tesoureiro Missionário pode lançar SAÍDAS de Missões para QUALQUER congregação
-#    (editor agora tem coluna "Congregação"); Entradas continuam no editor agregado.
-# 3) Nova aba "Relatório de Missões" para TESOUREIRO (congregações) ver apenas seus lançamentos.
-# 4) [EQUIVALÊNCIA DE DÍZIMOS] Dízimos lançados em "Entrada (Doação)" e por "Dizimista"
-#    agora são tratados como equivalentes (NÃO são somados). Em resumos por data e totais mensais,
-#    usa-se o MAIOR entre (soma de Tithes) e (soma de Transactions categoria "Dízimo").
-#
-# Obs.: Todo o restante do seu código foi preservado. Itens que você pediu antes
-# (ex.: esconder "ajuste" na ENTRADA, relatórios agregados editáveis da SEDE, etc.) continuam iguais.
 
-from __future__ import annotations
-# ===== UI extra (menu bonito com fallback) =====
-try:
-    import streamlit_antd_components as sac  # pip install streamlit-antd-components
-except Exception:
-    sac = None  # fallback p/ radio padrão
-import hashlib
-from sqlalchemy import select
-
-import os
-from datetime import date, timedelta, datetime
-from typing import Optional, List, Tuple, Dict, Any
-from collections import defaultdict, Counter
 import locale as _locale
 import pandas as pd
 import streamlit as st
