@@ -1934,6 +1934,7 @@ with st.form("form_dizimo", clear_on_submit=True):
         # ================== FORMULÁRIO: SAÍDA ==================
 st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
 st.subheader("Lançar SAÍDA")
+
 with st.form("form_saida", clear_on_submit=True):
     sai_data = st.date_input("Data", value=today_bahia(), key="sai_data", format="DD/MM/YYYY")
     cats_out = categories_for_type(db, TYPE_OUT)
@@ -1941,7 +1942,7 @@ with st.form("form_saida", clear_on_submit=True):
     sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
     sai_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="sai_valor")
 
-    # BOTÃO VERMELHO
+    # BOTÃO VERMELHO (dentro do form)
     ok = _submit_btn("Salvar SAÍDA", "submit_saida", theme="saida")
     if ok:
         with SessionLocal() as _db:
@@ -1956,7 +1957,9 @@ with st.form("form_saida", clear_on_submit=True):
                 ))
                 _db.commit()
                 st.success("Saída registrada.")
-            st.markdown('</div>', unsafe_allow_html=True)
+
+# <- fora do with st.form
+st.markdown('</div>', unsafe_allow_html=True)
 
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 def page_relatorio_entrada(user: "User"):
