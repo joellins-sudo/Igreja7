@@ -290,22 +290,16 @@ MENU_TILES_CSS = """
     background:#1f6feb; color:#fff; padding:.45rem .8rem;
     display:inline-block; margin:6px auto 18px; border-radius:.3rem;
   }
-  .tiles{ display:grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap:18px; }
-  @media (min-width: 1000px){ .tiles{ grid-template-columns: repeat(3, minmax(220px, 1fr)); } }
+  .tiles{ display:grid; grid-template-columns: repeat(3, minmax(220px, 1fr)); gap:18px; }
   .tile{
     background:#fff; border:1px solid #e6e8f0; border-radius:12px;
-    box-shadow:0 10px 26px rgba(16,24,40,.06); padding:16px; text-align:center;
+    box-shadow:0 10px 26px rgba(16,24,40,.06); padding:12px; text-align:center;
   }
-  .tile img{ width:150px; height:150px; object-fit:contain; margin:6px auto 10px; display:block; }
   .tile .stButton>button{
-    width:100%; height:44px; font-weight:700; border-radius:10px;
+    width:100%; height:56px; font-weight:700; border-radius:10px;
     background:#1f6feb; border-color:#1f6feb; color:#fff;
   }
   .tile .stButton>button:hover{ filter:brightness(.93); }
-  .tile .fallback{
-    width:150px; height:150px; margin:6px auto 10px; display:grid; place-items:center;
-    background:#f1f4f9; border:1px dashed #d7dbe5; color:#6b7280; border-radius:12px; font-size:42px;
-  }
 </style>
 """
 st.markdown(MENU_TILES_CSS, unsafe_allow_html=True)
@@ -313,17 +307,6 @@ st.markdown(MENU_TILES_CSS, unsafe_allow_html=True)
 def _tile(col, label: str, target_page: str):
     with col:
         st.markdown("<div class='tile'>", unsafe_allow_html=True)
-        img_path = MENU_TILE_IMAGES.get(label)
-        if img_path and os.path.exists(img_path):
-            st.image(img_path)
-        else:
-            # fallback simples (emoji muda por página)
-            emoji = {
-                "Lançamentos":"📥","Relatório de Entrada":"📊","Relatório de Saída":"📉",
-                "Relatório de Missões":"🌍","Relatório de Dizimistas":"🧾",
-                "Visão Geral":"🏁","Cadastro":"🛠️"
-            }.get(label,"📦")
-            st.markdown(f"<div class='fallback'>{emoji}</div>", unsafe_allow_html=True)
         if st.button(label, key=f"tile_{_norm(label)}"):
             st.session_state["main_menu_page"] = target_page
             st.rerun()
@@ -756,16 +739,10 @@ def order_congs_sede_first(congs: List[Congregation]) -> List[Congregation]:
     return (sede + others) if sede else others
 
 def sidebar_common(user: "User") -> str:
-    """
-    Desenha o menu lateral apenas uma vez e retorna a página selecionada.
-    Em reruns, mantém a escolha do usuário.
-    """
-    # Se já desenhou nesta execução, só devolve a última seleção
     if st.session_state.get("sidebar_rendered", False):
         return st.session_state.get("main_menu_page", "Menu")
 
     with st.sidebar:
-        # Identidade / logo
         try:
             if os.path.exists(LOGO_PATH):
                 st.image(LOGO_PATH, use_column_width=True)
@@ -773,74 +750,42 @@ def sidebar_common(user: "User") -> str:
             pass
         st.write(f"👤 **{getattr(user, 'username', 'Usuário')}** — *{getattr(user, 'role', '')}*")
 
-        # Ícones (agora inclui 'Menu')
-        MENU_ICONS = {
-            "Menu": "🏠",
-            "Lançamentos": "📥",
-            "Relatório de Entrada": "📊",
-            "Relatório de Saída": "📉",
-            "Relatório de Missões": "🌍",
-            "Relatório de Dizimistas": "🧾",
-            "Visão Geral": "🏁",
-            "Cadastro": "🛠️",
-        }
-
-        # Opções conforme o papel (agora com 'Menu' no topo)
         role = getattr(user, "role", "")
         if role == "SEDE":
             menu_options_plain = [
-                "Menu",
-                "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
-                "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Cadastro"
+                "Lançamentos","Relatório de Entrada","Relatório de Saída",
+                "Relatório de Missões","Relatório de Dizimistas","Visão Geral","Cadastro"
             ]
         elif role == "TESOUREIRO":
             menu_options_plain = [
-                "Menu",
-                "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
-                "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"
+                "Lançamentos","Relatório de Entrada","Relatório de Saída",
+                "Relatório de Missões","Relatório de Dizimistas","Visão Geral"
             ]
         elif role == "TESOUREIRO MISSIONÁRIO":
-            menu_options_plain = ["Menu", "Relatório de Missões"]
+            menu_options_plain = ["Relatório de Missões"]
         else:
-            menu_options_plain = ["Menu", "Visão Geral"]
+            menu_options_plain = ["Visão Geral"]
 
-        # Labels com ícones
-        menu_labels_pretty = [f"{MENU_ICONS.get(opt, '•')} {opt}" for opt in menu_options_plain]
+        # <<< só nomes
+        menu_labels_pretty = menu_options_plain
 
-        # Chave estável do widget
         state_key = f"main_menu_nav_{getattr(user, 'id', 'anon')}"
-
-        # Define valor inicial só uma vez (sem passar index no radio)
         if state_key not in st.session_state:
             prev_page = st.session_state.get("main_menu_page")
-            if prev_page in menu_options_plain:
-                init_label = f"{MENU_ICONS.get(prev_page, '•')} {prev_page}"
-            else:
-                init_label = menu_labels_pretty[0]
-            st.session_state[state_key] = init_label
+            st.session_state[state_key] = prev_page if prev_page in menu_options_plain else menu_options_plain[0]
 
-        sel_label = st.radio(
-            "Menu",
-            options=menu_labels_pretty,
-            key=state_key,
-            label_visibility="visible",
-        )
+        sel_label = st.radio("Menu", options=menu_labels_pretty, key=state_key, label_visibility="visible")
 
-        # Converte label -> página “pura”
-        sel_index = menu_labels_prety.index(sel_label) if False else menu_labels_pretty.index(sel_label)  # garante nome correto
-        page = menu_options_plain[sel_index]
+        # rótulo == página
+        page = sel_label
         st.session_state["main_menu_page"] = page
 
         st.divider()
         if st.button("Sair", key=f"btn_logout_{getattr(user, 'id', 'anon')}"):
             logout()
 
-        # Marca como renderizado
         st.session_state["sidebar_rendered"] = True
-
         return page
-
-
 
 # ======= NOVO: helper padrão para botões 'Salvar alterações' =======
 # ====== CORES P/ BOTÕES ======
