@@ -1100,6 +1100,7 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
 
 # ===================== EDITORES INLINE REUTILIZÁVEIS (com botão Salvar) =====================
 # ===== EDITOR DE LANÇAMENTOS (com force_cong_id e linha vazia) =====
+# ===== EDITOR DE LANÇAMENTOS (com total abaixo da tabela) =====
 def _editor_lancamentos(
     transactions: List["Transaction"],
     titulo: str,
@@ -1163,6 +1164,18 @@ def _editor_lancamentos(
         key=f"tx_editor_{titulo}",
     )
 
+    # === TOTAL da tabela ===
+    try:
+        _total_val = 0.0
+        if isinstance(edited_view, pd.DataFrame) and not edited_view.empty and ("Valor" in edited_view.columns):
+            _ev = edited_view.copy()
+            _ev["Valor"] = _ev["Valor"].map(_to_float_brl)
+            _total_val = float(_ev["Valor"].sum())
+    except Exception:
+        _total_val = 0.0
+    _label_total = "Total de SAÍDAS (tabela)" if tx_type == TYPE_OUT else "Total de ENTRADAS (tabela)"
+    st.metric(_label_total, format_currency(_total_val))
+
     def _save():
         _apply_tx_changes(df_full, edited_view, tx_type, default_cong_id)
         st.toast("💾 Alterações salvas.", icon="✅")
@@ -1171,6 +1184,7 @@ def _editor_lancamentos(
     _save_btn(_save, f"tx_{titulo}")
 
 # ===== EDITOR DE DÍZIMOS (com force_cong_id e linha vazia) =====
+# ===== EDITOR DE DÍZIMOS (com total abaixo da tabela) =====
 def _editor_dizimos(tithes: List["Tithe"], titulo: str, force_cong_id: Optional[int] = None):
     cong_ids = {int(t.congregation_id) for t in tithes if t.congregation_id}
     if force_cong_id:
@@ -1220,6 +1234,17 @@ def _editor_dizimos(tithes: List["Tithe"], titulo: str, force_cong_id: Optional[
         },
         key=f"tithe_editor_{titulo}",
     )
+
+    # === TOTAL da tabela ===
+    try:
+        _total_val = 0.0
+        if isinstance(edited_view, pd.DataFrame) and not edited_view.empty and ("Valor" in edited_view.columns):
+            _ev = edited_view.copy()
+            _ev["Valor"] = _ev["Valor"].map(_to_float_brl)
+            _total_val = float(_ev["Valor"].sum())
+    except Exception:
+        _total_val = 0.0
+    st.metric("Total de DÍZIMOS (tabela)", format_currency(_total_val))
 
     def _save():
         _apply_tithe_changes(df_full, edited_view, default_cong_id)
@@ -1648,6 +1673,7 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, is_all: bool =
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS (com modo Tabela fora do form) =====================
 # ===== PÁGINA: LANÇAMENTOS (com modo Tabela + 3 editores) =====
+# ===== PÁGINA: LANÇAMENTOS (modo Tabela mostra total abaixo de cada uma) =====
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1718,6 +1744,7 @@ def page_lancamentos(user: "User"):
                 key=f"lan_tab_editor_{cong_obj.id}_{start_tab:%Y_%m}",
             )
 
+            # === TOTAL logo abaixo da tabela D+O ===
             try:
                 _sum_total_mes = float(
                     edited_tab.assign(
@@ -1729,7 +1756,7 @@ def page_lancamentos(user: "User"):
                 )
             except Exception:
                 _sum_total_mes = 0.0
-            st.metric("Total de Entradas (Dízimo + Oferta) no mês", format_currency(_sum_total_mes))
+            st.metric("Total de Entradas (Dízimo + Oferta) — tabela", format_currency(_sum_total_mes))
 
             def _save_tab():
                 _apply_entrada_summary_changes(cong_obj.id, start_tab, end_tab, edited_tab)
@@ -1739,7 +1766,7 @@ def page_lancamentos(user: "User"):
 
             st.markdown("---")
 
-            # -------- TABELA 2: Dizimistas --------
+            # -------- TABELA 2: Dizimistas (mostra total abaixo) --------
             with SessionLocal() as _db_dz:
                 tithes = _db_dz.scalars(
                     select(Tithe).where(
@@ -1751,7 +1778,7 @@ def page_lancamentos(user: "User"):
 
             st.markdown("---")
 
-            # -------- TABELA 3: Saídas --------
+            # -------- TABELA 3: Saídas (mostra total abaixo) --------
             with SessionLocal() as _db_out:
                 txs_out = _db_out.scalars(
                     select(Transaction).options(joinedload(Transaction.category)).where(
@@ -1769,7 +1796,7 @@ def page_lancamentos(user: "User"):
 
             return  # fim do modo tabela
 
-        # ===================== FORMULÁRIOS ÚNICOS =====================
+        # ===================== FORMULÁRIOS ÚNICOS (mantidos) =====================
         st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
         st.subheader("Lançar ENTRADA (Doação)")
         with st.form("form_entrada", clear_on_submit=True):
