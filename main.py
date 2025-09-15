@@ -1611,68 +1611,6 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, is_all: bool =
 # ===================== PAGE: LANÇAMENTOS =====================
 def page_lancamentos(user: "User"):
     ensure_seed()
-
-    # --- CSS local desta página (cores dos botões + cartão HTML) ---
-    _LAN_CSS = """
-    <style>
-      /* Cartões e layout */
-      .adrf-card{
-        background:#fff;
-        border:1px solid #e9e9ee;
-        border-radius:14px;
-        padding:16px 18px;
-        margin-bottom:18px;
-        box-shadow:0 2px 10px rgba(16,24,40,.06);
-      }
-      .adrf-section-title{
-        margin:0 0 10px 0;
-        font-weight:800;
-      }
-
-      /* Cores dos botões por seção */
-      .adrf-entrada .stButton>button{
-        background:#16a34a !important;   /* verde */
-        border-color:#16a34a !important;
-        color:#fff !important;
-        font-weight:700 !important;
-      }
-      .adrf-entrada .stButton>button:hover{
-        background:#15803d !important;
-        border-color:#15803d !important;
-      }
-
-      .adrf-dizimo .stButton>button{
-        background:#1d4ed8 !important;   /* azul */
-        border-color:#1d4ed8 !important;
-        color:#fff !important;
-        font-weight:700 !important;
-      }
-      .adrf-dizimo .stButton>button:hover{
-        background:#1e40af !important;
-        border-color:#1e40af !important;
-      }
-
-      .adrf-saida .stButton>button{
-        background:#dc2626 !important;   /* vermelho */
-        border-color:#dc2626 !important;
-        color:#fff !important;
-        font-weight:700 !important;
-      }
-      .adrf-saida .stButton>button:hover{
-        background:#b91c1c !important;
-        border-color:#b91c1c !important;
-      }
-
-      /* Inputs um pouco mais compactos nesta página */
-      .adrf-card [data-testid="stForm"] input,
-      .adrf-card [data-testid="stForm"] select,
-      .adrf-card [data-testid="stForm"] textarea{
-        font-size:1rem;
-      }
-    </style>
-    """
-    st.markdown(_LAN_CSS, unsafe_allow_html=True)
-
     with SessionLocal() as db:
         sidebar_common(user)
 
@@ -1685,82 +1623,200 @@ def page_lancamentos(user: "User"):
 
         if user.role == "SEDE":
             congs_ordered = order_congs_sede_first(congs)
-            cong_sel = st.selectbox(
-                "Selecione a congregação",
-                [c.name for c in congs_ordered],
-                key="lan_cong_sel"
-            )
+            cong_sel = st.selectbox("Selecione a congregação", [c.name for c in congs_ordered], key="lan_cong_sel")
             cong_obj = next(c for c in congs_ordered if c.name == cong_sel)
         else:
             cong_obj = congs[0]
 
-        st.markdown(
-            f"<div class='cong-title'>CONGREGAÇÃO: {cong_obj.name.upper()}</div>",
-            unsafe_allow_html=True
+        st.markdown(f"<div class='cong-title'>CONGREGAÇÃO: {cong_obj.name.upper()}</div>", unsafe_allow_html=True)
+
+        # ===================== ENTRADA (com opção de inserir pela TABELA) =====================
+        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
+        st.subheader("Lançar ENTRADA (Doação)")
+
+        # Monta a lista de categorias e adiciona a opção de inserir pela tabela
+        with SessionLocal() as _db_cat:
+            cats_in = categories_for_type(_db_cat, TYPE_IN)
+            cats_in = [c for c in cats_in if "ajuste" not in _norm(c.name)]
+            cat_names_in = [c.name for c in cats_in] or ["—"]
+            desired = ["Dízimo", "Oferta", "Missões"]
+            desired_norm = [_norm(x) for x in desired]
+            top = [n for n in cat_names_in if _norm(n) in desired_norm]
+            rest = [n for n in cat_names_in if _norm(n) not in desired_norm]
+            cat_display = top + rest
+
+        opcoes = cat_display + ["Inserir na tabela (Dízimo + Oferta)"]
+        ent_opcao = st.selectbox(
+            "Categoria (ou inserir pela tabela)",
+            opcoes,
+            key=f"ent_choice_{cong_obj.id}"
         )
 
-        # ===================== ENTRADA (Doação) — VERDE =====================
-        st.markdown('<div class="adrf-card adrf-entrada">', unsafe_allow_html=True)
-        st.markdown("<h3 class='adrf-section-title'>Lançar ENTRADA (Doação)</h3>", unsafe_allow_html=True)
-        with st.form("form_entrada", clear_on_submit=True):
-            c1, c2, c3 = st.columns([1.1, 1.4, 2])
-            ent_data = st.date_input(
-                "Data do Culto",
-                value=today_bahia(),
-                key="ent_data",
-                format="DD/MM/YYYY"
-            )
-            with c2:
-                cats_in = categories_for_type(db, TYPE_IN)
-                cats_in = [c for c in cats_in if "ajuste" not in _norm(c.name)]
-                cat_names_in = [c.name for c in cats_in] or ["—"]
-                desired = ["Dízimo", "Oferta", "Missões"]
-                desired_norm = [_norm(x) for x in desired]
-                top = [n for n in cat_names_in if _norm(n) in desired_norm]
-                rest = [n for n in cat_names_in if _norm(n) not in desired_norm]
-                cat_display = top + rest
+        # --------------------- MODO TABELA (abre imediatamente) ---------------------
+        if ent_opcao == "Inserir na tabela (Dízimo + Oferta)":
+            with st.expander("Inserir pela Tabela — Dízimo e Oferta", expanded=True):
+                ref_tab = get_month_selector("Mês da tabela")
+                start_tab, end_tab = month_bounds(ref_tab)
+
+                with SessionLocal() as db_tab:
+                    df = _entrada_summary_df(db_tab, cong_obj.id, start_tab, end_tab)
+
+                if df.empty:
+                    df = pd.DataFrame([{
+                        "Data do Culto": today_bahia(),
+                        "Dízimo": 0.0,
+                        "Oferta": 0.0,
+                        "Total": 0.0
+                    }])
+
+                df = df.copy()
+                try:
+                    df["Dízimo"] = df["Dízimo"].map(float)
+                    df["Oferta"] = df["Oferta"].map(float)
+                except Exception:
+                    pass
+                df["Total"] = df["Dízimo"] + df["Oferta"]
+
+                edited_tab = st.data_editor(
+                    df[["Data do Culto", "Dízimo", "Oferta", "Total"]],
+                    use_container_width=True,
+                    hide_index=True,
+                    num_rows="dynamic",
+                    column_config={
+                        "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
+                        "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
+                        "Oferta": st.column_config.NumberColumn("Oferta (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
+                        "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
+                    },
+                    key=f"lan_tab_editor_{cong_obj.id}_{start_tab:%Y_%m}",
+                )
+
+                # métrica do mês (visual)
+                try:
+                    _sum_total_mes = float(
+                        edited_tab.assign(
+                            **{
+                                "Dízimo": edited_tab["Dízimo"].map(_to_float_brl),
+                                "Oferta": edited_tab["Oferta"].map(_to_float_brl),
+                            }
+                        ).eval("Dízimo + Oferta").sum()
+                    )
+                except Exception:
+                    _sum_total_mes = 0.0
+                st.metric("Total de Entradas (Dízimo + Oferta) no mês", format_currency(_sum_total_mes))
+
+                # salvar no banco (usa o mesmo motor do Relatório de Entrada)
+                def _save_tab():
+                    _apply_entrada_summary_changes(cong_obj.id, start_tab, end_tab, edited_tab)
+                    st.toast("💾 Tabela salva com sucesso.", icon="✅")
+                    st.rerun()
+
+                _save_btn(_save_tab, f"lan_tab_{cong_obj.id}_{start_tab:%Y_%m}")
+
+                # CSV do que está na tela
+                _csv = edited_tab.assign(
+                    **{
+                        "Data do Culto": edited_tab["Data do Culto"].map(lambda d: _to_date(d).strftime("%Y-%m-%d")),
+                        "Total": edited_tab["Dízimo"].map(_to_float_brl) + edited_tab["Oferta"].map(_to_float_brl),
+                    }
+                ).to_csv(index=False).encode("utf-8-sig")
+                st.download_button(
+                    "⬇️ Baixar CSV da tabela",
+                    data=_csv,
+                    file_name=f"entradas_tabela_{_norm(cong_obj.name)}_{start_tab:%Y-%m}.csv",
+                    mime="text/csv"
+                )
+
+            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown("---")
+
+        # --------------------- MODO FORM (lançamento único) ---------------------
+        else:
+            with st.form("form_entrada", clear_on_submit=True):
+                c1, c2, c3 = st.columns([1.1, 1.6, 2])
+                ent_data = st.date_input("Data do Culto", value=today_bahia(), key="ent_data", format="DD/MM/YYYY")
+
+                # a categoria dentro do form vem com a seleção feita acima
                 ent_cat = st.selectbox(
-                    "Categoria (ordem: Dízimo, Oferta, Missões)",
+                    "Categoria",
                     cat_display,
+                    index=(cat_display.index(ent_opcao) if ent_opcao in cat_display else 0),
                     key="ent_cat"
                 )
 
-            ent_desc = st.text_input("Descrição (opcional)", key="ent_desc")
-            ent_flag_missoes = _norm(ent_cat) == "oferta" and st.checkbox(
-                "Oferta de missões?",
-                key="ent_flag_missoes"
-            )
-            ent_valor = st.number_input(
-                "Valor (R$)",
-                min_value=0.0, step=1.0,
-                format="%.2f",
-                key="ent_valor"
-            )
+                ent_desc = st.text_input("Descrição (opcional)", key="ent_desc")
+                ent_flag_missoes = _norm(ent_cat) == "oferta" and st.checkbox("Oferta de missões?", key="ent_flag_missoes")
+                ent_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="ent_valor")
 
-            if st.form_submit_button("Salvar ENTRADA", type="primary"):
-                with SessionLocal() as _db:
-                    cat_name = ent_cat
-                    if ent_flag_missoes:
-                        cat_name = "Missões"
-                        if not _db.scalar(select(Category).where(Category.name == "Missões")):
+                if st.form_submit_button("Salvar ENTRADA", type="primary"):
+                    with SessionLocal() as _db:
+                        cat_name = "Missões" if ent_flag_missoes else ent_cat
+                        if ent_flag_missoes and not _db.scalar(select(Category).where(Category.name == "Missões")):
                             _db.add(Category(name="Missões", type=TYPE_IN))
                             _db.commit()
+                        cat_obj = _db.scalar(select(Category).where(Category.name == cat_name))
+                        if not cat_obj:
+                            st.error("Informe a categoria.")
+                        else:
+                            _db.add(Transaction(
+                                date=ent_data, type=TYPE_IN, category_id=cat_obj.id,
+                                amount=float(ent_valor), description=(ent_desc or None),
+                                congregation_id=cong_obj.id, payment_method=None
+                            ))
+                            _db.commit()
+                            st.success("Entrada registrada.")
 
-                    cat_obj = _db.scalar(select(Category).where(Category.name == cat_name))
-                    if not cat_obj:
-                        st.error("Informe a categoria.")
-                        st.stop()
+            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown("---")
 
-                    _db.add(Transaction(
-                        date=ent_data, type=TYPE_IN, category_id=cat_obj.id,
-                        amount=ent_valor, description=(ent_desc or None),
-                        congregation_id=cong_obj.id, payment_method=None
-                    ))
-                    _db.commit()
-                    st.success("Entrada registrada.")
-        st.markdown("</div>", unsafe_allow_html=True)
+        # ===================== DÍZIMOS =====================
+        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
+        st.subheader("Salvar DIZIMISTA")
+        with st.form("form_dizimo", clear_on_submit=True):
+            dz_data = st.date_input("Data do Culto", value=today_bahia(), key="dz_data", format="DD/MM/YYYY")
+            dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
+            dz_valor = st.number_input("Valor dízimo (R$)", min_value=0.0, step=1.0, format="%.2f", key="dz_valor")
+            dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX"], key="dz_payment_method")
 
+            if st.form_submit_button("Salvar DIZIMISTA", type="primary"):
+                nome = (dz_nome or "").strip()
+                if not nome:
+                    st.error("Informe o nome do dizimista.")
+                else:
+                    with SessionLocal() as _db:
+                        _db.add(Tithe(
+                            date=dz_data, tither_name=nome, amount=float(dz_valor),
+                            congregation_id=cong_obj.id, payment_method=dz_payment
+                        ))
+                        _db.commit()
+                        st.success("Dízimo registrado.")
+        st.markdown('</div>', unsafe_allow_html=True)
         st.markdown("---")
+
+        # ===================== SAÍDA =====================
+        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
+        st.subheader("Lançar SAÍDA")
+        with st.form("form_saida", clear_on_submit=True):
+            sai_data = st.date_input("Data", value=today_bahia(), key="sai_data", format="DD/MM/YYYY")
+            cats_out = categories_for_type(db, TYPE_OUT)
+            sai_cat = st.selectbox("Tipo da saída (Categoria)", [c.name for c in cats_out] or ["—"], key="sai_cat")
+            sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
+            sai_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="sai_valor")
+
+            if st.form_submit_button("Salvar SAÍDA", type="primary"):
+                with SessionLocal() as _db:
+                    cat_obj = _db.scalar(select(Category).where(Category.name == sai_cat))
+                    if not cat_obj:
+                        st.error("Informe o tipo de saída.")
+                    else:
+                        _db.add(Transaction(
+                            date=sai_data, type=TYPE_OUT, category_id=cat_obj.id,
+                            amount=sai_valor, description=(sai_desc or None),
+                            congregation_id=cong_obj.id,
+                        ))
+                        _db.commit()
+                        st.success("Saída registrada.")
+        st.markdown('</div>', unsafe_allow_html=True)
 
         # ===================== DÍZIMOS — AZUL =====================
         st.markdown('<div class="adrf-card adrf-dizimo">', unsafe_allow_html=True)
