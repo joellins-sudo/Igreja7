@@ -1512,10 +1512,7 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, is_all: bool =
 
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS (com modo Tabela fora do form) =====================
-# ... (código anterior)
-
 # ===================== PAGE: LANÇAMENTOS =====================
-# ===================== PAGE: LANÇAMENTOS (com modo Tabela fora do form) =====================
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1537,12 +1534,10 @@ def page_lancamentos(user: "User"):
 
         st.markdown(f"<div class='cong-title'>CONGREGAÇÃO: {cong_obj.name.upper()}</div>", unsafe_allow_html=True)
         
-        # O modo de lançamento por rádio foi removido.
-        # Agora, a tabela é um expander aberto (opção mais robusta).
-        
+        # 1. NOVO: Lançamento Agregado Diário (Tabela Editável)
         st.subheader("Lançamento Agregado Diário (Dízimo e Oferta)")
         
-        # Tabela dentro do EXPANDER (st.expander) - MODO MAIS COMPATÍVEL
+        # Tabela dentro do EXPANDER (st.expander)
         with st.expander("Clique para Inserir ou Editar Dízimo/Oferta por Data", expanded=False):
             st.info(f"Escopo: **{cong_obj.name}** — edite as linhas abaixo.")
 
@@ -1579,6 +1574,7 @@ def page_lancamentos(user: "User"):
                 key=f"lan_tab_editor_{cong_obj.id}_{start_tab:%Y_%m}",
             )
 
+            # Métrica do mês (dentro do expander)
             try:
                 _sum_total_mes = float(
                     edited_tab.assign(
@@ -1593,6 +1589,7 @@ def page_lancamentos(user: "User"):
             
             st.metric("Total de Entradas (Dízimo + Oferta) no mês", format_currency(_sum_total_mes))
 
+            # Botão Salvar
             def _save_tab():
                 _apply_entrada_summary_changes(cong_obj.id, start_tab, end_tab, edited_tab)
                 st.toast("💾 Tabela salva com sucesso.", icon="✅")
@@ -1602,13 +1599,12 @@ def page_lancamentos(user: "User"):
 
         st.markdown("---")
         
-        # ===================== FORMULÁRIOS DE LANÇAMENTO INDIVIDUAL =====================
-        
-        # ... (FORMULÁRIO ENTRADA)
+        # 2. Formulário de Lançamento de ENTRADA (MANTIDO)
         st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
         st.subheader("Lançar ENTRADA (Doação)")
 
         with st.form("form_entrada", clear_on_submit=True):
+            # ... (código do formulário de entrada preservado)
             c1, c2, c3 = st.columns([1.1, 1.6, 2])
             ent_data = st.date_input("Data do Culto", value=today_bahia(), key="ent_data", format="DD/MM/YYYY")
 
@@ -1646,10 +1642,11 @@ def page_lancamentos(user: "User"):
         st.markdown('</div>', unsafe_allow_html=True)
         st.markdown("---")
 
-        # ... (FORMULÁRIO DIZIMISTA)
+        # 3. Formulário de Lançamento de DIZIMISTA (MANTIDO)
         st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
         st.subheader("Salvar DIZIMISTA")
         with st.form("form_dizimo", clear_on_submit=True):
+            # ... (código do formulário de dízimo preservado)
             dz_data = st.date_input("Data do Culto", value=today_bahia(), key="dz_data", format="DD/MM/YYYY")
             dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
             dz_valor = st.number_input("Valor dízimo (R$)", min_value=0.0, step=1.0, format="%.2f", key="dz_valor")
@@ -1670,10 +1667,11 @@ def page_lancamentos(user: "User"):
         st.markdown('</div>', unsafe_allow_html=True)
         st.markdown("---")
 
-        # ... (FORMULÁRIO SAÍDA)
+        # 4. Formulário de Lançamento de SAÍDA (MANTIDO)
         st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
         st.subheader("Lançar SAÍDA")
         with st.form("form_saida", clear_on_submit=True):
+            # ... (código do formulário de saída preservado)
             sai_data = st.date_input("Data", value=today_bahia(), key="sai_data", format="DD/MM/YYYY")
             cats_out = categories_for_type(db, TYPE_OUT)
             sai_cat = st.selectbox("Tipo da saída (Categoria)", [c.name for c in cats_out] or ["—"], key="sai_cat")
@@ -1694,7 +1692,6 @@ def page_lancamentos(user: "User"):
                         _db.commit()
                         st.success("Saída registrada.")
         st.markdown('</div>', unsafe_allow_html=True)
-
 
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 def page_relatorio_entrada(user: "User"):
