@@ -209,89 +209,34 @@ hr{ opacity: .6; }
 # === Cores por formulário (Lançamentos) ===
 FORM_BUTTONS_CSS = """
 <style>
-/* Deixar nossos estilos ganharem a disputa */
-.adrf-entrada .stButton>button,
-.adrf-dizimo .stButton>button,
-.adrf-saida .stButton>button{
-  border-width:1px !important;
-  font-weight:700 !important;
-}
-
 /* ENTRADAS = verde */
-.adrf-entrada .stButton>button{
-  background:#16a34a !important;      /* verde */
-  border-color:#16a34a !important;
-  color:#fff !important;
+.adrf-entrada [data-testid="stButton"] > button,
+.adrf-entrada [data-testid="stFormSubmitButton"] > button{
+  background:#16a34a !important; border-color:#16a34a !important; color:#fff !important;
 }
-.adrf-entrada .stButton>button:hover{
-  background:#15803d !important;
-  border-color:#15803d !important;
+.adrf-entrada [data-testid="stButton"] > button:hover,
+.adrf-entrada [data-testid="stFormSubmitButton"] > button:hover{
+  background:#15803d !important; border-color:#15803d !important;
 }
 
 /* DIZIMISTAS = azul */
-.adrf-dizimo .stButton>button{
-  background:#1d4ed8 !important;      /* azul */
-  border-color:#1d4ed8 !important;
-  color:#fff !important;
+.adrf-dizimo [data-testid="stButton"] > button,
+.adrf-dizimo [data-testid="stFormSubmitButton"] > button{
+  background:#1d4ed8 !important; border-color:#1d4ed8 !important; color:#fff !important;
 }
-.adrf-dizimo .stButton>button:hover{
-  background:#1e40af !important;
-  border-color:#1e40af !important;
-}
-
-/* SAÍDAS = vermelho (mantém) */
-.adrf-saida .stButton>button{
-  background:#dc2626 !important;      /* vermelho */
-  border-color:#dc2626 !important;
-  color:#fff !important;
-}
-.adrf-saida .stButton>button:hover{
-  background:#b91c1c !important;
-  border-color:#b91c1c !important;
-}
-</style>
-"""
-# === Cores dos botões por formulário (compat com chamada antiga BUTTONS_CSS) ===
-FORM_BUTTONS_CSS = """
-<style>
-.adrf-entrada .stButton>button,
-.adrf-dizimo .stButton>button,
-.adrf-saida .stButton>button{
-  border-width:1px !important;
-  font-weight:700 !important;
-}
-
-/* ENTRADAS = verde */
-.adrf-entrada .stButton>button{
-  background:#16a34a !important;
-  border-color:#16a34a !important;
-  color:#fff !important;
-}
-.adrf-entrada .stButton>button:hover{
-  background:#15803d !important;
-  border-color:#15803d !important;
-}
-
-/* DIZIMISTAS = azul */
-.adrf-dizimo .stButton>button{
-  background:#1d4ed8 !important;
-  border-color:#1d4ed8 !important;
-  color:#fff !important;
-}
-.adrf-dizimo .stButton>button:hover{
-  background:#1e40af !important;
-  border-color:#1e40af !important;
+.adrf-dizimo [data-testid="stButton"] > button:hover,
+.adrf-dizimo [data-testid="stFormSubmitButton"] > button:hover{
+  background:#1e40af !important; border-color:#1e40af !important;
 }
 
 /* SAÍDAS = vermelho */
-.adrf-saida .stButton>button{
-  background:#dc2626 !important;
-  border-color:#dc2626 !important;
-  color:#fff !important;
+.adrf-saida [data-testid="stButton"] > button,
+.adrf-saida [data-testid="stFormSubmitButton"] > button{
+  background:#dc2626 !important; border-color:#dc2626 !important; color:#fff !important;
 }
-.adrf-saida .stButton>button:hover{
-  background:#b91c1c !important;
-  border-color:#b91c1c !important;
+.adrf-saida [data-testid="stButton"] > button:hover,
+.adrf-saida [data-testid="stFormSubmitButton"] > button:hover{
+  background:#b91c1c !important; border-color:#b91c1c !important;
 }
 </style>
 """
