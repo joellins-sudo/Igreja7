@@ -1512,7 +1512,8 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, is_all: bool =
 
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS (com modo Tabela fora do form) =====================
-d# ...
+d# ... (código anterior)
+
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS (com modo Tabela fora do form) =====================
 def page_lancamentos(user: "User"):
@@ -1536,8 +1537,7 @@ def page_lancamentos(user: "User"):
 
         st.markdown(f"<div class='cong-title'>CONGREGAÇÃO: {cong_obj.name.upper()}</div>", unsafe_allow_html=True)
         
-        # O modo de lançamento será substituído por um popover (botão "Abrir Tabela")
-        # st.radio será removido/comentado.
+        # O modo de lançamento por rádio foi substituído
         # mode = st.radio(
         #     "Como deseja lançar?",
         #     ["Formulário único", "Inserir na tabela (Dízimo + Oferta)"],
@@ -1603,27 +1603,25 @@ def page_lancamentos(user: "User"):
             def _save_tab():
                 _apply_entrada_summary_changes(cong_obj.id, start_tab, end_tab, edited_tab)
                 st.toast("💾 Tabela salva com sucesso.", icon="✅")
-                # Sem st.rerun() dentro do popover, para não fechá-lo imediatamente após salvar.
-                # O usuário pode fechar e reabrir o popover.
+                # Sem st.rerun() no popover, para evitar fechamento automático.
             
             # Reposiciona o botão Salvar dentro do popover.
             st.divider()
             _save_btn(_save_tab, f"lan_tab_{cong_obj.id}_{start_tab:%Y_%m}")
-            st.caption("Feche o pop-up e atualize a página para ver os dados salvos em relatórios.")
+            st.caption("Feche a janela e atualize a página para ver os dados salvos em relatórios.")
 
-            # CSV do que está na tela (removido do popover para simplificar)
+            # CSV de download removido do popover para simplificar
 
         st.markdown("---")
 
-        # Os demais formulários (Entrada, Dízimo, Saída) continuam como "Formulário único"
+        # Os demais formulários (Entrada, Dízimo nominal, Saída) continuam como "Formulário único"
         
         # ===================== MODO FORM (item único) =====================
-        # Removido o IF: if mode == "Formulário único":
+        # Removido o IF para o formulário único
         st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
         st.subheader("Lançar ENTRADA (Doação)")
 
         with st.form("form_entrada", clear_on_submit=True):
-            # ... resto do código do formulário de entrada (Entrada, Dízimos, Saída)
             c1, c2, c3 = st.columns([1.1, 1.6, 2])
             ent_data = st.date_input("Data do Culto", value=today_bahia(), key="ent_data", format="DD/MM/YYYY")
 
@@ -1709,6 +1707,9 @@ def page_lancamentos(user: "User"):
                         _db.commit()
                         st.success("Saída registrada.")
         st.markdown('</div>', unsafe_allow_html=True)
+
+# ... (restante do código)
+
 
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 def page_relatorio_entrada(user: "User"):
