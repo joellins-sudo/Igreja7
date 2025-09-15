@@ -1512,7 +1512,7 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, is_all: bool =
 
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS (com modo Tabela fora do form) =====================
-d# ... (código anterior)
+# ... (código anterior)
 
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS (com modo Tabela fora do form) =====================
@@ -1537,20 +1537,13 @@ def page_lancamentos(user: "User"):
 
         st.markdown(f"<div class='cong-title'>CONGREGAÇÃO: {cong_obj.name.upper()}</div>", unsafe_allow_html=True)
         
-        # O modo de lançamento por rádio foi substituído
-        # mode = st.radio(
-        #     "Como deseja lançar?",
-        #     ["Formulário único", "Inserir na tabela (Dízimo + Oferta)"],
-        #     horizontal=True,
-        #     key=f"lan_mode_{cong_obj.id}"
-        # )
-
-        # NOVO: Botão para abrir o "Pop-up" com a tabela de Dízimo/Oferta
-        st.subheader("Lançamento Agregado Diário")
+        # O modo de lançamento por rádio foi removido.
+        # Agora, a tabela é um expander aberto (opção mais robusta).
         
-        # Tabela dentro do POP-UP (st.popover)
-        with st.popover("➕ Abrir Tabela Dízimo/Oferta (por Data)", use_container_width=True):
-            st.markdown("### Tabela Dízimo e Oferta")
+        st.subheader("Lançamento Agregado Diário (Dízimo e Oferta)")
+        
+        # Tabela dentro do EXPANDER (st.expander) - MODO MAIS COMPATÍVEL
+        with st.expander("Clique para Inserir ou Editar Dízimo/Oferta por Data", expanded=False):
             st.info(f"Escopo: **{cong_obj.name}** — edite as linhas abaixo.")
 
             ref_tab = get_month_selector("Mês da tabela")
@@ -1603,21 +1596,15 @@ def page_lancamentos(user: "User"):
             def _save_tab():
                 _apply_entrada_summary_changes(cong_obj.id, start_tab, end_tab, edited_tab)
                 st.toast("💾 Tabela salva com sucesso.", icon="✅")
-                # Sem st.rerun() no popover, para evitar fechamento automático.
+                st.rerun()
             
-            # Reposiciona o botão Salvar dentro do popover.
-            st.divider()
             _save_btn(_save_tab, f"lan_tab_{cong_obj.id}_{start_tab:%Y_%m}")
-            st.caption("Feche a janela e atualize a página para ver os dados salvos em relatórios.")
-
-            # CSV de download removido do popover para simplificar
 
         st.markdown("---")
-
-        # Os demais formulários (Entrada, Dízimo nominal, Saída) continuam como "Formulário único"
         
-        # ===================== MODO FORM (item único) =====================
-        # Removido o IF para o formulário único
+        # ===================== FORMULÁRIOS DE LANÇAMENTO INDIVIDUAL =====================
+        
+        # ... (FORMULÁRIO ENTRADA)
         st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
         st.subheader("Lançar ENTRADA (Doação)")
 
@@ -1659,7 +1646,7 @@ def page_lancamentos(user: "User"):
         st.markdown('</div>', unsafe_allow_html=True)
         st.markdown("---")
 
-        # ================= DÍZIMOS (form nominal) =================
+        # ... (FORMULÁRIO DIZIMISTA)
         st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
         st.subheader("Salvar DIZIMISTA")
         with st.form("form_dizimo", clear_on_submit=True):
@@ -1683,7 +1670,7 @@ def page_lancamentos(user: "User"):
         st.markdown('</div>', unsafe_allow_html=True)
         st.markdown("---")
 
-        # ================= SAÍDA =================
+        # ... (FORMULÁRIO SAÍDA)
         st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
         st.subheader("Lançar SAÍDA")
         with st.form("form_saida", clear_on_submit=True):
@@ -1707,8 +1694,6 @@ def page_lancamentos(user: "User"):
                         _db.commit()
                         st.success("Saída registrada.")
         st.markdown('</div>', unsafe_allow_html=True)
-
-# ... (restante do código)
 
 
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
