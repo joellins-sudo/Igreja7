@@ -2799,6 +2799,7 @@ def page_cadastro(user: "User"):
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS =====================
+# ===================== PAGE: LANÇAMENTOS =====================
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -2819,7 +2820,7 @@ def page_lancamentos(user: "User"):
 
         st.markdown(f"### CONGREGAÇÃO: {cong_obj.name.upper()}", unsafe_allow_html=True)
 
-        # ===== SELETOR DE MODO RESTAURADO =====
+        # Seletor de Modo
         modo = st.radio(
             "Modo de lançamento:",
             ["Formulário único", "Editar direto na tabela"],
@@ -2834,7 +2835,7 @@ def page_lancamentos(user: "User"):
             sub_cong_options = {s.name: s.id for s in sub_congs}
             opcoes_dropdown = ["Lançamento na Principal"] + list(sub_cong_options.keys())
 
-            with st.expander("➕ Lançar ENTRADA (Dízimo, Oferta, etc.)", expanded=True):
+            with st.expander("➕ Lançar ENTRADA", expanded=True):
                 with st.form("form_entrada"):
                     cats_in = [c for c in categories_for_type(db, TYPE_IN) if "ajuste" not in _norm(c.name)]
                     c1, c2, c3 = st.columns(3)
@@ -2883,26 +2884,40 @@ def page_lancamentos(user: "User"):
                             db.commit(); st.success("Saída registrada!"); st.rerun()
                         else: st.error("Preencha categoria e valor.")
 
-        # --- MODO 2: EDITAR DIRETO NA TABELA (COMO ERA ANTES) ---
+        # --- MODO 2: EDITAR DIRETO NA TABELA (COM TOTAIS) ---
         elif modo == "Editar direto na tabela":
             st.info("A edição em tabela se aplica apenas à congregação principal, não às sub-congregações.")
             ref_tab = get_month_selector("Mês de referência da tabela")
             start_tab, end_tab = month_bounds(ref_tab)
             
-            # Tabela de Entradas
             st.markdown("##### Entradas (Dízimo e Oferta)")
             df = _entrada_summary_df(db, cong_obj.id, start_tab, end_tab)
             edited_tab = st.data_editor(df, use_container_width=True, hide_index=True, num_rows="dynamic", column_config={"Data do Culto": st.column_config.DateColumn("Data", format="DD/MM/YYYY"), "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", format="R$ %.2f"), "Oferta": st.column_config.NumberColumn("Oferta (R$)", format="R$ %.2f"), "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f")}, key=f"lan_tab_editor_{cong_obj.id}")
-            # ... (código dos totais da tabela de entradas) ...
+            
+            # BLOCO DE TOTAIS RESTAURADO
+            try:
+                total_dizimo, total_oferta, total_geral = 0.0, 0.0, 0.0
+                if isinstance(edited_tab, pd.DataFrame) and not edited_tab.empty:
+                    df_calc = edited_tab.copy()
+                    df_calc["Dízimo"] = df_calc["Dízimo"].map(_to_float_brl)
+                    df_calc["Oferta"] = df_calc["Oferta"].map(_to_float_brl)
+                    total_dizimo = df_calc["Dízimo"].sum()
+                    total_oferta = df_calc["Oferta"].sum()
+                    total_geral = total_dizimo + total_oferta
+            except Exception: pass
+            
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total Dízimos (tabela)", format_currency(total_dizimo))
+            col2.metric("Total Ofertas (tabela)", format_currency(total_oferta))
+            col3.metric("Total Geral (tabela)", format_currency(total_geral))
+
             _save_btn(lambda: _apply_entrada_summary_changes(cong_obj.id, start_tab, end_tab, edited_tab), f"lan_tab_{cong_obj.id}", "entrada")
 
             st.markdown("---")
-            # Tabela de Dizimistas
             tithes = db.scalars(select(Tithe).where(Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.congregation_id == cong_obj.id, Tithe.sub_congregation_id == None).order_by(Tithe.date)).all()
             _editor_dizimos(tithes, "Dizimistas do período (Congregação Principal)", force_cong_id=cong_obj.id)
 
             st.markdown("---")
-            # Tabela de Saídas
             txs_out = db.scalars(select(Transaction).options(joinedload(Transaction.category)).where(Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_OUT, Transaction.congregation_id == cong_obj.id, Transaction.sub_congregation_id == None)).all()
             _editor_lancamentos(txs_out, "Saídas do período (Congregação Principal)", tx_type_hint=TYPE_OUT, force_cong_id=cong_obj.id)
 
