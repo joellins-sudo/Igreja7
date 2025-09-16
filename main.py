@@ -1824,12 +1824,19 @@ def page_lancamentos(user: "User"):
         # seleção da congregação
         if user.role == "SEDE":
             congs_ordered = order_congs_sede_first(congs)
-            cong_sel = st.selectbox("Selecione a congregação", [c.name for c in congs_ordered], key="lan_cong_sel")
+            cong_sel = st.selectbox(
+                "Selecione a congregação",
+                [c.name for c in congs_ordered],
+                key="lan_cong_sel"
+            )
             cong_obj = next(c for c in congs_ordered if c.name == cong_sel)
         else:
             cong_obj = congs[0]
 
-        st.markdown(f"<div class='cong-title'>CONGREGAÇÃO: {cong_obj.name.upper()}</div>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div class='cong-title'>CONGREGAÇÃO: {cong_obj.name.upper()}</div>",
+            unsafe_allow_html=True
+        )
 
         # ===== modo de inserção =====
         modo = st.radio(
@@ -1847,67 +1854,72 @@ def page_lancamentos(user: "User"):
             start_tab, end_tab = month_bounds(ref_tab)
 
             # -------- TABELA 1: Agregado Diário (Dízimo + Oferta) --------
-            # -------- TABELA 1: Agregado Diário (Dízimo + Oferta) --------
-st.info(f"Escopo: **{cong_obj.name}** — edite as linhas abaixo. O campo **Total** é calculado.")
-# ==== RESUMO ENTRADA (D+O) — CÁLCULO E SALVAMENTO ====
+            st.info(f"Escopo: **{cong_obj.name}** — edite as linhas abaixo. O campo **Total** é calculado.")
+            # ==== RESUMO ENTRADA (D+O) — CÁLCULO E SALVAMENTO ====
 
-# abre uma sessão só para montar o resumo da tabela
-with SessionLocal() as _db_tab:
-    df = _entrada_summary_df(_db_tab, cong_obj.id, start_tab, end_tab)
+            # abre uma sessão só para montar o resumo da tabela
+            with SessionLocal() as _db_tab:
+                df = _entrada_summary_df(_db_tab, cong_obj.id, start_tab, end_tab)
 
-if df.empty:
-    df = pd.DataFrame([{
-        "Data do Culto": today_bahia(),
-        "Dízimo": 0.0,
-        "Oferta": 0.0,
-        "Total": 0.0
-    }])
+            if df.empty:
+                df = pd.DataFrame([{
+                    "Data do Culto": today_bahia(),
+                    "Dízimo": 0.0,
+                    "Oferta": 0.0,
+                    "Total": 0.0
+                }])
 
-df = df.copy()
-try:
-    df["Dízimo"] = df["Dízimo"].map(float)
-    df["Oferta"] = df["Oferta"].map(float)
-except Exception:
-    pass
-df["Total"] = df["Dízimo"] + df["Oferta"]
+            df = df.copy()
+            try:
+                df["Dízimo"] = df["Dízimo"].map(float)
+                df["Oferta"] = df["Oferta"].map(float)
+            except Exception:
+                pass
+            df["Total"] = df["Dízimo"] + df["Oferta"]
 
-edited_tab = st.data_editor(
-    df[["Data do Culto", "Dízimo", "Oferta", "Total"]],
-    use_container_width=True,
-    hide_index=True,
-    num_rows="dynamic",
-    column_config={
-        "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
-        "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
-        "Oferta": st.column_config.NumberColumn("Oferta (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
-        "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
-    },
-    key=f"lan_tab_editor_{cong_obj.id}_{start_tab:%Y_%m}",
-)
+            edited_tab = st.data_editor(
+                df[["Data do Culto", "Dízimo", "Oferta", "Total"]],
+                use_container_width=True,
+                hide_index=True,
+                num_rows="dynamic",
+                column_config={
+                    "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
+                    "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
+                    "Oferta": st.column_config.NumberColumn("Oferta (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
+                    "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
+                },
+                key=f"lan_tab_editor_{cong_obj.id}_{start_tab:%Y_%m}",
+            )
 
-# === TOTAL logo abaixo da tabela D+O ===
-try:
-    _sum_total_mes = float(
-        edited_tab.assign(
-            **{
-                "Dízimo": edited_tab["Dízimo"].map(_to_float_brl),
-                "Oferta": edited_tab["Oferta"].map(_to_float_brl)
-            }
-        ).eval("Dízimo + Oferta").sum()
-    )
-except Exception:
-    _sum_total_mes = 0.0
-st.metric("Total de Entradas (Dízimo + Oferta) — tabela", format_currency(_sum_total_mes))
+            # === TOTAL logo abaixo da tabela D+O ===
+            try:
+                _sum_total_mes = float(
+                    edited_tab.assign(
+                        **{
+                            "Dízimo": edited_tab["Dízimo"].map(_to_float_brl),
+                            "Oferta": edited_tab["Oferta"].map(_to_float_brl)
+                        }
+                    ).eval("Dízimo + Oferta").sum()
+                )
+            except Exception:
+                _sum_total_mes = 0.0
+            st.metric("Total de Entradas (Dízimo + Oferta) — tabela", format_currency(_sum_total_mes))
 
-def _save_tab():
-    _apply_entrada_summary_changes(cong_obj.id, start_tab, end_tab, edited_tab)
-    st.toast("💾 Tabela salva com sucesso.", icon="✅")
-    st.rerun()
+            def _save_tab():
+                _apply_entrada_summary_changes(cong_obj.id, start_tab, end_tab, edited_tab)
+                st.toast("💾 Tabela salva com sucesso.", icon="✅")
+                st.rerun()
 
-_save_btn(_save_tab, f"lan_tab_{cong_obj.id}_{start_tab:%Y_%m}", theme="entrada")
+            _save_btn(_save_tab, f"lan_tab_{cong_obj.id}_{start_tab:%Y_%m}", theme="entrada")
+
+            # (Aqui podem vir as outras duas tabelas — Dizimistas e Saídas — caso você já as tenha no arquivo)
 
 
-# ===================== Funções usadas acima =====================
+# ===================== Funções usadas no bloco acima =====================
+
+# Garante que a constante exista
+if "ADJ_ENTRY_DESC" not in globals():
+    ADJ_ENTRY_DESC = "Ajuste (Resumo de Entrada)"
 
 def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date) -> pd.DataFrame:
     # [EQ FIX]: separar somatórios de Dízimo (tithes) e Dízimo (transactions), e usar o MAIOR por data.
@@ -1923,7 +1935,7 @@ def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date) -> pd
             Transaction.congregation_id == cong_id,
             Transaction.date >= start, Transaction.date < end,
             Transaction.type.in_((TYPE_IN, "RECEITA")),
-            func.lower(Category.name).in_(("dízimo","dizimo"))
+            func.lower(Category.name).in_(("dízimo", "dizimo"))
         ))
         .group_by(Transaction.date)
     ).all()
@@ -1971,7 +1983,7 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
 
     with SessionLocal() as db:
         cats_in = categories_for_type(db, TYPE_IN)
-        cat_diz = next((c for c in cats_in if _norm(c.name) in ("dizimo","dízimo")), None)
+        cat_diz = next((c for c in cats_in if _norm(c.name) in ("dizimo", "dízimo")), None)
         cat_ofe = next((c for c in cats_in if _norm(c.name) == "oferta"), None)
         if not (cat_diz and cat_ofe):
             st.error("Categorias 'Dízimo' e/ou 'Oferta' não encontradas.")
@@ -1996,7 +2008,7 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
         # desejado vindo do editor
         wanted = {}
         if isinstance(edited_df, pd.DataFrame) and not edited_df.empty and \
-           {"Data do Culto","Dízimo","Oferta"}.issubset(set(edited_df.columns)):
+           {"Data do Culto", "Dízimo", "Oferta"}.issubset(set(edited_df.columns)):
             edited = edited_df.copy()
             edited["Data do Culto"] = edited["Data do Culto"].map(_to_date)
             for _, r in edited.iterrows():
