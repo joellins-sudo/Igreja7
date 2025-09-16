@@ -812,12 +812,10 @@ def sidebar_common(user: "User") -> str:
         st.divider()
         if st.button("Sair", key=f"btn_logout_{getattr(user, 'id', 'anon')}"):
             logout()
+            st.rerun() # <-- Garante que o logout é processado imediatamente
 
         # Marca como renderizado
         st.session_state["sidebar_rendered"] = True
-
-        return page
-
 
 # ======= NOVO: helper padrão para botões 'Salvar alterações' =======
 # ====== CORES P/ BOTÕES ======
