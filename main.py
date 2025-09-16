@@ -471,6 +471,14 @@ class Tithe(Base):
     amount: Mapped[float] = mapped_column(Float)
     congregation_id: Mapped[int] = mapped_column(ForeignKey("congregations.id"))
     payment_method: Mapped[Optional[str]] = mapped_column(String, default=None)
+    
+    # ================================================================
+    # CAMPOS FALTANTES - ADICIONADOS AQUI:
+    # ================================================================
+    sub_congregation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sub_congregations.id"))
+    sub_congregation: Mapped[Optional["SubCongregation"]] = relationship(back_populates="tithes")
+    # ================================================================
+
     congregation: Mapped["Congregation"] = relationship(back_populates="tithes")
 
 # ===================== ENGINE / SESSION =====================
