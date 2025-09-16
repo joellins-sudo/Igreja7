@@ -1772,393 +1772,6 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, is_all: bool =
 # ===================== PAGE: LANÇAMENTOS (com modo Tabela fora do form) =====================
 # ===== PÁGINA: LANÇAMENTOS (com modo Tabela + 3 editores) =====
 # ===== PÁGINA: LANÇAMENTOS (modo Tabela mostra total abaixo de cada uma) =====
-def page_lancamentos(user: "User"):
-    ensure_seed()
-    with SessionLocal() as db:
-        # sidebar_common(user) <--- CHAMADA REMOVIDA
-        
-        st.markdown(f"<h1 class='page-title'>Lançamentos</h1>", unsafe_allow_html=True)
-
-        # congregações disponíveis
-        congs = cong_options_for(user, db)
-        if not congs:
-            st.info("Nenhuma congregação disponível.")
-            return
-
-        # seleção da congregação
-        if user.role == "SEDE":
-            congs_ordered = order_congs_sede_first(congs)
-            cong_sel = st.selectbox("Selecione a congregação", [c.name for c in congs_ordered], key="lan_cong_sel")
-            cong_obj = next(c for c in congs_ordered if c.name == cong_sel)
-        else:
-            cong_obj = congs[0]
-
-        st.markdown(f"<div class='cong-title'>CONGREGAÇÃO: {cong_obj.name.upper()}</div>", unsafe_allow_html=True)
-
-        # ===== modo de inserção =====
-        modo = st.radio(
-            " ",
-            ["Formulário único", "Inserir na tabela (Dízimo + Oferta, Dizimistas e Saídas)"],
-            horizontal=False,
-            key="lan_modo_sel",
-        )
-
-        if modo == "Inserir na tabela (Dízimo + Oferta, Dizimistas e Saídas)":
-            st.subheader("Inserir pela Tabela — Dízimo, Oferta, Dizimistas e Saídas")
-
-            # mês único para os três editores
-            ref_tab = get_month_selector("Mês da tabela")
-            start_tab, end_tab = month_bounds(ref_tab)
-
-            # -------- TABELA 1: Agregado Diário (Dízimo + Oferta) --------
-            st.info(f"Escopo: **{cong_obj.name}** — edite as linhas abaixo. O campo **Total** é calculado.")
-            df = _entrada_summary_df(db, cong_obj.id, start_tab, end_tab)
-            if df.empty:
-                df = pd.DataFrame([{
-                    "Data do Culto": today_bahia(),
-                    "Dízimo": 0.0,
-                    "Oferta": 0.0,
-                    "Total": 0.0
-                }])
-            df = df.copy()
-            try:
-                df["Dízimo"] = df["Dízimo"].map(float)
-                df["Oferta"] = df["Oferta"].map(float)
-            except Exception:
-                pass
-            df["Total"] = df["Dízimo"] + df["Oferta"]
-
-            edited_tab = st.data_editor(
-                df[["Data do Culto", "Dízimo", "Oferta", "Total"]],
-                use_container_width=True,
-                hide_index=True,
-                num_rows="dynamic",
-                column_config={
-                    "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
-                    "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
-                    "Oferta": st.column_config.NumberColumn("Oferta (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
-                    "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
-                },
-                key=f"lan_tab_editor_{cong_obj.id}_{start_tab:%Y_%m}",
-            )
-
-            # === TOTAL logo abaixo da tabela D+O ===
-            try:
-                _sum_total_mes = float(
-                    edited_tab.assign(
-                        **{
-                            "Dízimo": edited_tab["Dízimo"].map(_to_float_brl),
-                            "Oferta": edited_tab["Oferta"].map(_to_float_brl)
-                        }
-                    ).eval("Dízimo + Oferta").sum()
-                )
-            except Exception:
-                _sum_total_mes = 0.0
-            st.metric("Total de Entradas (Dízimo + Oferta) — tabela", format_currency(_sum_total_mes))
-
-            def _save_tab():
-                _apply_entrada_summary_changes(cong_obj.id, start_tab, end_tab, edited_tab)
-                st.toast("💾 Tabela salva com sucesso.", icon="✅")
-                st.rerun()
-            _save_btn(_save_tab, f"lan_tab_{cong_obj.id}_{start_tab:%Y_%m}", theme="entrada")
-
-            st.markdown("---")
-
-            # -------- TABELA 2: Dizimistas (mostra total abaixo) --------
-            with SessionLocal() as _db_dz:
-                tithes = _db_dz.scalars(
-                    select(Tithe).where(
-                        Tithe.date >= start_tab, Tithe.date < end_tab,
-                        Tithe.congregation_id == cong_obj.id
-                    ).order_by(Tithe.date)
-                ).all()
-            _editor_dizimos(tithes, "Dizimistas do período (editar na tabela)", force_cong_id=cong_obj.id)
-
-            st.markdown("---")
-
-            # -------- TABELA 3: Saídas (mostra total abaixo) --------
-            with SessionLocal() as _db_out:
-                txs_out = _db_out.scalars(
-                    select(Transaction).options(joinedload(Transaction.category)).where(
-                        Transaction.date >= start_tab, Transaction.date < end_tab,
-                        Transaction.type.in_(("SAÍDA", "DESPESA")),
-                        Transaction.congregation_id == cong_obj.id
-                    )
-                ).all()
-            _editor_lancamentos(
-                txs_out,
-                "Saídas do período (editar na tabela)",
-                tx_type_hint=TYPE_OUT,
-                force_cong_id=cong_obj.id
-            )
-
-            return  # fim do modo tabela
-
-        # ===================== FORMULÁRIOS ÚNICOS (Entrada) =====================
-
-        st.markdown('<div class="st-container-card adrf-entrada">', unsafe_allow_html=True)
-        st.subheader("Lançar ENTRADA (Doação)")
-
-        # Define a lista de campos que devem ser limpos no Session State
-        ENTRADA_CLEANUP_KEYS = ["ent_desc", "ent_valor"]
-
-        # REMOVEMOS 'clear_on_submit=True'
-        with st.form("form_entrada", clear_on_submit=False): 
-            c1, c2 = st.columns([1, 1.6])
-            with c1:
-                ent_data = st.date_input("Data do Culto", value=today_bahia(), key="ent_data", format="DD/MM/YYYY")
-            
-            # --- CARREGA CATEGORIAS DENTRO DO CONTEXTO DE BANCO DE DADOS ---
-            with SessionLocal() as db_cat:
-                cats_in = categories_for_type(db_cat, TYPE_IN) 
-            
-            cats_in = [c for c in cats_in if "ajuste" not in _norm(c.name)]
-            cat_names_in = [c.name for c in cats_in] or ["—"]
-            desired = ["Dízimo", "Oferta", "Missões"]
-            desired_norm = [_norm(x) for x in desired]
-            top = [n for n in cat_names_in if _norm(n) in desired_norm]
-            rest = [n for n in cat_names_in if _norm(n) not in desired_norm]
-            cat_display = top + rest
-            
-            with c2:
-                ent_cat = st.selectbox("Categoria", cat_display, key="ent_cat")
-
-            if "ent_desc" not in st.session_state: st.session_state["ent_desc"] = ""
-            if "ent_valor" not in st.session_state: st.session_state["ent_valor"] = 0.0
-
-            ent_desc = st.text_input("Descrição (opcional)", key="ent_desc")
-            ent_flag_missoes = _norm(ent_cat) == "oferta" and st.checkbox("Oferta de missões?", key="ent_flag_missoes")
-            ent_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="ent_valor")
-
-            # O botão de envio agora chama _clear_launch_fields no clique
-            ok_submit = st.form_submit_button(
-                "Salvar ENTRADA", 
-                type="primary", 
-                on_click=lambda: _clear_launch_fields(ENTRADA_CLEANUP_KEYS)
-            )
-
-        if ok_submit:
-            cat_name = "Missões" if st.session_state.get("ent_flag_missoes") else st.session_state.get("ent_cat")
-            data_to_save = {
-                "date": st.session_state["ent_data"],
-                "amount": float(st.session_state.get("ent_valor", 0.0)),
-                "description": (st.session_state.get("ent_desc") or None),
-            }
-
-            if data_to_save["amount"] <= 0.0 or not cat_name:
-                st.error("Informe a **categoria** e um **valor positivo**.")
-            else:
-                with SessionLocal() as _db:
-                    if st.session_state.get("ent_flag_missoes") and not _db.scalar(select(Category).where(Category.name == "Missões")):
-                        _db.add(Category(name="Missões", type=TYPE_IN)); _db.commit()
-                    
-                    cat_obj = _db.scalar(select(Category).where(Category.name == cat_name))
-                    if not cat_obj:
-                         st.error("Categoria não encontrada.");
-                    else:
-                        _db.add(Transaction(
-                            date=data_to_save["date"], type=TYPE_IN, category_id=cat_obj.id,
-                            amount=data_to_save["amount"], description=data_to_save["description"],
-                            congregation_id=cong_obj.id, 
-                            payment_method=None
-                        ))
-                        _db.commit()
-                        st.success("Entrada registrada.")
-            
-            st.rerun() 
-
-        st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown("---")
-
-        # ===================== FORMULÁRIOS ÚNICOS (Dizimista) =====================
-        st.markdown('<div class="st-container-card adrf-dizimo">', unsafe_allow_html=True)
-        st.subheader("Salvar DIZIMISTA")
-
-        DIZIMISTA_CLEANUP_KEYS = ["dz_nome", "dz_valor"]
-
-        # REMOVEMOS 'clear_on_submit=True'
-        with st.form("form_dizimo", clear_on_submit=False): 
-            dz_data = st.date_input("Data do Culto", value=today_bahia(), key="dz_data", format="DD/MM/YYYY")
-            
-            if "dz_nome" not in st.session_state: st.session_state["dz_nome"] = ""
-            if "dz_valor" not in st.session_state: st.session_state["dz_valor"] = 0.0
-            
-            dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
-            dz_valor = st.number_input("Valor dízimo (R$)", min_value=0.0, step=1.0, format="%.2f", key="dz_valor")
-            dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX"], key="dz_payment_method")
-
-            ok_submit = st.form_submit_button(
-                "Salvar DIZIMISTA", 
-                type="primary", 
-                on_click=lambda: _clear_launch_fields(DIZIMISTA_CLEANUP_KEYS)
-            )
-
-        if ok_submit:
-            nome = (st.session_state.get("dz_nome") or "").strip()
-            valor = float(st.session_state.get("dz_valor", 0.0))
-            data = st.session_state.get("dz_data")
-            forma = st.session_state.get("dz_payment_method")
-            
-            if not nome or valor <= 0.0:
-                st.error("Informe o **nome** do dizimista e um **valor positivo**.")
-            else:
-                with SessionLocal() as _db:
-                    _db.add(Tithe(
-                        date=data, tither_name=nome, amount=valor,
-                        congregation_id=cong_obj.id, 
-                        payment_method=forma
-                    ))
-                    _db.commit()
-                    st.success("Dízimo registrado.")
-            
-            st.rerun() 
-
-        st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown("---")
-
-        # ===================== FORMULÁRIOS ÚNICOS (Saída) =====================
-        st.markdown('<div class="st-container-card adrf-saida">', unsafe_allow_html=True)
-        st.subheader("Lançar SAÍDA")
-
-        SAIDA_CLEANUP_KEYS = ["sai_desc", "sai_valor"]
-
-        # REMOVEMOS 'clear_on_submit=True'
-        with st.form("form_saida", clear_on_submit=False): 
-            sai_data = st.date_input("Data", value=today_bahia(), key="sai_data", format="DD/MM/YYYY")
-            
-            # --- CARREGA CATEGORIAS DENTRO DO CONTEXTO DE BANCO DE DADOS ---
-            with SessionLocal() as db_cat:
-                cats_out = categories_for_type(db_cat, TYPE_OUT) 
-            
-            sai_cat = st.selectbox("Tipo da saída (Categoria)", [c.name for c in cats_out] or ["—"], key="sai_cat")
-            
-            if "sai_desc" not in st.session_state: st.session_state["sai_desc"] = ""
-            if "sai_valor" not in st.session_state: st.session_state["sai_valor"] = 0.0
-            
-            sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
-            sai_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="sai_valor")
-
-            ok_submit = st.form_submit_button(
-                "Salvar SAÍDA", 
-                type="primary", 
-                on_click=lambda: _clear_launch_fields(SAIDA_CLEANUP_KEYS)
-            )
-
-        if ok_submit:
-            valor = float(st.session_state.get("sai_valor", 0.0))
-            data = st.session_state.get("sai_data")
-            cat_nome = st.session_state.get("sai_cat")
-            desc = st.session_state.get("sai_desc")
-            
-            with SessionLocal() as _db:
-                cat_obj = _db.scalar(select(Category).where(Category.name == cat_nome))
-                if not cat_obj or valor <= 0.0:
-                    st.error("Informe o **tipo de saída** e um **valor positivo**.")
-                else:
-                    _db.add(Transaction(
-                        date=data, type=TYPE_OUT, category_id=cat_obj.id,
-                        amount=valor, description=(desc or None),
-                        congregation_id=cong_obj.id, 
-                    ))
-                    _db.commit()
-                    st.success("Saída registrada.")
-            
-            st.rerun()
-
-        # ===================== FORMULÁRIOS ÚNICOS (Dizimista) =====================
-# ===================== FORMULÁRIOS ÚNICOS (Dizimista) =====================
-st.markdown('<div class="st-container-card adrf-dizimo">', unsafe_allow_html=True)
-st.subheader("Salvar DIZIMISTA")
-
-DIZIMISTA_CLEANUP_KEYS = ["dz_nome", "dz_valor"]
-
-# REMOVEMOS 'clear_on_submit=True'
-with st.form("form_dizimo", clear_on_submit=False): 
-    dz_data = st.date_input("Data do Culto", value=today_bahia(), key="dz_data", format="DD/MM/YYYY")
-    
-    if "dz_nome" not in st.session_state: st.session_state["dz_nome"] = ""
-    if "dz_valor" not in st.session_state: st.session_state["dz_valor"] = 0.0
-    
-    dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
-    dz_valor = st.number_input("Valor dízimo (R$)", min_value=0.0, step=1.0, format="%.2f", key="dz_valor")
-    dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX"], key="dz_payment_method")
-
-    ok_submit = st.form_submit_button(
-        "Salvar DIZIMISTA", 
-        type="primary", 
-        on_click=lambda: _clear_launch_fields(DIZIMISTA_CLEANUP_KEYS)
-    )
-
-if ok_submit:
-    nome = (st.session_state.get("dz_nome") or "").strip()
-    valor = float(st.session_state.get("dz_valor", 0.0))
-    data = st.session_state.get("dz_data")
-    forma = st.session_state.get("dz_payment_method")
-    
-    if not nome or valor <= 0.0:
-        st.error("Informe o **nome** do dizimista e um **valor positivo**.")
-    else:
-        with SessionLocal() as _db:
-            _db.add(Tithe(
-                date=data, tither_name=nome, amount=valor,
-                congregation_id=cong_obj.id, 
-                payment_method=forma
-            ))
-            _db.commit()
-            st.success("Dízimo registrado.")
-    
-    st.rerun()
-
-        # ===================== FORMULÁRIOS ÚNICOS (Saída) =====================
-# ===================== FORMULÁRIOS ÚNICOS (Saída) =====================
-st.markdown('<div class="st-container-card adrf-saida">', unsafe_allow_html=True)
-st.subheader("Lançar SAÍDA")
-
-SAIDA_CLEANUP_KEYS = ["sai_desc", "sai_valor"]
-
-# REMOVEMOS 'clear_on_submit=True'
-with st.form("form_saida", clear_on_submit=False): 
-    sai_data = st.date_input("Data", value=today_bahia(), key="sai_data", format="DD/MM/YYYY")
-    
-    # --- CORREÇÃO: CARREGA CATEGORIAS DENTRO DO CONTEXTO DE BANCO DE DADOS ---
-    with SessionLocal() as db_cat:
-        cats_out = categories_for_type(db_cat, TYPE_OUT) # Usamos db_cat aqui
-    # --- FIM CORREÇÃO ---
-    
-    sai_cat = st.selectbox("Tipo da saída (Categoria)", [c.name for c in cats_out] or ["—"], key="sai_cat")
-    
-    if "sai_desc" not in st.session_state: st.session_state["sai_desc"] = ""
-    if "sai_valor" not in st.session_state: st.session_state["sai_valor"] = 0.0
-    
-    sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
-    sai_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="sai_valor")
-
-    ok_submit = st.form_submit_button(
-        "Salvar SAÍDA", 
-        type="primary", 
-        on_click=lambda: _clear_launch_fields(SAIDA_CLEANUP_KEYS)
-    )
-
-if ok_submit:
-    valor = float(st.session_state.get("sai_valor", 0.0))
-    data = st.session_state.get("sai_data")
-    cat_nome = st.session_state.get("sai_cat")
-    desc = st.session_state.get("sai_desc")
-    
-    with SessionLocal() as _db:
-        cat_obj = _db.scalar(select(Category).where(Category.name == cat_nome))
-        if not cat_obj or valor <= 0.0:
-            st.error("Informe o **tipo de saída** e um **valor positivo**.")
-        else:
-            _db.add(Transaction(
-                date=data, type=TYPE_OUT, category_id=cat_obj.id,
-                amount=valor, description=(desc or None),
-                congregation_id=cong_obj.id, 
-            ))
-            _db.commit()
-            st.success("Saída registrada.")
-    
-    st.rerun()
 
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 def page_relatorio_dizimistas(user: "User"):
@@ -3348,64 +2961,64 @@ def page_cadastro(user: "User"):
 
 # ===================== MAIN =====================
 # ===================== MAIN =====================
+# ===================== MAIN =====================
 def main():
     try:
         ensure_seed()
 
-        # -------- sessão / cookies --------
-        try:
-            cm = get_cookie_manager()
-            tok = cm.get(COOKIE_NAME)
-            data = _read_token(tok)
-            if data and not st.session_state.get("uid"):
-                with SessionLocal() as db:
-                    u = db.get(User, int(data["uid"]))
-                    if u:
-                        st.session_state.uid = u.id
-            if st.session_state.get("uid"):
-                _check_inactivity_and_logout(cm)
-                _update_last_active(cm)
-        except Exception:
-            pass
-
-        # -------- auth --------
+        # Tenta carregar o usuário a partir da sessão ou dos cookies
         user = current_user()
         if not user:
+            try:
+                cm = get_cookie_manager()
+                tok = cm.get(COOKIE_NAME)
+                data = _read_token(tok)
+                if data:
+                    with SessionLocal() as db:
+                        u = db.get(User, int(data["uid"]))
+                        if u:
+                            st.session_state.uid = u.id
+                            st.rerun()
+            except Exception:
+                # Ignora erros do cookie manager se ele não estiver instalado
+                pass
+
+        # Estrutura Lógica Principal: OU mostra o login, OU mostra o app.
+        if 'uid' not in st.session_state or not st.session_state.uid:
+            # ESTADO DESLOGADO: Mostra apenas a UI de login
             login_ui()
-            return  # <-- ESTA LINHA É ESSENCIAL. Ela para a execução aqui se não houver usuário.
-
-        # -------- A partir daqui, o código só executa se o usuário estiver logado --------
-
-        # Força o menu a ser redesenhado a cada execução
-        st.session_state["sidebar_rendered"] = False
-
-        # -------- menu lateral (uma vez) --------
-        page = sidebar_common(user)
-
-        # -------- roteamento --------
-        if page == "Lançamentos":
-            page_lancamentos(user)
-        elif page == "Relatório de Entrada":
-            page_relatorio_entrada(user)
-        elif page == "Relatório de Saída":
-            page_relatorio_saida(user)
-        elif page == "Relatório de Dizimistas":
-            page_relatorio_dizimistas(user)
-        elif page == "Relatório de Missões":
-            # A lógica de roteamento correta para missões
-            if getattr(user, "role", "") == "TESOUREIRO":
-                page_relatorio_missoes_congregacao(user)
-            else: # SEDE e TESOUREIRO MISSIONÁRIO
-                page_relatorio_missoes(user)
-        elif page == "Visão Geral":
-            page_visao_geral(user)
-        elif page == "Cadastro":
-            page_cadastro(user)
         else:
-            page_visao_geral(user) # Página padrão caso algo dê errado
-            
+            # ESTADO LOGADO: Carrega o usuário e mostra a interface principal
+            user = current_user()
+            if user:
+                page = sidebar_common(user)
+
+                # Roteamento de páginas
+                if page == "Lançamentos":
+                    page_lancamentos(user)
+                elif page == "Relatório de Entrada":
+                    page_relatorio_entrada(user)
+                elif page == "Relatório de Saída":
+                    page_relatorio_saida(user)
+                elif page == "Relatório de Dizimistas":
+                    page_relatorio_dizimistas(user)
+                elif page == "Relatório de Missões":
+                    if getattr(user, "role", "") == "TESOUREIRO":
+                        page_relatorio_missoes_congregacao(user)
+                    else:
+                        page_relatorio_missoes(user)
+                elif page == "Visão Geral":
+                    page_visao_geral(user)
+                elif page == "Cadastro":
+                    page_cadastro(user)
+                else:
+                    page_visao_geral(user)
+            else:
+                # Caso raro: UID na sessão mas usuário não encontrado no DB. Força logout.
+                logout()
+
     except Exception as e:
-        st.error("Ocorreu um erro inesperado na aplicação.")
+        st.error("Ocorreu um erro crítico na aplicação.")
         st.exception(e)
 
 if __name__ == "__main__":
