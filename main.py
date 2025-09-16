@@ -489,8 +489,12 @@ class Tithe(Base):
     amount: Mapped[float] = mapped_column(Float)
     congregation_id: Mapped[int] = mapped_column(ForeignKey("congregations.id"))
     payment_method: Mapped[Optional[str]] = mapped_column(String, default=None)
+    
+    # Campos corretos para sub-congregação
     sub_congregation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sub_congregations.id"))
     sub_congregation: Mapped[Optional["SubCongregation"]] = relationship(back_populates="tithes")
+
+    # Relação de volta para a congregação principal
     congregation: Mapped["Congregation"] = relationship(back_populates="tithes")
     
     # ================================================================
@@ -2688,14 +2692,12 @@ def page_relatorio_missoes_congregacao(user: "User"):
 # ===================== PAGE: CADASTRO =====================
 # ===================== PAGE: CADASTRO =====================
 # ===================== PAGE: CADASTRO =====================
+# ===================== PAGE: CADASTRO =====================
 def page_cadastro(user: "User"):
-    # LINHA DE TESTE PARA DIAGNÓSTICO DE DEPLOY
-    st.title("VERSÃO DE TESTE - 16 DE SETEMBRO")
-    
     if not is_admin_general(user):
         st.warning("🔒 Apenas o **administrador geral** (admin) pode acessar o Cadastro.")
         return
-
+        
     with SessionLocal() as db:
         st.markdown("<h1 class='page-title'>Cadastro</h1>", unsafe_allow_html=True)
 
@@ -2727,21 +2729,44 @@ def page_cadastro(user: "User"):
                         st.success(f"Inseridas: {inseridas} | Já existiam: {repetidas}")
                         st.rerun()
 
+            congs_all_q = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+            if congs_all_q:
+                dfc = pd.DataFrame([{"ID": c.id, "Nome": c.name} for c in congs_all_q])
+                st.dataframe(dfc, use_container_width=True, hide_index=True)
+
         # Aba de Sub-congregações
         with tabs[1]:
             st.subheader("Sub-congregações")
-            congs_all_subs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
-            if not congs_all_subs:
-                st.warning("Cadastre uma Congregação principal primeiro.")
+            congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+            if not congs_all:
+                st.warning("Cadastre uma Congregação principal primeiro na aba 'Congregações'.")
             else:
                 c1, c2 = st.columns(2)
                 with c1:
-                    cong_mae_nome = st.selectbox("Selecione a Congregação 'mãe'",[c.name for c in congs_all_subs],key="cad_sub_cong_mae_sel")
+                    cong_mae_nome = st.selectbox("Selecione a Congregação 'mãe'", [c.name for c in congs_all], key="cad_sub_cong_mae_sel")
                 with c2:
                     new_sub_cong_name = st.text_input("Nome da nova Sub-congregação", key="cad_new_sub_cong")
+
                 if st.button("Adicionar Sub-congregação", key="cad_add_sub_cong"):
-                    # Lógica para adicionar sub-congregação...
-                    st.rerun()
+                    cong_mae_obj = next((c for c in congs_all if c.name == cong_mae_nome), None)
+                    nome_valido = new_sub_cong_name.strip()
+                    if cong_mae_obj and nome_valido:
+                        existe = db.scalar(select(SubCongregation).where(SubCongregation.name == nome_valido, SubCongregation.congregation_id == cong_mae_obj.id))
+                        if existe:
+                            st.error(f"A sub-congregação '{nome_valido}' já existe em '{cong_mae_obj.name}'.")
+                        else:
+                            db.add(SubCongregation(name=nome_valido, congregation_id=cong_mae_obj.id))
+                            db.commit()
+                            st.success(f"Sub-congregação '{nome_valido}' adicionada a '{cong_mae_obj.name}'.")
+                            st.rerun()
+                    else:
+                        st.error("Selecione a congregação 'mãe' e digite um nome válido.")
+
+            st.divider()
+            subs = db.scalars(select(SubCongregation).options(joinedload(SubCongregation.congregation)).order_by(SubCongregation.name)).all()
+            if subs:
+                df_subs = pd.DataFrame([{"ID": s.id, "Nome da Sub-congregação": s.name, "Congregação Mãe": s.congregation.name} for s in subs])
+                st.dataframe(df_subs, use_container_width=True, hide_index=True)
 
         # Aba de Categorias
         with tabs[2]:
@@ -2752,8 +2777,14 @@ def page_cadastro(user: "User"):
             with col2_cat:
                 cat_type = st.selectbox("Tipo", ["DOAÇÃO", "SAÍDA"], key="cad_cat_type")
             if st.button("Adicionar categoria", disabled=not cat_name.strip(), key="cad_add_cat"):
-                # Lógica para adicionar categoria...
-                st.rerun()
+                if db.scalar(select(Category).where(Category.name == cat_name.strip())):
+                    st.error("Já existe categoria com esse nome.")
+                else:
+                    db.add(Category(name=cat_name.strip(), type=cat_type)); db.commit()
+                    st.success("Categoria adicionada."); st.rerun()
+            cats = db.scalars(select(Category).order_by(Category.type, Category.name)).all()
+            if cats:
+                st.dataframe(pd.DataFrame([{"ID": c.id, "Nome": c.name, "Tipo": c.type} for c in cats]), use_container_width=True)
 
         # Aba de Usuários
         with tabs[3]:
@@ -2768,30 +2799,26 @@ def page_cadastro(user: "User"):
 
             if st.button("Criar usuário", key="cad_user_add"):
                 username_stripped = u_user.strip()
-
-                # ---- INÍCIO DA VALIDAÇÃO ----
                 user_exists = db.scalar(select(User).where(User.username == username_stripped))
 
                 if not username_stripped or not u_pwd.strip():
                     st.error("Usuário e senha são obrigatórios.")
                 elif user_exists:
-                    st.error(f"O nome de usuário '{username_stripped}' já está em uso. Por favor, escolha outro.")
+                    st.error(f"O nome de usuário '{username_stripped}' já está em uso.")
                 elif u_role == "TESOUREIRO" and u_cong_name == "—":
                     st.error("Selecione uma congregação para o perfil TESOUREIRO.")
                 else:
-                    cong_id = None
-                    if u_cong_name != "—":
-                        cong_id = next((c.id for c in all_congs if c.name == u_cong_name), None)
-
-                    db.add(User(
-                        username=username_stripped,
-                        password_hash=hash_password(u_pwd.strip()),
-                        role=u_role,
-                        congregation_id=cong_id
-                    ))
+                    cong_id = next((c.id for c in all_congs if c.name == u_cong_name), None) if u_cong_name != "—" else None
+                    db.add(User(username=username_stripped, password_hash=hash_password(u_pwd.strip()), role=u_role, congregation_id=cong_id))
                     db.commit()
                     st.success("Usuário criado com sucesso!")
                     st.rerun()
+            
+            st.divider()
+            users = db.scalars(select(User).options(joinedload(User.congregation)).order_by(User.username)).all()
+            if users:
+                dfu = pd.DataFrame([{"ID": u.id, "Usuário": u.username, "Perfil": u.role, "Congregação": u.congregation.name if u.congregation else "—"} for u in users])
+                st.dataframe(dfu, use_container_width=True, hide_index=True)
                 # ---- FIM DA VALIDAÇÃO ----
             # ... (seu código de usuários aqui, que deve estar funcionando) ...
             # ... (seu código de usuários aqui) ...
