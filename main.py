@@ -490,20 +490,11 @@ class Tithe(Base):
     congregation_id: Mapped[int] = mapped_column(ForeignKey("congregations.id"))
     payment_method: Mapped[Optional[str]] = mapped_column(String, default=None)
     
-    # Campos corretos para sub-congregação
+    # Relação com SubCongregation (versão correta e única)
     sub_congregation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sub_congregations.id"))
     sub_congregation: Mapped[Optional["SubCongregation"]] = relationship(back_populates="tithes")
 
-    # Relação de volta para a congregação principal
-    congregation: Mapped["Congregation"] = relationship(back_populates="tithes")
-    
-    # ================================================================
-    # CAMPOS FALTANTES - ADICIONADOS AQUI:
-    # ================================================================
-    sub_congregation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sub_congregations.id"))
-    sub_congregation: Mapped[Optional["SubCongregation"]] = relationship(back_populates="tithes")
-    # ================================================================
-
+    # Relação com Congregation (versão correta e única)
     congregation: Mapped["Congregation"] = relationship(back_populates="tithes")
 
 # ===================== ENGINE / SESSION =====================
