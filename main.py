@@ -934,9 +934,18 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
             is_new = pd.isna(rid) or int(rid) <= 0 or int(rid) not in old_ids
             if not is_new:
                 continue
+                
+            # --- CORREÇÃO: VERIFICAÇÃO DE DADOS MÍNIMOS ---
             data = _to_date(row.get("Data"))
             amount = _to_float_brl(row.get("Valor"))
             desc = str(row.get("Descrição","")).strip() or None
+
+            # Linha considerada inválida se: 1) não tem data válida ou 2) valor é zero/nulo
+            if not data or abs(amount) < 0.0001:
+                # Linha nova e vazia, ignorar
+                continue
+            # --- FIM CORREÇÃO ---
+            
             if "Categoria" in n.columns:
                 cat_name = str(row.get("Categoria","")).strip()
                 if not cat_name:
@@ -962,7 +971,6 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
                 description=desc, congregation_id=int(cong_id)
             ))
         db.commit()
-
 
 def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default_cong_id: Optional[int]):
     def norm_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -1011,12 +1019,18 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
             is_new = pd.isna(rid) or int(rid) <= 0 or int(rid) not in old_ids
             if not is_new:
                 continue
+            
+            # --- CORREÇÃO: VERIFICAÇÃO DE DADOS MÍNIMOS ---
             data = _to_date(row.get("Data"))
             nome = str(row.get("Dizimista","")).strip()
             amount = _to_float_brl(row.get("Valor"))
             forma = str(row.get("Forma de Pagamento","")).strip() or None
-            if not nome:
+            
+            # Linha considerada inválida se: 1) nome está vazio ou 2) valor é zero/nulo
+            if not nome or abs(amount) < 0.0001:
                 continue
+            # --- FIM CORREÇÃO ---
+
             cong_id = default_cong_id
             if cong_id is None and not o.empty:
                 cong_id = int(o.iloc[0].get("_cong_id", 0)) or None
