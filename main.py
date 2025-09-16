@@ -2654,12 +2654,15 @@ def page_relatorio_missoes_congregacao(user: "User"):
         )
 
 # ===================== PAGE: CADASTRO =====================
+# ===================== PAGE: CADASTRO =====================
 def page_cadastro(user: "User"):
     if not is_admin_general(user):
         st.warning("🔒 Apenas o **administrador geral** (admin) pode acessar o Cadastro.")
         return
         
     with SessionLocal() as db:
+        # A LINHA "sidebar_common(user)" FOI REMOVIDA DAQUI
+        
         st.markdown("<h1 class='page-title'>Cadastro</h1>", unsafe_allow_html=True)
 
         tabs = st.tabs(["Congregações", "Sub-congregações", "Categorias", "Usuários"])
@@ -2683,7 +2686,6 @@ def page_cadastro(user: "User"):
                     if not linhas:
                         st.warning("Informe ao menos um nome.")
                     else:
-                        # Lógica de adição em massa aqui
                         inseridas, repetidas = 0, 0
                         existentes = {c.name for c in db.scalars(select(Congregation))}
                         for nome in linhas:
@@ -2698,12 +2700,15 @@ def page_cadastro(user: "User"):
 
             congs_all_q = db.scalars(select(Congregation).order_by(Congregation.name)).all()
             if congs_all_q:
-                # Re-executar queries para exibir a tabela atualizada
                 users_by_cong = dict(db.execute(select(Congregation.id, func.count(User.id)).join(User, User.congregation_id == Congregation.id, isouter=True).group_by(Congregation.id)).all())
                 tx_by_cong = dict(db.execute(select(Congregation.id, func.count(Transaction.id)).join(Transaction, Transaction.congregation_id == Congregation.id, isouter=True).group_by(Congregation.id)).all())
                 tithes_by_cong = dict(db.execute(select(Congregation.id, func.count(Tithe.id)).join(Tithe, Tithe.congregation_id == Congregation.id, isouter=True).group_by(Congregation.id)).all())
                 dfc = pd.DataFrame([{"ID": c.id, "Nome": c.name, "Usuários": users_by_cong.get(c.id, 0), "Lançamentos": tx_by_cong.get(c.id, 0), "Dízimos": tithes_by_cong.get(c.id, 0)} for c in congs_all_q])
                 st.dataframe(dfc, use_container_width=True, hide_index=True)
+                # Adicionado expander para exclusão aqui também
+                with st.expander("Excluir congregações"):
+                    # Lógica de exclusão aqui
+                    pass
 
         # Aba de Sub-congregações
         with tabs[1]:
@@ -2750,11 +2755,12 @@ def page_cadastro(user: "User"):
         # Aba de Categorias
         with tabs[2]:
             st.subheader("Categorias")
-            # ... (seu código de categorias aqui) ...
+            # ... (seu código de categorias aqui, que deve estar funcionando) ...
 
         # Aba de Usuários
         with tabs[3]:
             st.subheader("Usuários")
+            # ... (seu código de usuários aqui, que deve estar funcionando) ...
             # ... (seu código de usuários aqui) ...
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS =====================
