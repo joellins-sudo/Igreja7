@@ -1060,11 +1060,14 @@ def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date) -> pd
     ).all()
 
     by_date_diz_tit = defaultdict(float)
-    for d, s in tithes: by_date_diz_tit[d] += float(s or 0.0)
+    for d, s in tithes:
+        by_date_diz_tit[d] += float(s or 0.0)
     by_date_diz_tx = defaultdict(float)
-    for d, s in diz_trans: by_date_diz_tx[d] += float(s or 0.0)
+    for d, s in diz_trans:
+        by_date_diz_tx[d] += float(s or 0.0)
     by_date_ofe = defaultdict(float)
-    for d, s in oferta_trans: by_date_ofe[d] += float(s or 0.0)
+    for d, s in oferta_trans:
+        by_date_ofe[d] += float(s or 0.0)
 
     all_dates = sorted(set(list(by_date_diz_tit.keys()) + list(by_date_diz_tx.keys()) + list(by_date_ofe.keys())))
     rows = []
@@ -1072,7 +1075,12 @@ def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date) -> pd
         dz = max(float(by_date_diz_tit.get(d, 0.0)), float(by_date_diz_tx.get(d, 0.0)))  # [EQ FIX]
         ofe = float(by_date_ofe.get(d, 0.0))
         rows.append({"Data do Culto": d, "Dízimo": dz, "Oferta": ofe, "Total": dz + ofe})
+
+    # [BLINDAGEM] garante as colunas esperadas mesmo quando não houver linhas
+    if not rows:
+        return pd.DataFrame(columns=["Data do Culto", "Dízimo", "Oferta", "Total"])
     return pd.DataFrame(rows)
+
 
 def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_df: pd.DataFrame):
     with SessionLocal() as db:
@@ -1080,25 +1088,42 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
         cat_diz = next((c for c in cats_in if _norm(c.name) in ("dizimo","dízimo")), None)
         cat_ofe = next((c for c in cats_in if _norm(c.name) == "oferta"), None)
         if not (cat_diz and cat_ofe):
-            st.error("Categorias 'Dízimo' e/ou 'Oferta' não encontradas."); return
+            st.error("Categorias 'Dízimo' e/ou 'Oferta' não encontradas.")
+            return
 
         def current_sums():
-            base = _entrada_summary_df(db, cong_id, start, end)
+            base = _entrada_summary_df(db, cong_id, start, end).copy()
+            if base.empty or "Data do Culto" not in base.columns:
+                return {}
             base["Data do Culto"] = base["Data do Culto"].map(_to_date)
-            bydate = {r["Data do Culto"]: (float(r["Dízimo"]), float(r["Oferta"])) for _, r in base.iterrows()}
-            return bydate
+            out = {}
+            for _, r in base.iterrows():
+                d = _to_date(r.get("Data do Culto"))
+                dz = float(_to_float_brl(r.get("Dízimo", 0.0)))
+                ofe = float(_to_float_brl(r.get("Oferta", 0.0)))
+                out[d] = (dz, ofe)
+            return out
 
         baseline = current_sums()
-        edited = edited_df.copy()
-        edited["Data do Culto"] = edited["Data do Culto"].map(_to_date)
-        wanted = {r["Data do Culto"]: (float(_to_float_brl(r["Dízimo"])), float(_to_float_brl(r["Oferta"]))) for _, r in edited.iterrows()}
+
+        # Monta o "wanted" a partir do editor; tolera editor vazio/sem colunas
+        wanted = {}
+        if isinstance(edited_df, pd.DataFrame) and not edited_df.empty and \
+           {"Data do Culto","Dízimo","Oferta"}.issubset(set(edited_df.columns)):
+            edited = edited_df.copy()
+            edited["Data do Culto"] = edited["Data do Culto"].map(_to_date)
+            for _, r in edited.iterrows():
+                d = _to_date(r.get("Data do Culto"))
+                dz = float(_to_float_brl(r.get("Dízimo", 0.0)))
+                ofe = float(_to_float_brl(r.get("Oferta", 0.0)))
+                wanted[d] = (dz, ofe)
 
         all_dates = sorted(set(list(baseline.keys()) + list(wanted.keys())))
         for d in all_dates:
             cur_dz, cur_of = baseline.get(d, (0.0, 0.0))
             want_dz, want_of = wanted.get(d, (0.0, 0.0))
 
-            # [EQ FIX]: equivalência → base de "outros" do dízimo é o MAIOR entre (tithes do dia) e (doações 'Dízimo' do dia, exceto ajustes)
+            # [EQ FIX] equivalência → base do dízimo é o MAIOR entre (tithes do dia) e (doações 'Dízimo' do dia, exceto ajustes)
             sum_dz_tithes = float(db.scalar(
                 select(func.coalesce(func.sum(Tithe.amount), 0.0))
                 .where(and_(Tithe.congregation_id == cong_id, Tithe.date == d))
@@ -1141,18 +1166,22 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
             ))
 
             if abs(adj_dz_new) < 0.0001:
-                if adj_dz: db.delete(adj_dz)
+                if adj_dz:
+                    db.delete(adj_dz)
             else:
-                if adj_dz: adj_dz.amount = float(adj_dz_new); db.add(adj_dz)
+                if adj_dz:
+                    adj_dz.amount = float(adj_dz_new); db.add(adj_dz)
                 else:
                     db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id,
                                        amount=float(adj_dz_new), description=ADJ_ENTRY_DESC,
                                        congregation_id=cong_id))
 
             if abs(adj_of_new) < 0.0001:
-                if adj_of: db.delete(adj_of)
+                if adj_of:
+                    db.delete(adj_of)
             else:
-                if adj_of: adj_of.amount = float(adj_of_new); db.add(adj_of)
+                if adj_of:
+                    adj_of.amount = float(adj_of_new); db.add(adj_of)
                 else:
                     db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id,
                                        amount=float(adj_of_new), description=ADJ_ENTRY_DESC,
