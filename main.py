@@ -3347,6 +3347,7 @@ def page_cadastro(user: "User"):
                 st.success(f"{len(ids_u)} usuário(s) excluído(s)."); st.rerun()
 
 # ===================== MAIN =====================
+# ===================== MAIN =====================
 def main():
     try:
         ensure_seed()
@@ -3371,7 +3372,9 @@ def main():
         user = current_user()
         if not user:
             login_ui()
-            return
+            return  # <-- ESTA LINHA É ESSENCIAL. Ela para a execução aqui se não houver usuário.
+
+        # -------- A partir daqui, o código só executa se o usuário estiver logado --------
 
         # Força o menu a ser redesenhado a cada execução
         st.session_state["sidebar_rendered"] = False
@@ -3389,18 +3392,20 @@ def main():
         elif page == "Relatório de Dizimistas":
             page_relatorio_dizimistas(user)
         elif page == "Relatório de Missões":
+            # A lógica de roteamento correta para missões
             if getattr(user, "role", "") == "TESOUREIRO":
                 page_relatorio_missoes_congregacao(user)
-            else:
+            else: # SEDE e TESOUREIRO MISSIONÁRIO
                 page_relatorio_missoes(user)
         elif page == "Visão Geral":
             page_visao_geral(user)
         elif page == "Cadastro":
             page_cadastro(user)
         else:
-            st.warning("Seleção de página inválida.")
+            page_visao_geral(user) # Página padrão caso algo dê errado
+            
     except Exception as e:
-        st.error("Ocorreu um erro ao renderizar a aplicação.")
+        st.error("Ocorreu um erro inesperado na aplicação.")
         st.exception(e)
 
 if __name__ == "__main__":
