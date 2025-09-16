@@ -1124,24 +1124,23 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
             if d is None:
                 continue 
             
-            # Pega o que o usuário quer que seja o total do dia (pode ser 0.0 se a linha foi apagada)
             want_dz, want_of = wanted.get(d, (0.0, 0.0))
 
-            # [EQ FIX]: Equivalência de Dízimo (Base de 'outros' = Máximo entre Dízimos Nominais e Doações 'Dízimo' (sem ajuste))
+            # --- CORREÇÃO DE BUSCA DE BASE (OUTROS LANÇAMENTOS) ---
             
-            # ATENÇÃO À CORREÇÃO: Filtro Tithe.date == d
+            # Tithe (apenas desta data)
             sum_dz_tithes = float(db.scalar(
                 select(func.coalesce(func.sum(Tithe.amount), 0.0))
                 .where(and_(Tithe.congregation_id == cong_id, Tithe.date == d))
             ) or 0.0)
             
-            # ATENÇÃO À CORREÇÃO: Filtro Transaction.date == d
+            # Transações Dízimo (apenas desta data, sem ajuste)
             sum_dz_tx_no_adj = float(db.scalar(
                 select(func.coalesce(func.sum(Transaction.amount), 0.0))
                 .join(Category, Transaction.category_id == Category.id)
                 .where(and_(
                     Transaction.congregation_id == cong_id,
-                    Transaction.date == d, # <--- GARANTINDO QUE É SÓ DESTA DATA
+                    Transaction.date == d,
                     Transaction.type.in_((TYPE_IN, "RECEITA")),
                     Transaction.category_id == cat_diz.id,
                     func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
@@ -1149,24 +1148,26 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
             ) or 0.0)
             sum_dz_others = max(sum_dz_tithes, sum_dz_tx_no_adj)
             
-            # Base de Outros para Oferta (soma de todas as ofertas não-ajuste)
-            # ATENÇÃO À CORREÇÃO: Filtro Transaction.date == d
+            # Transações Oferta (apenas desta data, sem ajuste)
             sum_of_others = float(db.scalar(
                 select(func.coalesce(func.sum(Transaction.amount), 0.0))
                 .where(and_(
                     Transaction.congregation_id == cong_id,
-                    Transaction.date == d, # <--- GARANTINDO QUE É SÓ DESTA DATA
+                    Transaction.date == d,
                     Transaction.type.in_((TYPE_IN, "RECEITA")),
                     Transaction.category_id == cat_ofe.id,
                     func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
                 ))
             ) or 0.0)
 
+            # --- FIM CORREÇÃO DE BUSCA DE BASE ---
+
+
             # Calcula o novo ajuste necessário para atingir o valor desejado
             adj_dz_new = want_dz - sum_dz_others
             adj_of_new = want_of - sum_of_others
 
-            # Busca ajustes existentes (também já filtrados por Transaction.date == d)
+            # Busca ajustes existentes (FILTRANDO PELA DATA ESPECÍFICA 'd')
             adj_dz = db.scalar(select(Transaction).where(
                 Transaction.congregation_id == cong_id, Transaction.date == d,
                 Transaction.type.in_((TYPE_IN, "RECEITA")), Transaction.category_id == cat_diz.id,
