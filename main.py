@@ -1912,6 +1912,8 @@ def page_lancamentos(user: "User"):
         # ===================== FORMULÁRIOS ÚNICOS (mantidos) =====================
         # ===================== FORMULÁRIOS ÚNICOS (Entrada) =====================
 
+# ===================== FORMULÁRIOS ÚNICOS (Entrada) =====================
+
 st.markdown('<div class="st-container-card adrf-entrada">', unsafe_allow_html=True)
 st.subheader("Lançar ENTRADA (Doação)")
 
@@ -1923,15 +1925,21 @@ with st.form("form_entrada", clear_on_submit=False):
     c1, c2 = st.columns([1, 1.6])
     with c1:
         ent_data = st.date_input("Data do Culto", value=today_bahia(), key="ent_data", format="DD/MM/YYYY")
+    
+    # --- CORREÇÃO: CARREGA CATEGORIAS DENTRO DO CONTEXTO DE BANCO DE DADOS (db) ---
+    with SessionLocal() as db_cat:
+        cats_in = categories_for_type(db_cat, TYPE_IN) # Usamos db_cat aqui
+    # --- FIM CORREÇÃO ---
+    
+    cats_in = [c for c in cats_in if "ajuste" not in _norm(c.name)]
+    cat_names_in = [c.name for c in cats_in] or ["—"]
+    desired = ["Dízimo", "Oferta", "Missões"]
+    desired_norm = [_norm(x) for x in desired]
+    top = [n for n in cat_names_in if _norm(n) in desired_norm]
+    rest = [n for n in cat_names_in if _norm(n) not in desired_norm]
+    cat_display = top + rest
+    
     with c2:
-        cats_in = categories_for_type(db, TYPE_IN)
-        cats_in = [c for c in cats_in if "ajuste" not in _norm(c.name)]
-        cat_names_in = [c.name for c in cats_in] or ["—"]
-        desired = ["Dízimo", "Oferta", "Missões"]
-        desired_norm = [_norm(x) for x in desired]
-        top = [n for n in cat_names_in if _norm(n) in desired_norm]
-        rest = [n for n in cat_names_in if _norm(n) not in desired_norm]
-        cat_display = top + rest
         ent_cat = st.selectbox("Categoria", cat_display, key="ent_cat")
 
     if "ent_desc" not in st.session_state: st.session_state["ent_desc"] = ""
@@ -1959,6 +1967,7 @@ if ok_submit:
     if data_to_save["amount"] <= 0.0 or not cat_name:
         st.error("Informe a **categoria** e um **valor positivo**.")
     else:
+        # --- CORREÇÃO: Usa SessionLocal() para acesso ao banco ---
         with SessionLocal() as _db:
             if st.session_state.get("ent_flag_missoes") and not _db.scalar(select(Category).where(Category.name == "Missões")):
                 _db.add(Category(name="Missões", type=TYPE_IN)); _db.commit()
@@ -1970,15 +1979,17 @@ if ok_submit:
                 _db.add(Transaction(
                     date=data_to_save["date"], type=TYPE_IN, category_id=cat_obj.id,
                     amount=data_to_save["amount"], description=data_to_save["description"],
-                    congregation_id=cong_obj.id, payment_method=None
+                    congregation_id=cong_obj.id, # cong_obj está definido no escopo de page_lancamentos
+                    payment_method=None
                 ))
                 _db.commit()
                 st.success("Entrada registrada.")
 
-        st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown("---")
+st.markdown('</div>', unsafe_allow_html=True)
+st.markdown("---")
 
         # ===================== FORMULÁRIOS ÚNICOS (Dizimista) =====================
+# ===================== FORMULÁRIOS ÚNICOS (Dizimista) =====================
 st.markdown('<div class="st-container-card adrf-dizimo">', unsafe_allow_html=True)
 st.subheader("Salvar DIZIMISTA")
 
@@ -2010,17 +2021,20 @@ if ok_submit:
     if not nome or valor <= 0.0:
         st.error("Informe o **nome** do dizimista e um **valor positivo**.")
     else:
+        # --- CORREÇÃO: Usa SessionLocal() para acesso ao banco ---
         with SessionLocal() as _db:
             _db.add(Tithe(
                 date=data, tither_name=nome, amount=valor,
-                congregation_id=cong_obj.id, payment_method=forma
+                congregation_id=cong_obj.id, # cong_obj está definido no escopo de page_lancamentos
+                payment_method=forma
             ))
             _db.commit()
             st.success("Dízimo registrado.")
-        st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown("---")
+st.markdown('</div>', unsafe_allow_html=True)
+st.markdown("---")
 
         # ===================== FORMULÁRIOS ÚNICOS (Saída) =====================
+# ===================== FORMULÁRIOS ÚNICOS (Saída) =====================
 st.markdown('<div class="st-container-card adrf-saida">', unsafe_allow_html=True)
 st.subheader("Lançar SAÍDA")
 
@@ -2029,7 +2043,12 @@ SAIDA_CLEANUP_KEYS = ["sai_desc", "sai_valor"]
 # REMOVEMOS 'clear_on_submit=True'
 with st.form("form_saida", clear_on_submit=False): 
     sai_data = st.date_input("Data", value=today_bahia(), key="sai_data", format="DD/MM/YYYY")
-    cats_out = categories_for_type(db, TYPE_OUT)
+    
+    # --- CORREÇÃO: CARREGA CATEGORIAS DENTRO DO CONTEXTO DE BANCO DE DADOS ---
+    with SessionLocal() as db_cat:
+        cats_out = categories_for_type(db_cat, TYPE_OUT) # Usamos db_cat aqui
+    # --- FIM CORREÇÃO ---
+    
     sai_cat = st.selectbox("Tipo da saída (Categoria)", [c.name for c in cats_out] or ["—"], key="sai_cat")
     
     if "sai_desc" not in st.session_state: st.session_state["sai_desc"] = ""
@@ -2050,6 +2069,7 @@ if ok_submit:
     cat_nome = st.session_state.get("sai_cat")
     desc = st.session_state.get("sai_desc")
     
+    # --- CORREÇÃO: Usa SessionLocal() para acesso ao banco ---
     with SessionLocal() as _db:
         cat_obj = _db.scalar(select(Category).where(Category.name == cat_nome))
         if not cat_obj or valor <= 0.0:
@@ -2058,7 +2078,7 @@ if ok_submit:
             _db.add(Transaction(
                 date=data, type=TYPE_OUT, category_id=cat_obj.id,
                 amount=valor, description=(desc or None),
-                congregation_id=cong_obj.id,
+                congregation_id=cong_obj.id, # cong_obj está definido no escopo de page_lancamentos
             ))
             _db.commit()
             st.success("Saída registrada.")
