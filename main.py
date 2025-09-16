@@ -554,6 +554,10 @@ def _check_inactivity_and_logout(cm):
 
 def logout():
     st.session_state.uid = None
+    # Novo: Limpar o estado de navegação para forçar a página inicial no próximo login
+    if "main_menu_page" in st.session_state:
+        del st.session_state["main_menu_page"] 
+        
     try:
         cm = get_cookie_manager()
         if hasattr(cm, "delete"):
