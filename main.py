@@ -1124,9 +1124,10 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
             if d is None:
                 continue 
             
+            # Pega o que o usuário quer que seja o total do dia (0.0 se a linha foi apagada no editor)
             want_dz, want_of = wanted.get(d, (0.0, 0.0))
 
-            # --- CORREÇÃO DE BUSCA DE BASE (OUTROS LANÇAMENTOS) ---
+            # --- BUSCA DE LANÇAMENTOS ORIGINAIS (SEM AJUSTE) APENAS PARA A DATA 'd' ---
             
             # Tithe (apenas desta data)
             sum_dz_tithes = float(db.scalar(
@@ -1140,7 +1141,7 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
                 .join(Category, Transaction.category_id == Category.id)
                 .where(and_(
                     Transaction.congregation_id == cong_id,
-                    Transaction.date == d,
+                    Transaction.date == d, # <--- FILTRO CRÍTICO
                     Transaction.type.in_((TYPE_IN, "RECEITA")),
                     Transaction.category_id == cat_diz.id,
                     func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
@@ -1153,21 +1154,20 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
                 select(func.coalesce(func.sum(Transaction.amount), 0.0))
                 .where(and_(
                     Transaction.congregation_id == cong_id,
-                    Transaction.date == d,
+                    Transaction.date == d, # <--- FILTRO CRÍTICO
                     Transaction.type.in_((TYPE_IN, "RECEITA")),
                     Transaction.category_id == cat_ofe.id,
                     func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
                 ))
             ) or 0.0)
 
-            # --- FIM CORREÇÃO DE BUSCA DE BASE ---
-
+            # --- FIM DA BUSCA ---
 
             # Calcula o novo ajuste necessário para atingir o valor desejado
             adj_dz_new = want_dz - sum_dz_others
             adj_of_new = want_of - sum_of_others
 
-            # Busca ajustes existentes (FILTRANDO PELA DATA ESPECÍFICA 'd')
+            # Busca ajustes existentes (também filtrando pela data 'd')
             adj_dz = db.scalar(select(Transaction).where(
                 Transaction.congregation_id == cong_id, Transaction.date == d,
                 Transaction.type.in_((TYPE_IN, "RECEITA")), Transaction.category_id == cat_diz.id,
@@ -1180,6 +1180,7 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
             ))
 
             # Aplica ou remove o ajuste de Dízimo
+            # Se adj_dz_new é zero, e houver ajuste existente, ele o deleta (limpa ajuste antigo)
             if abs(adj_dz_new) < 0.0001:
                 if adj_dz: db.delete(adj_dz)
             else:
