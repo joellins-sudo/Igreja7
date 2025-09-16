@@ -19,7 +19,11 @@ except Exception:
     sac = None  # fallback p/ radio padrão
 import hashlib
 from sqlalchemy import select
-
+# ... outras importações ...
+from sqlalchemy import select, func, String, Date, Float, ForeignKey, create_engine, and_
+from sqlalchemy.exc import IntegrityError  # <-- ADICIONE ESTA LINHA
+from sqlalchemy.orm import relationship, Mapped, mapped_column, sessionmaker, joinedload, Session
+# ...
 import os
 from datetime import date, timedelta, datetime
 from typing import Optional, List, Tuple, Dict, Any
@@ -991,27 +995,22 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
         if to_delete:
             db.query(Tithe).filter(Tithe.id.in_(to_delete)).delete(synchronize_session=False)
 
-        # Loop de ATUALIZAÇÃO de registros existentes
         for rid in sorted(new_ids & old_ids):
             old = old_map[rid]
             new = n.loc[n["ID"] == rid].iloc[0]
             
-            # ================================================================
-            # NOVO BLOCO DE VALIDAÇÃO PARA ATUALIZAÇÕES
-            # ================================================================
             new_nome = str(new.get("Dizimista", "")).strip()
             new_amount = _to_float_brl(new.get("Valor"))
 
             if not new_nome or abs(new_amount) < 0.0001:
                 st.warning(f"A alteração para o ID {rid} foi ignorada porque o nome ou valor se tornou inválido.")
-                continue # Pula para o próximo registro sem salvar este
-            # ================================================================
-
+                continue
+            
             changed = False
             t = db.get(Tithe, rid)
             if not t:
                 continue
-                
+            
             if t.date != _to_date(new["Data"]):
                 t.date = _to_date(new["Data"]); changed = True
             if t.tither_name != new_nome:
@@ -1020,11 +1019,10 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
                 t.amount = new_amount; changed = True
             if (t.payment_method or "") != (new["Forma de Pagamento"] or ""):
                 t.payment_method = (new["Forma de Pagamento"] or None); changed = True
-                
+            
             if changed:
                 db.add(t)
 
-        # Loop de INSERÇÃO de novos registros
         for _, row in n.iterrows():
             rid = row.get("ID", None)
             is_new = pd.isna(rid) or int(rid) <= 0 or int(rid) not in old_ids
@@ -1044,13 +1042,29 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
                 cong_id = int(o.iloc[0].get("_cong_id", 0)) or None
             if cong_id is None:
                 continue
-                
+            
             db.add(Tithe(
                 date=data, tither_name=nome, amount=float(amount),
                 congregation_id=int(cong_id), payment_method=forma
             ))
-            
-        db.commit()
+
+        # ================================================================
+        # BLOCO try/except ADICIONADO PARA CAPTURAR IntegrityError
+        # ================================================================
+        try:
+            db.commit()
+            st.toast("💾 Alterações salvas com sucesso!", icon="✅")
+        except IntegrityError:
+            db.rollback() # Desfaz a transação que falhou
+            st.error(
+                "❌ Erro ao Salvar: A alteração resultaria em um registro duplicado. "
+                "Verifique se você não está tentando salvar um dizimista com nome e data que já existem. "
+                "Nenhuma alteração foi salva."
+            )
+        except Exception as e:
+            db.rollback()
+            st.error(f"Ocorreu um erro inesperado ao salvar: {e}")
+        # ================================================================
 
 # ===================== RELATÓRIO DE ENTRADA — TABELA ÚNICA (EDIT SUMÁRIO) =====================
 def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date) -> pd.DataFrame:
