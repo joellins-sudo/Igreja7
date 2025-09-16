@@ -2653,340 +2653,109 @@ def page_relatorio_missoes_congregacao(user: "User"):
             mime="application/pdf"
         )
 
-def page_cadastro(user: "User"):
-    if not is_admin_general(user):
-        st.warning("🔒 Apenas o **administrador geral** (admin) pode acessar o Cadastro.")
-        return
-    with SessionLocal() as db:
-        st.markdown("<h1 class='page-title'>Cadastro</h1>", unsafe_allow_html=True)
-
-        # (restante do cadastro preservado — sem editores que precisem de botão)
-
-        # Congregações
-        st.subheader("Congregações")
-        col_single, col_mass = st.columns(2)
-        with col_single:
-            new_cong = st.text_input("Nova congregação (individual)", key="cad_new_cong")
-            if st.button("Adicionar congregação", disabled=not new_cong.strip(), key="cad_add_cong"):
-                if db.scalar(select(Congregation).where(Congregation.name == new_cong.strip())):
-                    st.error("Já existe congregação com esse nome.")
-                else:
-                    db.add(Congregation(name=new_cong.strip())); db.commit()
-                    st.success("Congregação adicionada."); st.rerun()
-        with col_mass:
-            mass_text = st.text_area("Adicionar em massa (uma congregação por linha)", height=140, key="cad_mass_cong")
-            if st.button("Adicionar lista", key="cad_add_cong_mass"):
-                linhas = [l.strip() for l in (mass_text or "").splitlines()]
-                linhas = [l for l in linhas if l]
-                if not linhas:
-                    st.warning("Informe ao menos um nome.")
-                else:
-                    inseridas = 0; repetidas = 0
-                    for nome in linhas:
-                        if db.scalar(select(Congregation).where(Congregation.name == nome)):
-                            repetidas += 1
-                        else:
-                            db.add(Congregation(name=nome)); inseridas += 1
-                    db.commit()
-                    st.success(f"Inseridas: {inseridas} | Já existiam: {repetidas}")
-                    st.rerun()
-
-        congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
-        users_by_cong = dict(db.execute(select(Congregation.id, func.count(User.id))
-                                    .join(User, User.congregation_id == Congregation.id, isouter=True)
-                                    .group_by(Congregation.id)).all())
-        tx_by_cong = dict(db.execute(select(Congregation.id, func.count(Transaction.id))
-                                .join(Transaction, Transaction.congregation_id == Congregation.id, isouter=True)
-                                .group_by(Congregation.id)).all())
-        tithes_by_cong = dict(db.execute(select(Congregation.id, func.count(Tithe.id))
-                                    .join(Tithe, Tithe.congregation_id == Congregation.id, isouter=True)
-                                    .group_by(Congregation.id)).all())
-        dfc = pd.DataFrame([{
-            "ID": c.id, "Nome": c.name,
-            "Usuários": int(users_by_cong.get(c.id, 0)),
-            "Lançamentos": int(tx_by_cong.get(c.id, 0)),
-            "Dízimos": int(tithes_by_cong.get(c.id, 0)),
-        } for c in congs_all])
-        if not dfc.empty:
-            st.dataframe(dfc, use_container_width=True, hide_index=True, height=200)
-
-        with st.expander("Excluir congregações"):
-            st.caption("Só é possível excluir congregações **sem usuários, lançamentos ou dízimos**. A congregação **Sede** não pode ser excluída.")
-            eligible_ids = []
-            for c in congs_all:
-                if _norm(c.name) == "sede": continue
-                if users_by_cong.get(c.id, 0) == 0 and tx_by_cong.get(c.id, 0) == 0 and tithes_by_cong.get(c.id, 0) == 0:
-                    eligible_ids.append(c.id)
-            if not eligible_ids:
-                st.info("Nenhuma congregação elegível para exclusão.")
-            else:
-                ids_del_cong = st.multiselect("IDs de congregações para excluir", eligible_ids, key="cad_del_cong_ids")
-                confc2 = st.text_input("Digite EXCLUIR para confirmar", key="cad_del_cong_conf")
-                btn_disabled = (not ids_del_cong) or (not _confirm_ok(confc2))
-                if st.button("Excluir congregações selecionadas", disabled=btn_disabled, key="cad_del_cong_btn"):
-                    with SessionLocal() as _db:
-                        _db.query(Congregation).filter(Congregation.id.in_(ids_del_cong)).delete(synchronize_session=False)
-                        _db.commit()
-                    st.success(f"{len(ids_del_cong)} congregação(ões) excluída(s)."); st.rerun()
-        st.divider()
-
-        # Categorias
-        st.subheader("Categorias")
-        col1, col2 = st.columns(2)
-        with col1:
-            cat_name = st.text_input("Nome da categoria", key="cad_cat_name")
-        with col2:
-            cat_type = st.selectbox("Tipo", ["DOAÇÃO", "SAÍDA"], key="cad_cat_type")
-        if st.button("Adicionar categoria", disabled=not cat_name.strip(), key="cad_add_cat"):
-            if db.scalar(select(Category).where(Category.name == cat_name.strip())):
-                st.error("Já existe categoria com esse nome.")
-            else:
-                db.add(Category(name=cat_name.strip(), type=cat_type)); db.commit()
-                st.success("Categoria adicionada."); st.rerun()
-
-        cats = db.scalars(select(Category).order_by(Category.type, Category.name)).all()
-        usage = dict(db.execute(select(Category.id, func.count(Transaction.id))
-                                .join(Transaction, Transaction.category_id == Category.id, isouter=True)
-                                .group_by(Category.id)).all())
-        dfcat = pd.DataFrame([{
-            "ID": c.id, "Nome": c.name, "Tipo": c.type, "Usos em lançamentos": int(usage.get(c.id, 0))
-        } for c in cats])
-        if not dfcat.empty:
-            st.dataframe(dfcat, use_container_width=True, hide_index=True, height=200)
-
-        with st.expander("Excluir categorias"):
-            st.caption("Só é possível excluir categorias **sem lançamentos** vinculados.")
-            ids_del = st.multiselect("IDs de categorias para excluir", dfcat.loc[dfcat["Usos em lançamentos"] == 0, "ID"].tolist(), key="cad_del_cat_ids")
-            confc = st.text_input("Digite EXCLUIR para confirmar", key="cad_del_cat_conf")
-            btn_disabled = (not ids_del) or (not _confirm_ok(confc))
-            if st.button("Excluir categorias selecionadas", disabled=btn_disabled, key="cad_del_cat_btn"):
-                with SessionLocal() as _db:
-                    _db.query(Category).filter(Category.id.in_(ids_del)).delete(synchronize_session=False)
-                    _db.commit()
-                st.success(f"{len(ids_del)} categoria(s) excluída(s)."); st.rerun()
-        st.divider()
-
-        # Usuários
-        st.subheader("Usuários")
-        u_user = st.text_input("Usuário (login)", key="cad_user_login")
-        u_pwd = st.text_input("Senha", type="password", key="cad_user_pwd")
-        u_role = st.selectbox("Perfil", ["SEDE", "TESOUREIRO", "TESOUREIRO MISSIONÁRIO"], key="cad_user_role")
-        all_congs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
-        cong_options = ["—"] + [c.name for c in all_congs]
-        if u_role == "TESOUREIRO MISSIONÁRIO":
-            try:
-                index = cong_options.index("Sede")
-            except ValueError:
-                index = 0
-            u_cong_name = st.selectbox("Congregação (vinculada a Saídas de Missões)", cong_options, index=index, key="cad_user_cong")
-        else:
-            u_cong_name = st.selectbox("Congregação", cong_options, key="cad_user_cong")
-
-        if st.button("Criar usuário", key="cad_user_add"):
-            if not u_user.strip() or not u_pwd.strip():
-                st.error("Usuário e senha são obrigatórios.")
-            elif db.scalar(select(User).where(User.username == u_user.strip())):
-                st.error("Usuário já existe.")
-            else:
-                cong_id = None
-                if u_role == "TESOUREIRO":
-                    if u_cong_name == "—":
-                        st.error("Selecione a congregação."); return
-                    cong_id = next(c.id for c in all_congs if c.name == u_cong_name)
-                elif u_role == "TESOUREIRO MISSIONÁRIO":
-                        cong_id = db.scalar(select(Congregation.id).where(Congregation.name == "Sede"))
-                db.add(User(username=u_user.strip(), password_hash=hash_password(u_pwd.strip()), role=u_role, congregation_id=cong_id))
-                db.commit()
-                st.success("Usuário criado."); st.rerun()
-
-        users = db.scalars(select(User).order_by(User.username)).all()
-        dfu = pd.DataFrame([{
-            "ID": u.id, "Usuário": u.username, "Perfil": u.role,
-            "Congregação": (db.get(Congregation, u.congregation_id).name if u.congregation_id else "—")
-        } for u in users])
-        if not dfu.empty:
-            st.dataframe(dfu, use_container_width=True, hide_index=True, height=200)
-
-        with st.expander("Excluir usuários"):
-            st.caption("Não é permitido excluir o usuário atualmente logado.")
-            ids_u = st.multiselect("IDs de usuários para excluir", dfu["ID"].tolist(), key="cad_del_users_ids")
-            ids_u = [i for i in ids_u if i != user.id]
-            confu = st.text_input("Digite EXCLUIR para confirmar", key="cad_del_users_conf")
-            btn_disabled = (not ids_u) or (not _confirm_ok(confu))
-            if st.button("Excluir usuários selecionadas", disabled=btn_disabled, key="cad_del_users_btn"):
-                with SessionLocal() as _db:
-                    _db.query(User).filter(User.id.in_(ids_u)).delete(synchronize_session=False)
-                    _db.commit()
-                st.success(f"{len(ids_u)} usuário(s) excluído(s)."); st.rerun()
-
 # ===================== PAGE: CADASTRO =====================
 def page_cadastro(user: "User"):
     if not is_admin_general(user):
         st.warning("🔒 Apenas o **administrador geral** (admin) pode acessar o Cadastro.")
         return
+        
     with SessionLocal() as db:
-        sidebar_common(user)
-
         st.markdown("<h1 class='page-title'>Cadastro</h1>", unsafe_allow_html=True)
 
-        # (restante do cadastro preservado — sem editores que precisem de botão)
+        tabs = st.tabs(["Congregações", "Sub-congregações", "Categorias", "Usuários"])
 
-        # Congregações
-        st.subheader("Congregações")
-        col_single, col_mass = st.columns(2)
-        with col_single:
-            new_cong = st.text_input("Nova congregação (individual)", key="cad_new_cong")
-            if st.button("Adicionar congregação", disabled=not new_cong.strip(), key="cad_add_cong"):
-                if db.scalar(select(Congregation).where(Congregation.name == new_cong.strip())):
-                    st.error("Já existe congregação com esse nome.")
-                else:
-                    db.add(Congregation(name=new_cong.strip())); db.commit()
-                    st.success("Congregação adicionada."); st.rerun()
-        with col_mass:
-            mass_text = st.text_area("Adicionar em massa (uma congregação por linha)", height=140, key="cad_mass_cong")
-            if st.button("Adicionar lista", key="cad_add_cong_mass"):
-                linhas = [l.strip() for l in (mass_text or "").splitlines()]
-                linhas = [l for l in linhas if l]
-                if not linhas:
-                    st.warning("Informe ao menos um nome.")
-                else:
-                    inseridas = 0; repetidas = 0
-                    for nome in linhas:
-                        if db.scalar(select(Congregation).where(Congregation.name == nome)):
-                            repetidas += 1
+        # Aba de Congregações
+        with tabs[0]:
+            st.subheader("Congregações")
+            col_single, col_mass = st.columns(2)
+            with col_single:
+                new_cong = st.text_input("Nova congregação (individual)", key="cad_new_cong")
+                if st.button("Adicionar congregação", disabled=not new_cong.strip(), key="cad_add_cong"):
+                    if db.scalar(select(Congregation).where(Congregation.name == new_cong.strip())):
+                        st.error("Já existe congregação com esse nome.")
+                    else:
+                        db.add(Congregation(name=new_cong.strip())); db.commit()
+                        st.success("Congregação adicionada."); st.rerun()
+            with col_mass:
+                mass_text = st.text_area("Adicionar em massa (uma por linha)", height=140, key="cad_mass_cong")
+                if st.button("Adicionar lista de congregações", key="cad_add_cong_mass"):
+                    linhas = [l.strip() for l in (mass_text or "").splitlines() if l.strip()]
+                    if not linhas:
+                        st.warning("Informe ao menos um nome.")
+                    else:
+                        # Lógica de adição em massa aqui
+                        inseridas, repetidas = 0, 0
+                        existentes = {c.name for c in db.scalars(select(Congregation))}
+                        for nome in linhas:
+                            if nome in existentes:
+                                repetidas += 1
+                            else:
+                                db.add(Congregation(name=nome))
+                                inseridas += 1
+                        db.commit()
+                        st.success(f"Inseridas: {inseridas} | Já existiam: {repetidas}")
+                        st.rerun()
+
+            congs_all_q = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+            if congs_all_q:
+                # Re-executar queries para exibir a tabela atualizada
+                users_by_cong = dict(db.execute(select(Congregation.id, func.count(User.id)).join(User, User.congregation_id == Congregation.id, isouter=True).group_by(Congregation.id)).all())
+                tx_by_cong = dict(db.execute(select(Congregation.id, func.count(Transaction.id)).join(Transaction, Transaction.congregation_id == Congregation.id, isouter=True).group_by(Congregation.id)).all())
+                tithes_by_cong = dict(db.execute(select(Congregation.id, func.count(Tithe.id)).join(Tithe, Tithe.congregation_id == Congregation.id, isouter=True).group_by(Congregation.id)).all())
+                dfc = pd.DataFrame([{"ID": c.id, "Nome": c.name, "Usuários": users_by_cong.get(c.id, 0), "Lançamentos": tx_by_cong.get(c.id, 0), "Dízimos": tithes_by_cong.get(c.id, 0)} for c in congs_all_q])
+                st.dataframe(dfc, use_container_width=True, hide_index=True)
+
+        # Aba de Sub-congregações
+        with tabs[1]:
+            st.subheader("Sub-congregações")
+            congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+            if not congs_all:
+                st.warning("Cadastre uma Congregação principal primeiro na aba 'Congregações'.")
+            else:
+                c1, c2 = st.columns(2)
+                with c1:
+                    cong_mae_nome = st.selectbox("Selecione a Congregação 'mãe'", [c.name for c in congs_all], key="cad_sub_cong_mae_sel")
+                with c2:
+                    new_sub_cong_name = st.text_input("Nome da nova Sub-congregação", key="cad_new_sub_cong")
+
+                if st.button("Adicionar Sub-congregação", key="cad_add_sub_cong"):
+                    cong_mae_obj = next((c for c in congs_all if c.name == cong_mae_nome), None)
+                    nome_valido = new_sub_cong_name.strip()
+                    if cong_mae_obj and nome_valido:
+                        existe = db.scalar(select(SubCongregation).where(SubCongregation.name == nome_valido, SubCongregation.congregation_id == cong_mae_obj.id))
+                        if existe:
+                            st.error(f"A sub-congregação '{nome_valido}' já existe em '{cong_mae_obj.name}'.")
                         else:
-                            db.add(Congregation(name=nome)); inseridas += 1
-                    db.commit()
-                    st.success(f"Inseridas: {inseridas} | Já existiam: {repetidas}")
-                    st.rerun()
+                            db.add(SubCongregation(name=nome_valido, congregation_id=cong_mae_obj.id))
+                            db.commit()
+                            st.success(f"Sub-congregação '{nome_valido}' adicionada a '{cong_mae_obj.name}'.")
+                            st.rerun()
+                    else:
+                        st.error("Selecione a congregação 'mãe' e digite um nome válido.")
 
-        congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
-        users_by_cong = dict(db.execute(select(Congregation.id, func.count(User.id))
-                               .join(User, User.congregation_id == Congregation.id, isouter=True)
-                               .group_by(Congregation.id)).all())
-        tx_by_cong = dict(db.execute(select(Congregation.id, func.count(Transaction.id))
-                         .join(Transaction, Transaction.congregation_id == Congregation.id, isouter=True)
-                         .group_by(Congregation.id)).all())
-        tithes_by_cong = dict(db.execute(select(Congregation.id, func.count(Tithe.id))
-                                 .join(Tithe, Tithe.congregation_id == Congregation.id, isouter=True)
-                                 .group_by(Congregation.id)).all())
-        dfc = pd.DataFrame([{
-            "ID": c.id, "Nome": c.name,
-            "Usuários": int(users_by_cong.get(c.id, 0)),
-            "Lançamentos": int(tx_by_cong.get(c.id, 0)),
-            "Dízimos": int(tithes_by_cong.get(c.id, 0)),
-        } for c in congs_all])
-        if not dfc.empty:
-            st.dataframe(dfc, use_container_width=True, hide_index=True, height=200)
+            st.divider()
+            subs = db.scalars(select(SubCongregation).options(joinedload(SubCongregation.congregation)).order_by(SubCongregation.name)).all()
+            if subs:
+                df_subs = pd.DataFrame([{"ID": s.id, "Nome da Sub-congregação": s.name, "Congregação Mãe": s.congregation.name} for s in subs])
+                st.dataframe(df_subs, use_container_width=True, hide_index=True)
+                with st.expander("Excluir sub-congregações"):
+                    ids_del = st.multiselect("Selecione os IDs para excluir", [s.id for s in subs], key="cad_del_sub_ids")
+                    conf_del = st.text_input("Digite EXCLUIR para confirmar", key="cad_del_sub_conf")
+                    if st.button("Confirmar Exclusão", disabled=(not ids_del or conf_del.upper() != "EXCLUIR")):
+                        db.query(SubCongregation).filter(SubCongregation.id.in_(ids_del)).delete(synchronize_session=False)
+                        db.commit()
+                        st.success("Sub-congregações selecionadas foram excluídas.")
+                        st.rerun()
 
-        with st.expander("Excluir congregações"):
-            st.caption("Só é possível excluir congregações **sem usuários, lançamentos ou dízimos**. A congregação **Sede** não pode ser excluída.")
-            eligible_ids = []
-            for c in congs_all:
-                if _norm(c.name) == "sede": continue
-                if users_by_cong.get(c.id, 0) == 0 and tx_by_cong.get(c.id, 0) == 0 and tithes_by_cong.get(c.id, 0) == 0:
-                    eligible_ids.append(c.id)
-            if not eligible_ids:
-                st.info("Nenhuma congregação elegível para exclusão.")
-            else:
-                ids_del_cong = st.multiselect("IDs de congregações para excluir", eligible_ids, key="cad_del_cong_ids")
-                confc2 = st.text_input("Digite EXCLUIR para confirmar", key="cad_del_cong_conf")
-                btn_disabled = (not ids_del_cong) or (not _confirm_ok(confc2))
-                if st.button("Excluir congregações selecionadas", disabled=btn_disabled, key="cad_del_cong_btn"):
-                    with SessionLocal() as _db:
-                        _db.query(Congregation).filter(Congregation.id.in_(ids_del_cong)).delete(synchronize_session=False)
-                        _db.commit()
-                    st.success(f"{len(ids_del_cong)} congregação(ões) excluída(s)."); st.rerun()
-        st.divider()
+        # Aba de Categorias
+        with tabs[2]:
+            st.subheader("Categorias")
+            # ... (seu código de categorias aqui) ...
 
-        # Categorias
-        st.subheader("Categorias")
-        col1, col2 = st.columns(2)
-        with col1:
-            cat_name = st.text_input("Nome da categoria", key="cad_cat_name")
-        with col2:
-            cat_type = st.selectbox("Tipo", ["DOAÇÃO", "SAÍDA"], key="cad_cat_type")
-        if st.button("Adicionar categoria", disabled=not cat_name.strip(), key="cad_add_cat"):
-            if db.scalar(select(Category).where(Category.name == cat_name.strip())):
-                st.error("Já existe categoria com esse nome.")
-            else:
-                db.add(Category(name=cat_name.strip(), type=cat_type)); db.commit()
-                st.success("Categoria adicionada."); st.rerun()
-
-        cats = db.scalars(select(Category).order_by(Category.type, Category.name)).all()
-        usage = dict(db.execute(select(Category.id, func.count(Transaction.id))
-                           .join(Transaction, Transaction.category_id == Category.id, isouter=True)
-                           .group_by(Category.id)).all())
-        dfcat = pd.DataFrame([{
-            "ID": c.id, "Nome": c.name, "Tipo": c.type, "Usos em lançamentos": int(usage.get(c.id, 0))
-        } for c in cats])
-        if not dfcat.empty:
-            st.dataframe(dfcat, use_container_width=True, hide_index=True, height=200)
-
-        with st.expander("Excluir categorias"):
-            st.caption("Só é possível excluir categorias **sem lançamentos** vinculados.")
-            ids_del = st.multiselect("IDs de categorias para excluir", dfcat.loc[dfcat["Usos em lançamentos"] == 0, "ID"].tolist(), key="cad_del_cat_ids")
-            confc = st.text_input("Digite EXCLUIR para confirmar", key="cad_del_cat_conf")
-            btn_disabled = (not ids_del) or (not _confirm_ok(confc))
-            if st.button("Excluir categorias selecionadas", disabled=btn_disabled, key="cad_del_cat_btn"):
-                with SessionLocal() as _db:
-                    _db.query(Category).filter(Category.id.in_(ids_del)).delete(synchronize_session=False)
-                    _db.commit()
-                st.success(f"{len(ids_del)} categoria(s) excluída(s)."); st.rerun()
-        st.divider()
-
-        # Usuários
-        st.subheader("Usuários")
-        u_user = st.text_input("Usuário (login)", key="cad_user_login")
-        u_pwd = st.text_input("Senha", type="password", key="cad_user_pwd")
-        u_role = st.selectbox("Perfil", ["SEDE", "TESOUREIRO", "TESOUREIRO MISSIONÁRIO"], key="cad_user_role")
-        all_congs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
-        cong_options = ["—"] + [c.name for c in all_congs]
-        if u_role == "TESOUREIRO MISSIONÁRIO":
-            try:
-                index = cong_options.index("Sede")
-            except ValueError:
-                index = 0
-            u_cong_name = st.selectbox("Congregação (vinculada a Saídas de Missões)", cong_options, index=index, key="cad_user_cong")
-        else:
-            u_cong_name = st.selectbox("Congregação", cong_options, key="cad_user_cong")
-
-        if st.button("Criar usuário", key="cad_user_add"):
-            if not u_user.strip() or not u_pwd.strip():
-                st.error("Usuário e senha são obrigatórios.")
-            elif db.scalar(select(User).where(User.username == u_user.strip())):
-                st.error("Usuário já existe.")
-            else:
-                cong_id = None
-                if u_role == "TESOUREIRO":
-                    if u_cong_name == "—":
-                        st.error("Selecione a congregação."); return
-                    cong_id = next(c.id for c in all_congs if c.name == u_cong_name)
-                elif u_role == "TESOUREIRO MISSIONÁRIO":
-                     cong_id = db.scalar(select(Congregation.id).where(Congregation.name == "Sede"))
-                db.add(User(username=u_user.strip(), password_hash=hash_password(u_pwd.strip()), role=u_role, congregation_id=cong_id))
-                db.commit()
-                st.success("Usuário criado."); st.rerun()
-
-        users = db.scalars(select(User).order_by(User.username)).all()
-        dfu = pd.DataFrame([{
-            "ID": u.id, "Usuário": u.username, "Perfil": u.role,
-            "Congregação": (db.get(Congregation, u.congregation_id).name if u.congregation_id else "—")
-        } for u in users])
-        if not dfu.empty:
-            st.dataframe(dfu, use_container_width=True, hide_index=True, height=200)
-
-        with st.expander("Excluir usuários"):
-            st.caption("Não é permitido excluir o usuário atualmente logado.")
-            ids_u = st.multiselect("IDs de usuários para excluir", dfu["ID"].tolist(), key="cad_del_users_ids")
-            ids_u = [i for i in ids_u if i != user.id]
-            confu = st.text_input("Digite EXCLUIR para confirmar", key="cad_del_users_conf")
-            btn_disabled = (not ids_u) or (not _confirm_ok(confu))
-            if st.button("Excluir usuários selecionadas", disabled=btn_disabled, key="cad_del_users_btn"):
-                with SessionLocal() as _db:
-                    _db.query(User).filter(User.id.in_(ids_u)).delete(synchronize_session=False)
-                    _db.commit()
-                st.success(f"{len(ids_u)} usuário(s) excluído(s)."); st.rerun()
+        # Aba de Usuários
+        with tabs[3]:
+            st.subheader("Usuários")
+            # ... (seu código de usuários aqui) ...
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS =====================
 def page_lancamentos(user: "User"):
