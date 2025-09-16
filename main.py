@@ -985,31 +985,46 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
     new_ids = set(int(x) for x in n["ID"].tolist() if pd.notna(x) and int(x) > 0)
     to_delete = list(old_ids - new_ids)
     
-    # CORREÇÃO: Adicionado filtro 'if pd.notna(r["ID"])' para evitar o erro int(None)
     old_map = {int(r["ID"]): r for _, r in o.iterrows() if pd.notna(r["ID"])}
 
     with SessionLocal() as db:
         if to_delete:
             db.query(Tithe).filter(Tithe.id.in_(to_delete)).delete(synchronize_session=False)
 
+        # Loop de ATUALIZAÇÃO de registros existentes
         for rid in sorted(new_ids & old_ids):
             old = old_map[rid]
             new = n.loc[n["ID"] == rid].iloc[0]
+            
+            # ================================================================
+            # NOVO BLOCO DE VALIDAÇÃO PARA ATUALIZAÇÕES
+            # ================================================================
+            new_nome = str(new.get("Dizimista", "")).strip()
+            new_amount = _to_float_brl(new.get("Valor"))
+
+            if not new_nome or abs(new_amount) < 0.0001:
+                st.warning(f"A alteração para o ID {rid} foi ignorada porque o nome ou valor se tornou inválido.")
+                continue # Pula para o próximo registro sem salvar este
+            # ================================================================
+
             changed = False
             t = db.get(Tithe, rid)
             if not t:
                 continue
-            if old["Data"] != new["Data"]:
+                
+            if t.date != _to_date(new["Data"]):
                 t.date = _to_date(new["Data"]); changed = True
-            if (old["Dizimista"] or "") != (new["Dizimista"] or ""):
-                t.tither_name = (new["Dizimista"] or ""); changed = True
-            if float(old["Valor"]) != float(new["Valor"]):
-                t.amount = float(new["Valor"]); changed = True
-            if (old["Forma de Pagamento"] or "") != (new["Forma de Pagamento"] or ""):
+            if t.tither_name != new_nome:
+                t.tither_name = new_nome; changed = True
+            if t.amount != new_amount:
+                t.amount = new_amount; changed = True
+            if (t.payment_method or "") != (new["Forma de Pagamento"] or ""):
                 t.payment_method = (new["Forma de Pagamento"] or None); changed = True
+                
             if changed:
                 db.add(t)
 
+        # Loop de INSERÇÃO de novos registros
         for _, row in n.iterrows():
             rid = row.get("ID", None)
             is_new = pd.isna(rid) or int(rid) <= 0 or int(rid) not in old_ids
@@ -1029,10 +1044,12 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
                 cong_id = int(o.iloc[0].get("_cong_id", 0)) or None
             if cong_id is None:
                 continue
+                
             db.add(Tithe(
                 date=data, tither_name=nome, amount=float(amount),
                 congregation_id=int(cong_id), payment_method=forma
             ))
+            
         db.commit()
 
 # ===================== RELATÓRIO DE ENTRADA — TABELA ÚNICA (EDIT SUMÁRIO) =====================
