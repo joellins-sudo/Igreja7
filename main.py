@@ -740,11 +740,10 @@ def order_congs_sede_first(congs: List[Congregation]) -> List[Congregation]:
 
 def sidebar_common(user: "User") -> str:
     """
-    Desenha o menu lateral e retorna a página selecionada, forçando a leitura
-    do estado da sessão para garantir a navegação.
+    Desenha o menu lateral e retorna a página selecionada.
     """
     
-    # 1. Definições de Menu (Mantidas)
+    # 1. Definições de Menu
     MENU_PAGES = {
         "Lançamentos": "📥", "Relatório de Entrada": "📊", "Relatório de Saída": "📉",
         "Relatório de Missões": "🌍", "Relatório de Dizimistas": "🧾", "Visão Geral": "🏁",
@@ -765,8 +764,7 @@ def sidebar_common(user: "User") -> str:
     label_to_page = {label: page for label, page in zip(menu_labels_pretty, menu_options_plain)}
 
     # 2. Determina o índice padrão para o st.radio
-    # A chave é o nome que a variável de sessão de navegação terá.
-    session_key = "main_menu_page" 
+    session_key = "main_menu_page"  
     current_page_name = st.session_state.get(session_key, "Visão Geral")
     
     try:
@@ -775,7 +773,7 @@ def sidebar_common(user: "User") -> str:
         default_index = 0 # Fallback se a página salva não estiver mais disponível
 
     with st.sidebar:
-        # Identidade e Logo (Mantidos)
+        # Identidade e Logo
         try:
             if os.path.exists(LOGO_PATH):
                 st.image(LOGO_PATH, use_column_width=True)
@@ -788,19 +786,20 @@ def sidebar_common(user: "User") -> str:
             "Menu",
             options=menu_labels_pretty,
             index=default_index,
-            # Usamos uma chave simples e única que não deve causar problemas de duplicação
-            key=session_key, 
+            key=session_key,  # O widget usa a chave e atualiza o estado automaticamente
             label_visibility="visible",
         )
 
-        # 4. Salva o valor da página selecionada
+        # 4. Converte o label selecionado de volta para o nome da página
         page = label_to_page.get(sel_label, "Visão Geral")
-        st.session_state[session_key] = page
+        
+        # A LINHA ABAIXO FOI REMOVIDA, POIS CAUSAVA O ERRO
+        # st.session_state[session_key] = page 
         
         st.divider()
         if st.button("Sair", key=f"btn_logout_{getattr(user, 'id', 'anon')}"):
             logout()
-            st.rerun() 
+            st.rerun()  
 
     return page
 
