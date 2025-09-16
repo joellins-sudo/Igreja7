@@ -1188,6 +1188,7 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
                                        congregation_id=cong_id))
         db.commit()
 
+
 # ===================== EDITORES INLINE REUTILIZÁVEIS (com botão Salvar) =====================
 # ===== EDITOR DE LANÇAMENTOS (com force_cong_id e linha vazia) =====
 # ===== EDITOR DE LANÇAMENTOS (com total abaixo da tabela) =====
@@ -1804,7 +1805,7 @@ def page_lancamentos(user: "User"):
 
             # -------- TABELA 1: Agregado Diário (Dízimo + Oferta) --------
             st.info(f"Escopo: **{cong_obj.name}** — edite as linhas abaixo. O campo **Total** é calculado.")
-           # ==== RESUMO ENTRADA (D+O) — CÁLCULO E SALVAMENTO ====
+            # ==== RESUMO ENTRADA (D+O) — CÁLCULO E SALVAMENTO ====
 
 def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date) -> pd.DataFrame:
     # [EQ FIX]: separar somatórios de Dízimo (tithes) e Dízimo (transactions), e usar o MAIOR por data.
