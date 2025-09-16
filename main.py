@@ -2798,6 +2798,7 @@ def page_cadastro(user: "User"):
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS =====================
+# ===================== PAGE: LANÇAMENTOS =====================
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -2818,106 +2819,92 @@ def page_lancamentos(user: "User"):
 
         st.markdown(f"### CONGREGAÇÃO: {cong_obj.name.upper()}", unsafe_allow_html=True)
 
-        # 2. Carregar as Sub-congregações da Congregação selecionada
-        sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong_obj.id).order_by(SubCongregation.name)).all()
-        sub_cong_options = {s.name: s.id for s in sub_congs}
-        opcoes_dropdown = ["Lançamento na Principal"] + list(sub_cong_options.keys())
+        # ===== SELETOR DE MODO RESTAURADO =====
+        modo = st.radio(
+            "Modo de lançamento:",
+            ["Formulário único", "Editar direto na tabela"],
+            horizontal=True,
+            key="lan_modo_sel",
+        )
+        st.divider()
 
-        # ===================== FORMULÁRIOS ÚNICOS =====================
-        # O modo "Editar direto na tabela" ainda não suportará sub-congregações.
-        
-        # Formulário de ENTRADA
-        with st.expander("➕ Lançar ENTRADA (Dízimo, Oferta, etc.)", expanded=True):
-            with st.form("form_entrada"):
-                cats_in = [c for c in categories_for_type(db, TYPE_IN) if "ajuste" not in _norm(c.name)]
-                
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    ent_data = st.date_input("Data da Entrada", value=today_bahia(), key="ent_data", format="DD/MM/YYYY")
-                with c2:
-                    ent_cat_name = st.selectbox("Categoria da Entrada", [c.name for c in cats_in] or ["—"], key="ent_cat")
-                with c3:
-                    ent_sub_cong_name = st.selectbox("Lançar em:", opcoes_dropdown, key="ent_sub_cong")
+        # --- MODO 1: FORMULÁRIO ÚNICO (COM SUB-CONGREGAÇÕES) ---
+        if modo == "Formulário único":
+            sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong_obj.id).order_by(SubCongregation.name)).all()
+            sub_cong_options = {s.name: s.id for s in sub_congs}
+            opcoes_dropdown = ["Lançamento na Principal"] + list(sub_cong_options.keys())
 
-                ent_desc = st.text_input("Descrição (opcional)", key="ent_desc", placeholder="Ex: Oferta de missões")
-                ent_valor = st.number_input("Valor da Entrada (R$)", min_value=0.01, step=1.0, format="%.2f", key="ent_valor")
+            with st.expander("➕ Lançar ENTRADA (Dízimo, Oferta, etc.)", expanded=True):
+                with st.form("form_entrada"):
+                    cats_in = [c for c in categories_for_type(db, TYPE_IN) if "ajuste" not in _norm(c.name)]
+                    c1, c2, c3 = st.columns(3)
+                    with c1: ent_data = st.date_input("Data da Entrada", value=today_bahia(), key="ent_data")
+                    with c2: ent_cat_name = st.selectbox("Categoria", [c.name for c in cats_in] or ["—"], key="ent_cat")
+                    with c3: ent_sub_cong_name = st.selectbox("Lançar em:", opcoes_dropdown, key="ent_sub_cong")
+                    ent_desc = st.text_input("Descrição (opcional)", key="ent_desc")
+                    ent_valor = st.number_input("Valor (R$)", min_value=0.01, format="%.2f", key="ent_valor")
+                    if st.form_submit_button("Salvar ENTRADA", type="primary"):
+                        sub_cong_id = sub_cong_options.get(ent_sub_cong_name)
+                        cat_obj = next((c for c in cats_in if c.name == ent_cat_name), None)
+                        if ent_valor and cat_obj:
+                            db.add(Transaction(date=ent_data, type=TYPE_IN, category_id=cat_obj.id, amount=ent_valor, description=(ent_desc or None), congregation_id=cong_obj.id, sub_congregation_id=sub_cong_id))
+                            db.commit(); st.success("Entrada registrada!"); st.rerun()
+                        else: st.error("Preencha categoria e valor.")
 
-                if st.form_submit_button("Salvar ENTRADA", type="primary"):
-                    sub_cong_id = sub_cong_options.get(ent_sub_cong_name) # Será None se "Lançamento na Principal"
-                    cat_obj = next((c for c in cats_in if c.name == ent_cat_name), None)
+            with st.expander("👤 Lançar DÍZIMO (Nominal)"):
+                with st.form("form_dizimo"):
+                    c1, c2 = st.columns(2)
+                    with c1: dz_data = st.date_input("Data do Dízimo", value=today_bahia(), key="dz_data")
+                    with c2: dz_sub_cong_name = st.selectbox("Lançar em:", opcoes_dropdown, key="dz_sub_cong")
+                    dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
+                    dz_valor = st.number_input("Valor (R$)", min_value=0.01, format="%.2f", key="dz_valor")
+                    dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência"], key="dz_pay")
+                    if st.form_submit_button("Salvar DIZIMISTA", type="primary"):
+                        sub_cong_id = sub_cong_options.get(dz_sub_cong_name)
+                        if dz_valor and dz_nome.strip():
+                            db.add(Tithe(date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor, congregation_id=cong_obj.id, sub_congregation_id=sub_cong_id, payment_method=dz_payment))
+                            db.commit(); st.success("Dízimo registrado!"); st.rerun()
+                        else: st.error("Preencha nome e valor.")
 
-                    if ent_valor and cat_obj:
-                        db.add(Transaction(
-                            date=ent_data, type=TYPE_IN, category_id=cat_obj.id,
-                            amount=ent_valor, description=(ent_desc or None),
-                            congregation_id=cong_obj.id,
-                            sub_congregation_id=sub_cong_id
-                        ))
-                        db.commit()
-                        st.success("Entrada registrada com sucesso!")
-                        st.rerun()
-                    else:
-                        st.error("Preencha a categoria e um valor maior que zero.")
+            with st.expander("➖ Lançar SAÍDA"):
+                with st.form("form_saida"):
+                    cats_out = categories_for_type(db, TYPE_OUT)
+                    c1, c2, c3 = st.columns(3)
+                    with c1: sai_data = st.date_input("Data da Saída", value=today_bahia(), key="sai_data")
+                    with c2: sai_cat_name = st.selectbox("Categoria", [c.name for c in cats_out] or ["—"], key="sai_cat")
+                    with c3: sai_sub_cong_name = st.selectbox("Lançar em:", opcoes_dropdown, key="sai_sub_cong")
+                    sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
+                    sai_valor = st.number_input("Valor (R$)", min_value=0.01, format="%.2f", key="sai_valor")
+                    if st.form_submit_button("Salvar SAÍDA", type="primary"):
+                        sub_cong_id = sub_cong_options.get(sai_sub_cong_name)
+                        cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
+                        if sai_valor and cat_obj:
+                            db.add(Transaction(date=sai_data, type=TYPE_OUT, category_id=cat_obj.id, amount=sai_valor, description=(sai_desc or None), congregation_id=cong_obj.id, sub_congregation_id=sub_cong_id))
+                            db.commit(); st.success("Saída registrada!"); st.rerun()
+                        else: st.error("Preencha categoria e valor.")
 
-        # Formulário de DIZIMISTA
-        with st.expander("👤 Lançar DÍZIMO (Nominal)"):
-            with st.form("form_dizimo"):
-                c1, c2 = st.columns(2)
-                with c1:
-                    dz_data = st.date_input("Data do Dízimo", value=today_bahia(), key="dz_data", format="DD/MM/YYYY")
-                with c2:
-                    dz_sub_cong_name = st.selectbox("Lançar em:", opcoes_dropdown, key="dz_sub_cong")
+        # --- MODO 2: EDITAR DIRETO NA TABELA (COMO ERA ANTES) ---
+        elif modo == "Editar direto na tabela":
+            st.info("A edição em tabela se aplica apenas à congregação principal, não às sub-congregações.")
+            ref_tab = get_month_selector("Mês de referência da tabela")
+            start_tab, end_tab = month_bounds(ref_tab)
+            
+            # Tabela de Entradas
+            st.markdown("##### Entradas (Dízimo e Oferta)")
+            df = _entrada_summary_df(db, cong_obj.id, start_tab, end_tab)
+            edited_tab = st.data_editor(df, use_container_width=True, hide_index=True, num_rows="dynamic", column_config={"Data do Culto": st.column_config.DateColumn("Data", format="DD/MM/YYYY"), "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", format="R$ %.2f"), "Oferta": st.column_config.NumberColumn("Oferta (R$)", format="R$ %.2f"), "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f")}, key=f"lan_tab_editor_{cong_obj.id}")
+            # ... (código dos totais da tabela de entradas) ...
+            _save_btn(lambda: _apply_entrada_summary_changes(cong_obj.id, start_tab, end_tab, edited_tab), f"lan_tab_{cong_obj.id}", "entrada")
 
-                dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
-                dz_valor = st.number_input("Valor do Dízimo (R$)", min_value=0.01, step=1.0, format="%.2f", key="dz_valor")
-                dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência", "Outro"], key="dz_payment_method")
+            st.markdown("---")
+            # Tabela de Dizimistas
+            tithes = db.scalars(select(Tithe).where(Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.congregation_id == cong_obj.id, Tithe.sub_congregation_id == None).order_by(Tithe.date)).all()
+            _editor_dizimos(tithes, "Dizimistas do período (Congregação Principal)", force_cong_id=cong_obj.id)
 
-                if st.form_submit_button("Salvar DIZIMISTA", type="primary"):
-                    sub_cong_id = sub_cong_options.get(dz_sub_cong_name)
-                    if dz_valor and dz_nome.strip():
-                        db.add(Tithe(
-                            date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor,
-                            congregation_id=cong_obj.id,
-                            sub_congregation_id=sub_cong_id,
-                            payment_method=dz_payment
-                        ))
-                        db.commit()
-                        st.success(f"Dízimo de {dz_nome.strip()} registrado!")
-                        st.rerun()
-                    else:
-                        st.error("Preencha o nome do dizimista e um valor maior que zero.")
-
-        # Formulário de SAÍDA
-        with st.expander("➖ Lançar SAÍDA"):
-            with st.form("form_saida"):
-                cats_out = categories_for_type(db, TYPE_OUT)
-                
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    sai_data = st.date_input("Data da Saída", value=today_bahia(), key="sai_data", format="DD/MM/YYYY")
-                with c2:
-                    sai_cat_name = st.selectbox("Categoria da Saída", [c.name for c in cats_out] or ["—"], key="sai_cat")
-                with c3:
-                    sai_sub_cong_name = st.selectbox("Lançar em:", opcoes_dropdown, key="sai_sub_cong")
-
-                sai_desc = st.text_input("Descrição da Saída (opcional)", key="sai_desc", placeholder="Ex: Compra de material de limpeza")
-                sai_valor = st.number_input("Valor da Saída (R$)", min_value=0.01, step=1.0, format="%.2f", key="sai_valor")
-
-                if st.form_submit_button("Salvar SAÍDA", type="primary"):
-                    sub_cong_id = sub_cong_options.get(sai_sub_cong_name)
-                    cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
-                    if sai_valor and cat_obj:
-                        db.add(Transaction(
-                            date=sai_data, type=TYPE_OUT, category_id=cat_obj.id,
-                            amount=sai_valor, description=(sai_desc or None),
-                            congregation_id=cong_obj.id,
-                            sub_congregation_id=sub_cong_id
-                        ))
-                        db.commit()
-                        st.success("Saída registrada com sucesso!")
-                        st.rerun()
-                    else:
-                        st.error("Preencha a categoria e um valor maior que zero.")
+            st.markdown("---")
+            # Tabela de Saídas
+            txs_out = db.scalars(select(Transaction).options(joinedload(Transaction.category)).where(Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_OUT, Transaction.congregation_id == cong_obj.id, Transaction.sub_congregation_id == None)).all()
+            _editor_lancamentos(txs_out, "Saídas do período (Congregação Principal)", tx_type_hint=TYPE_OUT, force_cong_id=cong_obj.id)
 
                     # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
