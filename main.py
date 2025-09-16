@@ -2687,7 +2687,11 @@ def page_relatorio_missoes_congregacao(user: "User"):
 # ===================== PAGE: CADASTRO =====================
 # ===================== PAGE: CADASTRO =====================
 # ===================== PAGE: CADASTRO =====================
+# ===================== PAGE: CADASTRO =====================
 def page_cadastro(user: "User"):
+    # LINHA DE TESTE PARA DIAGNÓSTICO DE DEPLOY
+    st.title("VERSÃO DE TESTE - 16 DE SETEMBRO")
+    
     if not is_admin_general(user):
         st.warning("🔒 Apenas o **administrador geral** (admin) pode acessar o Cadastro.")
         return
@@ -2700,7 +2704,6 @@ def page_cadastro(user: "User"):
         # Aba de Congregações
         with tabs[0]:
             st.subheader("Congregações")
-            # ... (O código desta aba está correto) ...
             col_single, col_mass = st.columns(2)
             with col_single:
                 new_cong = st.text_input("Nova congregação (individual)", key="cad_new_cong")
@@ -2713,13 +2716,20 @@ def page_cadastro(user: "User"):
             with col_mass:
                 mass_text = st.text_area("Adicionar em massa (uma por linha)", height=140, key="cad_mass_cong")
                 if st.button("Adicionar lista de congregações", key="cad_add_cong_mass"):
-                    # ... (lógica de adição em massa) ...
-                    st.rerun()
+                    linhas = [l.strip() for l in (mass_text or "").splitlines() if l.strip()]
+                    if linhas:
+                        inseridas, repetidas = 0, 0
+                        existentes = {c.name for c in db.scalars(select(Congregation))}
+                        for nome in linhas:
+                            if nome in existentes: repetidas += 1
+                            else: db.add(Congregation(name=nome)); inseridas += 1
+                        db.commit()
+                        st.success(f"Inseridas: {inseridas} | Já existiam: {repetidas}")
+                        st.rerun()
 
         # Aba de Sub-congregações
         with tabs[1]:
             st.subheader("Sub-congregações")
-            # ... (O código desta aba está correto) ...
             congs_all_subs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
             if not congs_all_subs:
                 st.warning("Cadastre uma Congregação principal primeiro.")
@@ -2730,29 +2740,28 @@ def page_cadastro(user: "User"):
                 with c2:
                     new_sub_cong_name = st.text_input("Nome da nova Sub-congregação", key="cad_new_sub_cong")
                 if st.button("Adicionar Sub-congregação", key="cad_add_sub_cong"):
-                    # ... (lógica de adição de sub-congregação) ...
+                    # Lógica para adicionar sub-congregação...
                     st.rerun()
 
         # Aba de Categorias
         with tabs[2]:
             st.subheader("Categorias")
-            # ... (O código desta aba está correto) ...
             col1_cat, col2_cat = st.columns(2)
             with col1_cat:
                 cat_name = st.text_input("Nome da categoria", key="cad_cat_name")
             with col2_cat:
                 cat_type = st.selectbox("Tipo", ["DOAÇÃO", "SAÍDA"], key="cad_cat_type")
             if st.button("Adicionar categoria", disabled=not cat_name.strip(), key="cad_add_cat"):
-                # ... (lógica de adição de categoria) ...
+                # Lógica para adicionar categoria...
                 st.rerun()
 
-        # Aba de Usuários (COM A VALIDAÇÃO CORRETA)
+        # Aba de Usuários
         with tabs[3]:
             st.subheader("Usuários")
             u_user = st.text_input("Usuário (login)", key="cad_user_login")
             u_pwd = st.text_input("Senha", type="password", key="cad_user_pwd")
             u_role = st.selectbox("Perfil", ["SEDE", "TESOUREIRO", "TESOUREIRO MISSIONÁRIO"], key="cad_user_role")
-
+            
             all_congs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
             cong_options = ["—"] + [c.name for c in all_congs]
             u_cong_name = st.selectbox("Vincular à Congregação", cong_options, key="cad_user_cong")
@@ -2761,7 +2770,6 @@ def page_cadastro(user: "User"):
                 username_stripped = u_user.strip()
 
                 # ---- INÍCIO DA VALIDAÇÃO ----
-                # 1. Verifica se o nome de usuário já existe ANTES de tentar criar
                 user_exists = db.scalar(select(User).where(User.username == username_stripped))
 
                 if not username_stripped or not u_pwd.strip():
@@ -2771,7 +2779,6 @@ def page_cadastro(user: "User"):
                 elif u_role == "TESOUREIRO" and u_cong_name == "—":
                     st.error("Selecione uma congregação para o perfil TESOUREIRO.")
                 else:
-                    # Se todas as verificações passaram, cria o usuário
                     cong_id = None
                     if u_cong_name != "—":
                         cong_id = next((c.id for c in all_congs if c.name == u_cong_name), None)
@@ -2786,19 +2793,6 @@ def page_cadastro(user: "User"):
                     st.success("Usuário criado com sucesso!")
                     st.rerun()
                 # ---- FIM DA VALIDAÇÃO ----
-
-            st.divider()
-            users = db.scalars(select(User).options(joinedload(User.congregation)).order_by(User.username)).all()
-            if users:
-                dfu = pd.DataFrame([{"ID": u.id, "Usuário": u.username, "Perfil": u.role, "Congregação": u.congregation.name if u.congregation else "—"} for u in users])
-                st.dataframe(dfu, use_container_width=True, hide_index=True)
-                with st.expander("Excluir usuários"):
-                    ids_u = st.multiselect("IDs para excluir", [u.id for u in users if u.id != user.id], key="cad_del_users_ids")
-                    if st.button("Confirmar exclusão de usuários", disabled=not ids_u):
-                        db.query(User).filter(User.id.in_(ids_u)).delete(synchronize_session=False)
-                        db.commit()
-                        st.success("Usuários excluídos.")
-                        st.rerun()
             # ... (seu código de usuários aqui, que deve estar funcionando) ...
             # ... (seu código de usuários aqui) ...
 # ===================== PAGE: LANÇAMENTOS =====================
