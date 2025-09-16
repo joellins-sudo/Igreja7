@@ -414,10 +414,11 @@ def _to_float_brl(x: Any) -> float:
 class Base(DeclarativeBase):
     pass
 
-from sqlalchemy.orm import relationship, Mapped, mapped_column
+# Dica: garanta que este bloco aparece UMA única vez no arquivo.
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = {"extend_existing": True}
     __allow_unmapped__ = True
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -426,7 +427,6 @@ class User(Base):
     role: Mapped[str] = mapped_column(String)  # 'SEDE', 'TESOUREIRO', 'TESOUREIRO MISSIONÁRIO'
     congregation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("congregations.id"), nullable=True)
 
-    # use o nome da classe como string para evitar problemas de forward ref
     congregation: Mapped[Optional["Congregation"]] = relationship(
         "Congregation", back_populates="users"
     )
@@ -434,6 +434,7 @@ class User(Base):
 
 class Congregation(Base):
     __tablename__ = "congregations"
+    __table_args__ = {"extend_existing": True}
     __allow_unmapped__ = True
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -452,6 +453,7 @@ class Congregation(Base):
 
 class Category(Base):
     __tablename__ = "categories"
+    __table_args__ = {"extend_existing": True}
     __allow_unmapped__ = True
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -465,6 +467,7 @@ class Category(Base):
 
 class Transaction(Base):
     __tablename__ = "transactions"
+    __table_args__ = {"extend_existing": True}
     __allow_unmapped__ = True
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -486,6 +489,7 @@ class Transaction(Base):
 
 class Tithe(Base):
     __tablename__ = "tithes"
+    __table_args__ = {"extend_existing": True}
     __allow_unmapped__ = True
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -498,16 +502,6 @@ class Tithe(Base):
     congregation: Mapped["Congregation"] = relationship(
         "Congregation", back_populates="tithes"
     )
-
-class Tithe(Base):
-    __tablename__ = "tithes"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    date: Mapped[date] = mapped_column(Date)
-    tither_name: Mapped[str] = mapped_column(String)
-    amount: Mapped[float] = mapped_column(Float)
-    congregation_id: Mapped[int] = mapped_column(ForeignKey("congregations.id"))
-    payment_method: Mapped[Optional[str]] = mapped_column(String, default=None)
-    congregation: Mapped["Congregation"] = relationship(back_populates="tithes")
 
 # ===================== ENGINE / SESSION =====================
 @st.cache_resource
