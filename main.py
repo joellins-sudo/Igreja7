@@ -2511,18 +2511,6 @@ def render_current_page(user: "User"):
 
     pages.get(page, page_menu)(user)
 
-
-def main():
-    ensure_seed()
-    user = current_user()
-    if not user:
-        login_ui(); return
-    st.session_state.setdefault("main_menu_page", "Menu")
-    render_current_page(user)
-
-if __name__ == "__main__":
-    main()
-
 # ===================== PAGE: VISÃO GERAL =====================
 def page_visao_geral(user: "User"):
     ensure_seed()
