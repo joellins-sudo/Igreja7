@@ -1976,16 +1976,13 @@ if ok_submit:
                 _db.add(Transaction(
                     date=data_to_save["date"], type=TYPE_IN, category_id=cat_obj.id,
                     amount=data_to_save["amount"], description=data_to_save["description"],
-                    congregation_id=cong_obj.id, # cong_obj está definido no escopo de page_lancamentos
+                    congregation_id=cong_obj.id, 
                     payment_method=None
                 ))
                 _db.commit()
                 st.success("Entrada registrada.")
     
-    st.rerun() # <--- ADICIONE ESTA LINHA
-
-st.markdown('</div>', unsafe_allow_html=True)
-st.markdown("---")
+    st.rerun()
 
         # ===================== FORMULÁRIOS ÚNICOS (Dizimista) =====================
 # ===================== FORMULÁRIOS ÚNICOS (Dizimista) =====================
@@ -2023,13 +2020,13 @@ if ok_submit:
         with SessionLocal() as _db:
             _db.add(Tithe(
                 date=data, tither_name=nome, amount=valor,
-                congregation_id=cong_obj.id, # cong_obj está definido no escopo de page_lancamentos
+                congregation_id=cong_obj.id, 
                 payment_method=forma
             ))
             _db.commit()
             st.success("Dízimo registrado.")
     
-    st.rerun() # <--- ADICIONE ESTA LINHA
+    st.rerun()
 
         # ===================== FORMULÁRIOS ÚNICOS (Saída) =====================
 # ===================== FORMULÁRIOS ÚNICOS (Saída) =====================
@@ -2075,12 +2072,12 @@ if ok_submit:
             _db.add(Transaction(
                 date=data, type=TYPE_OUT, category_id=cat_obj.id,
                 amount=valor, description=(desc or None),
-                congregation_id=cong_obj.id, # cong_obj está definido no escopo de page_lancamentos
+                congregation_id=cong_obj.id, 
             ))
             _db.commit()
             st.success("Saída registrada.")
     
-    st.rerun() # <--- ADICIONE ESTA LINHA
+    st.rerun()
 
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 def page_relatorio_entrada(user: "User"):
