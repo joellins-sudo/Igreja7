@@ -1104,11 +1104,23 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
 
         baseline = current_sums()
         edited = edited_df.copy()
-        edited["Data do Culto"] = edited["Data do Culto"].map(_to_date)
+        
+        # --- CORREÇÃO: Pega a data de forma segura e ignora linhas sem data válida ---
+        edited["Data do Culto"] = edited["Data do Culto"].map(lambda x: _to_date(x) if pd.notna(x) else None)
+        edited = edited.dropna(subset=["Data do Culto"])
+        # --- FIM CORREÇÃO ---
+        
         wanted = {r["Data do Culto"]: (float(_to_float_brl(r["Dízimo"])), float(_to_float_brl(r["Oferta"]))) for _, r in edited.iterrows()}
 
+        # Adiciona as datas que já existiam, mas foram apagadas no editor
         all_dates = sorted(set(list(baseline.keys()) + list(wanted.keys())))
+        
         for d in all_dates:
+            # CORREÇÃO: Adicionamos um check aqui também, caso o filtro acima tenha falhado por algum motivo, 
+            # garantindo que só trabalhamos com datas válidas.
+            if d is None:
+                continue 
+            
             cur_dz, cur_of = baseline.get(d, (0.0, 0.0))
             want_dz, want_of = wanted.get(d, (0.0, 0.0))
 
@@ -1119,6 +1131,7 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
             ) or 0.0)
             sum_dz_tx_no_adj = float(db.scalar(
                 select(func.coalesce(func.sum(Transaction.amount), 0.0))
+                .join(Category, Transaction.category_id == Category.id)
                 .where(and_(
                     Transaction.congregation_id == cong_id,
                     Transaction.date == d,
@@ -1154,6 +1167,7 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
                 func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC
             ))
 
+            # CORREÇÃO: Somente adiciona/atualiza o ajuste se ele for significativo (> 0.0001)
             if abs(adj_dz_new) < 0.0001:
                 if adj_dz: db.delete(adj_dz)
             else:
@@ -1163,6 +1177,7 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
                                        amount=float(adj_dz_new), description=ADJ_ENTRY_DESC,
                                        congregation_id=cong_id))
 
+            # CORREÇÃO: Somente adiciona/atualiza o ajuste se ele for significativo (> 0.0001)
             if abs(adj_of_new) < 0.0001:
                 if adj_of: db.delete(adj_of)
             else:
