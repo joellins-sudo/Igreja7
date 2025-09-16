@@ -1967,7 +1967,6 @@ if ok_submit:
     if data_to_save["amount"] <= 0.0 or not cat_name:
         st.error("Informe a **categoria** e um **valor positivo**.")
     else:
-        # --- CORREÇÃO: Usa SessionLocal() para acesso ao banco ---
         with SessionLocal() as _db:
             if st.session_state.get("ent_flag_missoes") and not _db.scalar(select(Category).where(Category.name == "Missões")):
                 _db.add(Category(name="Missões", type=TYPE_IN)); _db.commit()
@@ -1984,6 +1983,8 @@ if ok_submit:
                 ))
                 _db.commit()
                 st.success("Entrada registrada.")
+    
+    st.rerun() # <--- ADICIONE ESTA LINHA
 
 st.markdown('</div>', unsafe_allow_html=True)
 st.markdown("---")
@@ -2021,7 +2022,6 @@ if ok_submit:
     if not nome or valor <= 0.0:
         st.error("Informe o **nome** do dizimista e um **valor positivo**.")
     else:
-        # --- CORREÇÃO: Usa SessionLocal() para acesso ao banco ---
         with SessionLocal() as _db:
             _db.add(Tithe(
                 date=data, tither_name=nome, amount=valor,
@@ -2030,8 +2030,8 @@ if ok_submit:
             ))
             _db.commit()
             st.success("Dízimo registrado.")
-st.markdown('</div>', unsafe_allow_html=True)
-st.markdown("---")
+    
+    st.rerun() # <--- ADICIONE ESTA LINHA
 
         # ===================== FORMULÁRIOS ÚNICOS (Saída) =====================
 # ===================== FORMULÁRIOS ÚNICOS (Saída) =====================
@@ -2069,7 +2069,6 @@ if ok_submit:
     cat_nome = st.session_state.get("sai_cat")
     desc = st.session_state.get("sai_desc")
     
-    # --- CORREÇÃO: Usa SessionLocal() para acesso ao banco ---
     with SessionLocal() as _db:
         cat_obj = _db.scalar(select(Category).where(Category.name == cat_nome))
         if not cat_obj or valor <= 0.0:
@@ -2082,6 +2081,8 @@ if ok_submit:
             ))
             _db.commit()
             st.success("Saída registrada.")
+    
+    st.rerun() # <--- ADICIONE ESTA LINHA
 
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 def page_relatorio_entrada(user: "User"):
