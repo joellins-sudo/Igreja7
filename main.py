@@ -2957,6 +2957,7 @@ def page_cadastro(user: "User"):
                     _db.commit()
                 st.success(f"{len(ids_u)} usuário(s) excluído(s)."); st.rerun()
 # ===================== PAGE: LANÇAMENTOS =====================
+# ===================== PAGE: LANÇAMENTOS =====================
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -3007,9 +3008,32 @@ def page_lancamentos(user: "User"):
                 },
                 key=f"lan_tab_editor_{cong_obj.id}_{start_tab:%Y_%m}",
             )
+            
+            # NOVO BLOCO DE TOTAIS PARA A TABELA DE ENTRADAS
+            try:
+                total_dizimo = 0.0
+                total_oferta = 0.0
+                total_geral = 0.0
+                if isinstance(edited_tab, pd.DataFrame) and not edited_tab.empty:
+                    df_calc = edited_tab.copy()
+                    df_calc["Dízimo"] = df_calc["Dízimo"].map(_to_float_brl)
+                    df_calc["Oferta"] = df_calc["Oferta"].map(_to_float_brl)
+                    total_dizimo = df_calc["Dízimo"].sum()
+                    total_oferta = df_calc["Oferta"].sum()
+                    total_geral = total_dizimo + total_oferta
+            except Exception:
+                pass
+            
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total Dízimos (tabela)", format_currency(total_dizimo))
+            col2.metric("Total Ofertas (tabela)", format_currency(total_oferta))
+            col3.metric("Total Geral (tabela)", format_currency(total_geral))
+            # FIM DO NOVO BLOCO
+
             def _save_tab():
                 _apply_entrada_summary_changes(cong_obj.id, start_tab, end_tab, edited_tab)
                 st.toast("💾 Tabela de entradas salva!", icon="✅")
+                st.rerun() # Adicionado para recarregar após salvar
             _save_btn(_save_tab, f"lan_tab_{cong_obj.id}_{start_tab:%Y_%m}", theme="entrada")
 
             st.markdown("---")
