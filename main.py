@@ -1107,16 +1107,13 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
         
         # 1. Converte Colunas numéricas de forma segura e remove linhas sem valores válidos
         for col in ["Dízimo", "Oferta"]:
-            # Converte para float (trata vazios como 0.0)
             edited[col] = edited[col].map(_to_float_brl) 
-            # Remove linhas onde o valor da coluna se tornou NaN (ocasionalmente acontece em edição vazia)
             edited = edited.dropna(subset=[col]) 
         
         # 2. Converte Data e remove linhas sem data válida
         edited["Data do Culto"] = edited["Data do Culto"].map(lambda x: _to_date(x) if pd.notna(x) else None)
         edited = edited.dropna(subset=["Data do Culto"])
 
-        # 3. Mapeia os valores desejados (want_dz, want_of) a partir do DF limpo
         # 3. Mapeia os valores desejados (want_dz, want_of) a partir do DF limpo
         wanted = {r["Data do Culto"]: (float(r["Dízimo"]), float(r["Oferta"])) for _, r in edited.iterrows()}
         
@@ -1127,26 +1124,24 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
             if d is None:
                 continue 
             
-            # CHAVE DA CORREÇÃO:
-            # Se a data NÃO está no 'wanted', ele assume (0.0, 0.0), garantindo que o ajuste será zerado.
-            want_dz, want_of = wanted.get(d, (0.0, 0.0)) 
-            # ... o código continua para calcular o ajuste (adj_dz_new = want_dz - sum_dz_others)
-            # Se want_dz é 0.0, e sum_dz_others > 0.0, adj_dz_new será negativo, zerando o ajuste. 
-            
             # Pega o que o usuário quer que seja o total do dia (pode ser 0.0 se a linha foi apagada)
             want_dz, want_of = wanted.get(d, (0.0, 0.0))
 
             # [EQ FIX]: Equivalência de Dízimo (Base de 'outros' = Máximo entre Dízimos Nominais e Doações 'Dízimo' (sem ajuste))
+            
+            # ATENÇÃO À CORREÇÃO: Filtro Tithe.date == d
             sum_dz_tithes = float(db.scalar(
                 select(func.coalesce(func.sum(Tithe.amount), 0.0))
                 .where(and_(Tithe.congregation_id == cong_id, Tithe.date == d))
             ) or 0.0)
+            
+            # ATENÇÃO À CORREÇÃO: Filtro Transaction.date == d
             sum_dz_tx_no_adj = float(db.scalar(
                 select(func.coalesce(func.sum(Transaction.amount), 0.0))
                 .join(Category, Transaction.category_id == Category.id)
                 .where(and_(
                     Transaction.congregation_id == cong_id,
-                    Transaction.date == d,
+                    Transaction.date == d, # <--- GARANTINDO QUE É SÓ DESTA DATA
                     Transaction.type.in_((TYPE_IN, "RECEITA")),
                     Transaction.category_id == cat_diz.id,
                     func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
@@ -1155,11 +1150,12 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
             sum_dz_others = max(sum_dz_tithes, sum_dz_tx_no_adj)
             
             # Base de Outros para Oferta (soma de todas as ofertas não-ajuste)
+            # ATENÇÃO À CORREÇÃO: Filtro Transaction.date == d
             sum_of_others = float(db.scalar(
                 select(func.coalesce(func.sum(Transaction.amount), 0.0))
                 .where(and_(
                     Transaction.congregation_id == cong_id,
-                    Transaction.date == d,
+                    Transaction.date == d, # <--- GARANTINDO QUE É SÓ DESTA DATA
                     Transaction.type.in_((TYPE_IN, "RECEITA")),
                     Transaction.category_id == cat_ofe.id,
                     func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
@@ -1170,7 +1166,7 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
             adj_dz_new = want_dz - sum_dz_others
             adj_of_new = want_of - sum_of_others
 
-            # Busca ajustes existentes
+            # Busca ajustes existentes (também já filtrados por Transaction.date == d)
             adj_dz = db.scalar(select(Transaction).where(
                 Transaction.congregation_id == cong_id, Transaction.date == d,
                 Transaction.type.in_((TYPE_IN, "RECEITA")), Transaction.category_id == cat_diz.id,
@@ -1184,21 +1180,21 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
 
             # Aplica ou remove o ajuste de Dízimo
             if abs(adj_dz_new) < 0.0001:
-                if adj_dz: db.delete(adj_dz) # Remove se não for mais necessário
+                if adj_dz: db.delete(adj_dz)
             else:
-                if adj_dz: adj_dz.amount = float(adj_dz_new); db.add(adj_dz) # Atualiza
+                if adj_dz: adj_dz.amount = float(adj_dz_new); db.add(adj_dz)
                 else:
-                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id, # Insere
+                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id,
                                        amount=float(adj_dz_new), description=ADJ_ENTRY_DESC,
                                        congregation_id=cong_id))
 
             # Aplica ou remove o ajuste de Oferta
             if abs(adj_of_new) < 0.0001:
-                if adj_of: db.delete(adj_of) # Remove se não for mais necessário
+                if adj_of: db.delete(adj_of)
             else:
-                if adj_of: adj_of.amount = float(adj_of_new); db.add(adj_of) # Atualiza
+                if adj_of: adj_of.amount = float(adj_of_new); db.add(adj_of)
                 else:
-                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id, # Insere
+                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id,
                                        amount=float(adj_of_new), description=ADJ_ENTRY_DESC,
                                        congregation_id=cong_id))
         db.commit()
