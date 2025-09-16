@@ -1096,35 +1096,33 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
         # ================================================================
 
 # ===================== RELATÓRIO DE ENTRADA — TABELA ÚNICA (EDIT SUMÁRIO) =====================
-def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date) -> pd.DataFrame:
+# ===================== RELATÓRIO DE ENTRADA — TABELA ÚNICA (EDIT SUMÁRIO) =====================
+def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
     # [EQ FIX]: separar somatórios de Dízimo (tithes) e Dízimo (transactions), e usar o MAIOR por data.
-    tithes = db.execute(
-        select(Tithe.date, func.sum(Tithe.amount))
-        .where(and_(Tithe.congregation_id == cong_id, Tithe.date >= start, Tithe.date < end))
-        .group_by(Tithe.date)
-    ).all()
-    diz_trans = db.execute(
-        select(Transaction.date, func.sum(Transaction.amount))
-        .join(Category, Transaction.category_id == Category.id)
-        .where(and_(
-            Transaction.congregation_id == cong_id,
-            Transaction.date >= start, Transaction.date < end,
-            Transaction.type.in_((TYPE_IN, "RECEITA")),
-            func.lower(Category.name).in_(("dízimo","dizimo"))
-        ))
-        .group_by(Transaction.date)
-    ).all()
-    oferta_trans = db.execute(
-        select(Transaction.date, func.sum(Transaction.amount))
-        .join(Category, Transaction.category_id == Category.id)
-        .where(and_(
-            Transaction.congregation_id == cong_id,
-            Transaction.date >= start, Transaction.date < end,
-            Transaction.type.in_((TYPE_IN, "RECEITA")),
-            func.lower(Category.name) == "oferta"
-        ))
-        .group_by(Transaction.date)
-    ).all()
+    
+    # Base queries
+    tithes_q = select(Tithe.date, func.sum(Tithe.amount)).where(
+        Tithe.congregation_id == cong_id, Tithe.date >= start, Tithe.date < end
+    )
+    diz_trans_q = select(Transaction.date, func.sum(Transaction.amount)).join(Category).where(
+        Transaction.congregation_id == cong_id, Transaction.date >= start, Transaction.date < end,
+        Transaction.type.in_((TYPE_IN, "RECEITA")), func.lower(Category.name).in_(("dízimo","dizimo"))
+    )
+    oferta_trans_q = select(Transaction.date, func.sum(Transaction.amount)).join(Category).where(
+        Transaction.congregation_id == cong_id, Transaction.date >= start, Transaction.date < end,
+        Transaction.type.in_((TYPE_IN, "RECEITA")), func.lower(Category.name) == "oferta"
+    )
+
+    # Aplica filtro de sub-congregação se necessário
+    if sub_cong_id is not None:
+        tithes_q = tithes_q.where(Tithe.sub_congregation_id == sub_cong_id)
+        diz_trans_q = diz_trans_q.where(Transaction.sub_congregation_id == sub_cong_id)
+        oferta_trans_q = oferta_trans_q.where(Transaction.sub_congregation_id == sub_cong_id)
+
+    # Executa queries
+    tithes = db.execute(tithes_q.group_by(Tithe.date)).all()
+    diz_trans = db.execute(diz_trans_q.group_by(Transaction.date)).all()
+    oferta_trans = db.execute(oferta_trans_q.group_by(Transaction.date)).all()
 
     by_date_diz_tit = defaultdict(float)
     for d, s in tithes: by_date_diz_tit[d] += float(s or 0.0)
@@ -1136,9 +1134,10 @@ def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date) -> pd
     all_dates = sorted(set(list(by_date_diz_tit.keys()) + list(by_date_diz_tx.keys()) + list(by_date_ofe.keys())))
     rows = []
     for d in all_dates:
-        dz = max(float(by_date_diz_tit.get(d, 0.0)), float(by_date_diz_tx.get(d, 0.0)))  # [EQ FIX]
+        dz = max(float(by_date_diz_tit.get(d, 0.0)), float(by_date_diz_tx.get(d, 0.0)))
         ofe = float(by_date_ofe.get(d, 0.0))
         rows.append({"Data do Culto": d, "Dízimo": dz, "Oferta": ofe, "Total": dz + ofe})
+    
     return pd.DataFrame(rows)
 
 def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_df: pd.DataFrame):
@@ -2913,6 +2912,7 @@ def page_lancamentos(user: "User"):
                     # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
+# ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 def page_relatorio_entrada(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -2922,7 +2922,6 @@ def page_relatorio_entrada(user: "User"):
 
         # --- SELEÇÃO DE CONTEXTO (CONGREGAÇÃO E SUB-CONGREGAÇÃO) ---
         parent_cong_obj = None
-        target_sub_cong_id = None
         
         # Define a congregação principal a ser analisada
         if user.role == "SEDE":
@@ -2938,11 +2937,8 @@ def page_relatorio_entrada(user: "User"):
         # Monta o seletor de sub-congregação
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
         
-        # Opção "Todas" para ver o total agregado
         opcoes = {"-- Todas (Principal + Subs) --": "ALL"}
-        # Opção para ver somente a principal
         opcoes[parent_cong_obj.name + " (Principal)"] = None
-        # Opções para cada sub
         for sub in sub_congs:
             opcoes[sub.name] = sub.id
 
@@ -2954,96 +2950,32 @@ def page_relatorio_entrada(user: "User"):
         st.info(f"Exibindo dados para: **{contexto_selecionado}**")
 
         if target_sub_cong_id_or_all == "ALL":
-            # Visão agregada de todas as sub-unidades
             all_units = [(parent_cong_obj.name + " (Principal)", None)] + [(s.name, s.id) for s in sub_congs]
-            rows = []
+            rows, total_geral = [], 0.0
             for name, sub_id in all_units:
                 totals = _collect_month_data(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)["totals"]
+                total_entradas_unidade = totals["entradas_total_sem_missoes"]
                 rows.append({
                     "Unidade": name,
                     "Dízimos": totals["dizimos"],
                     "Ofertas": totals["ofertas"],
-                    "Total Entradas": totals["entradas_total_sem_missoes"]
+                    "Total Entradas": total_entradas_unidade
                 })
+                total_geral += total_entradas_unidade
             
             df_agg = pd.DataFrame(rows)
             st.dataframe(df_agg.style.format({"Dízimos": format_currency, "Ofertas": format_currency, "Total Entradas": format_currency}), use_container_width=True)
-            
-            # Mostra o total geral
-            total_geral_entradas = df_agg["Total Entradas"].sum()
-            st.metric("Total Geral de Entradas (Principal + Subs)", format_currency(total_geral_entradas))
-
+            st.metric("Total Geral de Entradas (Principal + Subs)", format_currency(total_geral))
+        
         else:
-            # Visão detalhada de uma única unidade (principal ou sub)
             base_df = _entrada_summary_df(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id_or_all)
-            edited = st.data_editor(base_df, use_container_width=True, hide_index=True, num_rows="dynamic", key="re_editor_detalhado")
+            st.dataframe(base_df.style.format({"Dízimo": format_currency, "Oferta": format_currency, "Total": format_currency}), use_container_width=True)
             
-            # (O restante do código, como totais e botões, precisaria ser ajustado para este novo contexto)
-            # Por enquanto, vamos focar na visualização correta.
-        
-        # =================================================================
-        # NOVO BLOCO DE TOTAIS (GARANTINDO A EXIBIÇÃO CORRETA)
-        # =================================================================
-        try:
-            total_dizimo = 0.0
-            total_oferta = 0.0
-            total_geral = 0.0
-            if isinstance(edited, pd.DataFrame) and not edited.empty:
-                # Garante que os valores sejam numéricos para a soma
-                edited_calc = edited.copy()
-                edited_calc["Dízimo"] = edited_calc["Dízimo"].apply(_to_float_brl)
-                edited_calc["Oferta"] = edited_calc["Oferta"].apply(_to_float_brl)
-                
-                total_dizimo = edited_calc["Dízimo"].sum()
-                total_oferta = edited_calc["Oferta"].sum()
-                total_geral = total_dizimo + total_oferta
-        except Exception as e:
-            # Em caso de erro, os totais permanecerão zero, sem quebrar a aplicação
-            pass
-        
-        st.markdown("---")
-        st.subheader("Totais do Período (baseado na tabela acima)")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Soma Dízimos", format_currency(total_dizimo))
-        col2.metric("Soma Ofertas", format_currency(total_oferta))
-        col3.metric("Soma Geral", format_currency(total_geral))
-        st.markdown("---")
-        # =================================================================
-        # FIM DO BLOCO DE TOTAIS
-        # =================================================================
-
-        def _save_sum():
-            _apply_entrada_summary_changes(cong_obj.id, start, end, edited)
-            st.toast("💾 Alterações salvas.", icon="✅")
-            st.rerun()
-        _save_btn(_save_sum, "entrada_sum")
-
-        # Seção para apagar linhas (mantida como estava)
-        if isinstance(edited, pd.DataFrame) and not edited.empty and ("Data do Culto" in edited.columns):
-            with st.expander("🗑️ Apagar linhas da tabela-resumo"):
-                try:
-                    _datas_ord = sorted({_to_date(d) for d in edited["Data do Culto"].tolist() if pd.notna(d)})
-                    _label_map = {format_date(d): d for d in _datas_ord}
-                    _rotulos = list(_label_map.keys())
-                except Exception:
-                    _rotulos, _label_map = [], {}
-
-                _sel_del = st.multiselect(
-                    "Selecione as datas que deseja APAGAR", options=_rotulos, key="re_entrada_sum_del_dates"
-                )
-                def _delete_selected_rows():
-                    if not _sel_del: return
-                    to_drop = {_label_map[x] for x in _sel_del if x in _label_map}
-                    edited_clean = edited.copy()
-                    edited_clean["Data do Culto"] = edited_clean["Data do Culto"].map(_to_date)
-                    edited_clean = edited_clean[~edited_clean["Data do Culto"].isin(to_drop)]
-                    _apply_entrada_summary_changes(cong_obj.id, start, end, edited_clean)
-                    st.toast("🗑️ Linhas apagadas com sucesso.", icon="✅")
-                    st.rerun()
-
-                st.button(
-                    "Apagar linhas selecionadas", type="secondary", on_click=_delete_selected_rows, key="btn_del_entrada_sum"
-                )
+            if not base_df.empty:
+                total_unidade = base_df["Total"].sum()
+                st.metric(f"Total de Entradas para {contexto_selecionado}", format_currency(total_unidade))
+            else:
+                st.caption("Nenhum lançamento de entrada para esta unidade no período.")
 # ===================== MAIN =====================
 def main():
     try:
