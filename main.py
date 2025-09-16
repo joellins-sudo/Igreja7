@@ -209,34 +209,89 @@ hr{ opacity: .6; }
 # === Cores por formulário (Lançamentos) ===
 FORM_BUTTONS_CSS = """
 <style>
-/* ENTRADAS = verde */
-.adrf-entrada [data-testid="stButton"] > button,
-.adrf-entrada [data-testid="stFormSubmitButton"] > button{
-  background:#16a34a !important; border-color:#16a34a !important; color:#fff !important;
+/* Deixar nossos estilos ganharem a disputa */
+.adrf-entrada .stButton>button,
+.adrf-dizimo .stButton>button,
+.adrf-saida .stButton>button{
+  border-width:1px !important;
+  font-weight:700 !important;
 }
-.adrf-entrada [data-testid="stButton"] > button:hover,
-.adrf-entrada [data-testid="stFormSubmitButton"] > button:hover{
-  background:#15803d !important; border-color:#15803d !important;
+
+/* ENTRADAS = verde */
+.adrf-entrada .stButton>button{
+  background:#16a34a !important;      /* verde */
+  border-color:#16a34a !important;
+  color:#fff !important;
+}
+.adrf-entrada .stButton>button:hover{
+  background:#15803d !important;
+  border-color:#15803d !important;
 }
 
 /* DIZIMISTAS = azul */
-.adrf-dizimo [data-testid="stButton"] > button,
-.adrf-dizimo [data-testid="stFormSubmitButton"] > button{
-  background:#1d4ed8 !important; border-color:#1d4ed8 !important; color:#fff !important;
+.adrf-dizimo .stButton>button{
+  background:#1d4ed8 !important;      /* azul */
+  border-color:#1d4ed8 !important;
+  color:#fff !important;
 }
-.adrf-dizimo [data-testid="stButton"] > button:hover,
-.adrf-dizimo [data-testid="stFormSubmitButton"] > button:hover{
-  background:#1e40af !important; border-color:#1e40af !important;
+.adrf-dizimo .stButton>button:hover{
+  background:#1e40af !important;
+  border-color:#1e40af !important;
+}
+
+/* SAÍDAS = vermelho (mantém) */
+.adrf-saida .stButton>button{
+  background:#dc2626 !important;      /* vermelho */
+  border-color:#dc2626 !important;
+  color:#fff !important;
+}
+.adrf-saida .stButton>button:hover{
+  background:#b91c1c !important;
+  border-color:#b91c1c !important;
+}
+</style>
+"""
+# === Cores dos botões por formulário (compat com chamada antiga BUTTONS_CSS) ===
+FORM_BUTTONS_CSS = """
+<style>
+.adrf-entrada .stButton>button,
+.adrf-dizimo .stButton>button,
+.adrf-saida .stButton>button{
+  border-width:1px !important;
+  font-weight:700 !important;
+}
+
+/* ENTRADAS = verde */
+.adrf-entrada .stButton>button{
+  background:#16a34a !important;
+  border-color:#16a34a !important;
+  color:#fff !important;
+}
+.adrf-entrada .stButton>button:hover{
+  background:#15803d !important;
+  border-color:#15803d !important;
+}
+
+/* DIZIMISTAS = azul */
+.adrf-dizimo .stButton>button{
+  background:#1d4ed8 !important;
+  border-color:#1d4ed8 !important;
+  color:#fff !important;
+}
+.adrf-dizimo .stButton>button:hover{
+  background:#1e40af !important;
+  border-color:#1e40af !important;
 }
 
 /* SAÍDAS = vermelho */
-.adrf-saida [data-testid="stButton"] > button,
-.adrf-saida [data-testid="stFormSubmitButton"] > button{
-  background:#dc2626 !important; border-color:#dc2626 !important; color:#fff !important;
+.adrf-saida .stButton>button{
+  background:#dc2626 !important;
+  border-color:#dc2626 !important;
+  color:#fff !important;
 }
-.adrf-saida [data-testid="stButton"] > button:hover,
-.adrf-saida [data-testid="stFormSubmitButton"] > button:hover{
-  background:#b91c1c !important; border-color:#b91c1c !important;
+.adrf-saida .stButton>button:hover{
+  background:#b91c1c !important;
+  border-color:#b91c1c !important;
 }
 </style>
 """
@@ -272,103 +327,6 @@ st.markdown(CSS, unsafe_allow_html=True)
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
-# ==== Menu (tiles) ====
-MENU_TILE_IMAGES = {
-    "Lançamentos":           os.path.join(ASSETS_DIR, "tile_lancamentos.png"),
-    "Relatório de Entrada":  os.path.join(ASSETS_DIR, "tile_entrada.png"),
-    "Relatório de Saída":    os.path.join(ASSETS_DIR, "tile_saida.png"),
-    "Relatório de Missões":  os.path.join(ASSETS_DIR, "tile_missoes.png"),
-    "Relatório de Dizimistas": os.path.join(ASSETS_DIR, "tile_dizimistas.png"),
-    "Visão Geral":           os.path.join(ASSETS_DIR, "tile_visao.png"),
-    "Cadastro":              os.path.join(ASSETS_DIR, "tile_cadastro.png"),
-}
-
-MENU_TILES_CSS = """
-<style>
-  .menu-title{
-    text-align:center; font-weight:800; letter-spacing:.6px;
-    background:#1f6feb; color:#fff; padding:.45rem .8rem;
-    display:inline-block; margin:6px auto 18px; border-radius:.4rem;
-  }
-
-  /* grid responsiva */
-  .tiles{
-    display:grid;
-    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-    gap: 20px;
-  }
-
-  /* cartão do tile */
-  .tile{
-    background: linear-gradient(180deg,#ffffff 0%, #f8fafc 100%);
-    border:1px solid #e6e8f0;
-    border-radius:16px;
-    padding:16px;
-    box-shadow:0 6px 16px rgba(16,24,40,.06);
-    transition: transform .12s ease, box-shadow .12s ease;
-  }
-  .tile:hover{
-    transform: translateY(-2px);
-    box-shadow:0 14px 26px rgba(16,24,40,.12);
-  }
-
-  /* botão moderno dentro do tile */
-  .tile .stButton>button{
-    width:100%; height:56px;
-    border:0; border-radius:12px;
-    font-weight:800; letter-spacing:.2px;
-    color:#fff;
-    background: linear-gradient(135deg, #1f6feb, #0ea5e9);
-    box-shadow: 0 10px 22px rgba(31,111,235,.28);
-    transition: transform .08s ease, filter .08s ease, box-shadow .2s ease;
-  }
-  .tile .stButton>button:hover{
-    filter: brightness(.96);
-    transform: translateY(-1px);
-    box-shadow: 0 14px 28px rgba(31,111,235,.35);
-  }
-  .tile .stButton>button:active{
-    transform: translateY(0);
-    filter: brightness(.93);
-  }
-</style>
-"""
-
-st.markdown(MENU_TILES_CSS, unsafe_allow_html=True)
-
-def _tile(col, label: str, target_page: str):
-    with col:
-        st.markdown("<div class='tile'>", unsafe_allow_html=True)
-        if st.button(label, key=f"tile_{_norm(label)}"):
-            st.session_state["main_menu_page"] = target_page
-            st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
-
-def page_menu(user: "User"):
-    ensure_seed()
-    sidebar_common(user)
-
-    st.markdown("<h2 class='menu-title'>ESCOLHA O AMBIENTE</h2>", unsafe_allow_html=True)
-
-    role = getattr(user, "role", "")
-    if role == "SEDE":
-        items = ["Lançamentos","Relatório de Entrada","Relatório de Saída",
-                 "Relatório de Missões","Relatório de Dizimistas","Visão Geral","Cadastro"]
-    elif role == "TESOUREIRO":
-        items = ["Lançamentos","Relatório de Entrada","Relatório de Saída",
-                 "Relatório de Missões","Relatório de Dizimistas","Visão Geral"]
-    elif role == "TESOUREIRO MISSIONÁRIO":
-        items = ["Relatório de Missões"]
-    else:
-        items = ["Visão Geral"]
-
-    st.markdown("<div class='tiles'>", unsafe_allow_html=True)
-    cols = st.columns(3, gap="large")
-    for i, label in enumerate(items):
-        _tile(cols[i % 3], label, label)
-        if (i % 3) == 2 and i != len(items)-1:
-            cols = st.columns(3, gap="large")
-    st.markdown("</div>", unsafe_allow_html=True)
 
 # ===================== LOCALE (fallback) =====================
 def _set_locale_ptbr():
@@ -661,27 +619,28 @@ def current_user():
         return db.get(User, uid)
 
 def login_ui():
-    # evita duplicar o formulário no mesmo run
-    if st.session_state.get("_adrf_login_drawn"):
-        return
-    st.session_state["_adrf_login_drawn"] = True
-
-    # estilos (ok manter)
+    # CSS base (o seu ADRF_LOGIN_CSS pode continuar)
     st.markdown(ADRF_LOGIN_CSS, unsafe_allow_html=True)
+
+    # === Centraliza a viewport e transforma o st.form em um "card" ===
     LOGIN_CARD_CSS = """
     <style>
+      /* centraliza tudo vertical/horizontal */
       [data-testid="stAppViewContainer"] > .main{
         display:flex; align-items:center; justify-content:center;
         min-height:100vh; padding:0 !important;
       }
       header[data-testid="stHeader"]{ display:none; }
       footer{ visibility:hidden; }
+
+      /* deixa o formulário com cara de cartão e largura fixa */
       form[data-testid="stForm"]{
         width:520px; max-width:92vw; margin:0 auto;
         background:#fff; border:1px solid #E6E8F0; border-radius:14px;
         box-shadow:0 10px 30px rgba(16,24,40,.08);
         padding:28px 22px;
       }
+      /* inputs e botão mais bonitos dentro do card */
       form[data-testid="stForm"] .stTextInput>div>div>input,
       form[data-testid="stForm"] .stPassword>div>div>input{
         height:44px; font-size:1rem;
@@ -693,10 +652,14 @@ def login_ui():
     """
     st.markdown(LOGIN_CARD_CSS, unsafe_allow_html=True)
 
+    # === (REMOVA) Qualquer wrapper HTML aberto antes tipo:
+    # st.markdown("<div class='adrf-wrap'><div class='adrf-card'><div class='body'>", unsafe_allow_html=True)
+    # ... e o fechamento correspondente. Eles não "abraçam" widgets do Streamlit e viram um card vazio no topo.
+
     # LOGO (opcional)
     try:
         if os.path.exists(LOGO_PATH):
-            st.image(LOGO_PATH, width=120)
+            st.image(LOGO_PATH, caption=None, use_container_width=False, width=120)
         else:
             st.markdown(
                 "<div style='text-align:center; font:800 48px/1 Inter,system-ui; color:#1f66eb'>ADRF<span style='color:#74b816'>!</span></div>",
@@ -705,10 +668,14 @@ def login_ui():
     except Exception:
         pass
 
-    # >>>>>>  key NOVA para o form  <<<<<<
-    with st.form("adrf_login_form_v2", clear_on_submit=False):
+    # === FORMULÁRIO DE LOGIN (dentro do card) ===
+    with st.form("adrf_login_form", clear_on_submit=False):
         u = st.text_input("Usuário", placeholder="Usuário", key="adrf_user")
         p = st.text_input("Senha", type="password", placeholder="Senha", key="adrf_pass")
+
+        # Se você tiver combo de órgão/perfil, coloque aqui também:
+        # org = st.selectbox("Órgão", ["PCPE", "PMPE", "SDS", ...])
+
         ok = st.form_submit_button("ACESSAR")
 
     if ok:
@@ -719,12 +686,10 @@ def login_ui():
                 try:
                     cm = get_cookie_manager()
                     token = _make_token({"uid": int(user.id)})
-                    cm.set(COOKIE_NAME, token,
-                           expires_at=datetime.utcnow()+timedelta(days=30),
-                           key="auth_set")
+                    cm.set(COOKIE_NAME, token, expires_at=datetime.utcnow()+timedelta(days=30), key="auth_set")
                     _update_last_active(cm)
                 except Exception:
-                    st.warning("Login salvo só na sessão atual.")
+                    st.warning("Login salvo só na sessão atual. Instale 'extra-streamlit-components' para lembrar o login.")
                 st.rerun()
             else:
                 st.error("Usuário ou senha inválidos.")
@@ -761,11 +726,16 @@ def order_congs_sede_first(congs: List[Congregation]) -> List[Congregation]:
     return (sede + others) if sede else others
 
 def sidebar_common(user: "User") -> str:
-    """Menu lateral simples (sem ícones) e expõe a chave do radio para o menu de tiles."""
+    """
+    Desenha o menu lateral apenas uma vez e retorna a página selecionada.
+    Em reruns, mantém a escolha do usuário.
+    """
+    # Se já desenhou nesta execução, só devolve a última seleção
     if st.session_state.get("sidebar_rendered", False):
-        return st.session_state.get("main_menu_page", "Menu")
+        return st.session_state.get("main_menu_page", "Visão Geral")
 
     with st.sidebar:
+        # Identidade / logo
         try:
             if os.path.exists(LOGO_PATH):
                 st.image(LOGO_PATH, use_column_width=True)
@@ -773,43 +743,78 @@ def sidebar_common(user: "User") -> str:
             pass
         st.write(f"👤 **{getattr(user, 'username', 'Usuário')}** — *{getattr(user, 'role', '')}*")
 
+        # Ícones
+        MENU_ICONS = {
+            "Lançamentos": "📥",
+            "Relatório de Entrada": "📊",
+            "Relatório de Saída": "📉",
+            "Relatório de Missões": "🌍",
+            "Relatório de Dizimistas": "🧾",
+            "Visão Geral": "🏁",
+            "Cadastro": "🛠️",
+        }
+
+        # Opções conforme o papel
         role = getattr(user, "role", "")
         if role == "SEDE":
-            menu_options = ["Menu","Lançamentos","Relatório de Entrada","Relatório de Saída",
-                            "Relatório de Missões","Relatório de Dizimistas","Visão Geral","Cadastro"]
+            menu_options_plain = [
+                "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
+                "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Cadastro"
+            ]
         elif role == "TESOUREIRO":
-            menu_options = ["Menu","Lançamentos","Relatório de Entrada","Relatório de Saída",
-                            "Relatório de Missões","Relatório de Dizimistas","Visão Geral"]
+            menu_options_plain = [
+                "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
+                "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"
+            ]
         elif role == "TESOUREIRO MISSIONÁRIO":
-            menu_options = ["Menu","Relatório de Missões"]
+            menu_options_plain = ["Relatório de Missões"]
         else:
-            menu_options = ["Menu","Visão Geral"]
+            menu_options_plain = ["Visão Geral"]
 
-        state_key = f"main_menu_nav_{getattr(user,'id','anon')}"
+        # Labels com ícones
+        menu_labels_pretty = [f"{MENU_ICONS.get(opt, '•')} {opt}" for opt in menu_options_plain]
+
+        # Chave estável do widget
+        state_key = f"main_menu_nav_{getattr(user, 'id', 'anon')}"
+
+        # Define valor inicial só uma vez (sem passar index no radio)
         if state_key not in st.session_state:
-            prev = st.session_state.get("main_menu_page", "Menu")
-            st.session_state[state_key] = prev if prev in menu_options else "Menu"
+            # usa última página escolhida, se houver
+            prev_page = st.session_state.get("main_menu_page")
+            if prev_page in menu_options_plain:
+                init_label = f"{MENU_ICONS.get(prev_page, '•')} {prev_page}"
+            else:
+                init_label = menu_labels_pretty[0]
+            st.session_state[state_key] = init_label
 
-        sel = st.radio("Menu", options=menu_options, key=state_key, label_visibility="visible")
-        st.session_state["main_menu_page"] = sel
+        sel_label = st.radio(
+            "Menu",
+            options=menu_labels_pretty,
+            key=state_key,
+            label_visibility="visible",
+        )
 
+        # Converte label -> página “pura”
+        sel_index = menu_labels_pretty.index(sel_label)
+        page = menu_options_plain[sel_index]
+        st.session_state["main_menu_page"] = page
+
+        st.divider()
         if st.button("Sair", key=f"btn_logout_{getattr(user, 'id', 'anon')}"):
             logout()
 
-        # ---- expõe para o menu de tiles conseguir mudar o radio ----
-        st.session_state["__menu_state_key"] = state_key
-        st.session_state["__menu_options_plain"] = menu_options
-
+        # Marca como renderizado
         st.session_state["sidebar_rendered"] = True
-        return sel
+
+        return page
+
 
 # ======= NOVO: helper padrão para botões 'Salvar alterações' =======
 # ====== CORES P/ BOTÕES ======
-# ======= NOVO: helper padrão para botões 'Salvar alterações' =======
 BTN_COLORS = {
     "entrada":  "#16a34a",  # verde
     "dizimista":"#2563eb",  # azul
-    "saida":    "#dc2626",  # vermelho
+    "saida":    "#dc2626",  # vermelha
     "neutral":  "#1f6feb",  # fallback (azul padrão)
 }
 
@@ -819,25 +824,22 @@ def _save_btn(on_click, key_suffix: str, theme: str = "neutral", label: str = "S
       - 'entrada'  -> verde
       - 'dizimista'-> azul
       - 'saida'    -> vermelho
-      - 'neutral'  -> cor padrão (azul)
+      - 'neutral'  -> cor padrão
     """
     color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
     with st.container():
-        # 👇 criamos um wrapper para escopar o CSS via SELETOR DE DESCENDENTE (mais confiável que "~")
-        st.markdown(f'<div id="wrap-{key_suffix}">', unsafe_allow_html=True)
+        # marcador p/ escopar o CSS desse botão apenas
+        st.markdown(f'<div id="mark-{key_suffix}"></div>', unsafe_allow_html=True)
         st.button(label, key=f"btn_save_{key_suffix}", type="primary", on_click=on_click)
-        st.markdown("</div>", unsafe_allow_html=True)
-
         st.markdown(
             f"""
             <style>
-              /* pinta SOMENTE o botão dentro deste wrapper */
-              #wrap-{key_suffix} [data-testid="stButton"] > button {{
+              /* pinta SOMENTE o botão dentro deste bloco */
+              #mark-{key_suffix} ~ div[data-testid="stButton"] > button {{
                 background: {color} !important;
                 border-color: {color} !important;
-                color: #fff !important;
               }}
-              #wrap-{key_suffix} [data-testid="stButton"] > button:hover {{
+              #mark-{key_suffix} ~ div[data-testid="stButton"] > button:hover {{
                 filter: brightness(0.93);
               }}
             </style>
@@ -852,21 +854,19 @@ def _submit_btn(label: str, key_suffix: str, theme: str = "neutral") -> bool:
     """
     color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
     with st.container():
-        st.markdown(f'<div id="wrap-submit-{key_suffix}">', unsafe_allow_html=True)
+        st.markdown(f'<div id="mark-{key_suffix}"></div>', unsafe_allow_html=True)
         clicked = st.form_submit_button(label, type="primary")
-        st.markdown("</div>", unsafe_allow_html=True)
-
         st.markdown(
             f"""
             <style>
-              #wrap-submit-{key_suffix} [data-testid="stFormSubmitButton"] > button,
-              #wrap-submit-{key_suffix} [data-testid="stButton"] > button {{
+              /* cobre tanto submit de form quanto um fallback de stButton */
+              #mark-{key_suffix} ~ div[data-testid="stFormSubmitButton"] > button,
+              #mark-{key_suffix} ~ div[data-testid="stButton"] > button {{
                 background: {color} !important;
                 border-color: {color} !important;
-                color: #fff !important;
               }}
-              #wrap-submit-{key_suffix} [data-testid="stFormSubmitButton"] > button:hover,
-              #wrap-submit-{key_suffix} [data-testid="stButton"] > button:hover {{
+              #mark-{key_suffix} ~ div[data-testid="stFormSubmitButton"] > button:hover,
+              #mark-{key_suffix} ~ div[data-testid="stButton"] > button:hover {{
                 filter: brightness(0.93);
               }}
             </style>
@@ -1857,8 +1857,8 @@ def page_lancamentos(user: "User"):
 
             return  # fim do modo tabela
 
-        # ===================== FORMULÁRIOS ÚNICOS (coloridos) =====================
-        st.markdown('<div class="st-container-card adrf-entrada">', unsafe_allow_html=True)
+        # ===================== FORMULÁRIOS ÚNICOS (mantidos) =====================
+        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
         st.subheader("Lançar ENTRADA (Doação)")
         with st.form("form_entrada", clear_on_submit=True):
             c1, c2, c3 = st.columns([1.1, 1.6, 2])
@@ -1878,9 +1878,7 @@ def page_lancamentos(user: "User"):
             ent_flag_missoes = _norm(ent_cat) == "oferta" and st.checkbox("Oferta de missões?", key="ent_flag_missoes")
             ent_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="ent_valor")
 
-            # --- botão submit colorido (verde) ---
-            ok = _submit_btn("Salvar ENTRADA", "submit_entrada", theme="entrada")
-            if ok:
+            if st.form_submit_button("Salvar ENTRADA", type="primary"):
                 with SessionLocal() as _db:
                     cat_name = "Missões" if ent_flag_missoes else ent_cat
                     if ent_flag_missoes and not _db.scalar(select(Category).where(Category.name == "Missões")):
@@ -1899,7 +1897,7 @@ def page_lancamentos(user: "User"):
         st.markdown('</div>', unsafe_allow_html=True)
         st.markdown("---")
 
-        st.markdown('<div class="st-container-card adrf-dizimo">', unsafe_allow_html=True)
+        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
         st.subheader("Salvar DIZIMISTA")
         with st.form("form_dizimo", clear_on_submit=True):
             dz_data = st.date_input("Data do Culto", value=today_bahia(), key="dz_data", format="DD/MM/YYYY")
@@ -1907,9 +1905,7 @@ def page_lancamentos(user: "User"):
             dz_valor = st.number_input("Valor dízimo (R$)", min_value=0.0, step=1.0, format="%.2f", key="dz_valor")
             dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX"], key="dz_payment_method")
 
-            # --- botão submit colorido (azul) ---
-            ok = _submit_btn("Salvar DIZIMISTA", "submit_dizimista", theme="dizimista")
-            if ok:
+            if st.form_submit_button("Salvar DIZIMISTA", type="primary"):
                 nome = (dz_nome or "").strip()
                 if not nome:
                     st.error("Informe o nome do dizimista.")
@@ -1924,7 +1920,7 @@ def page_lancamentos(user: "User"):
         st.markdown('</div>', unsafe_allow_html=True)
         st.markdown("---")
 
-        st.markdown('<div class="st-container-card adrf-saida">', unsafe_allow_html=True)
+        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
         st.subheader("Lançar SAÍDA")
         with st.form("form_saida", clear_on_submit=True):
             sai_data = st.date_input("Data", value=today_bahia(), key="sai_data", format="DD/MM/YYYY")
@@ -1933,9 +1929,7 @@ def page_lancamentos(user: "User"):
             sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
             sai_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="sai_valor")
 
-            # --- botão submit colorido (vermelho) ---
-            ok = _submit_btn("Salvar SAÍDA", "submit_saida", theme="saida")
-            if ok:
+            if st.form_submit_button("Salvar SAÍDA", type="primary"):
                 with SessionLocal() as _db:
                     cat_obj = _db.scalar(select(Category).where(Category.name == sai_cat))
                     if not cat_obj:
@@ -2489,27 +2483,17 @@ def build_consolidated_pdf(agg_total: list, ref: date) -> bytes:
     return buf.getvalue()
 
 # ===================== HELPER: STAT CARD =====================
-def render_current_page(user: "User"):
-    page_from_sidebar = sidebar_common(user)
-    page = st.session_state.get("main_menu_page") or page_from_sidebar or "Menu"
-
-    # resolve função pelo nome; se não existir, cai no menu
-    def _R(name: str):
-        fn = globals().get(name)
-        return fn if callable(fn) else page_menu
-
-    pages = {
-        "Menu": _R("page_menu"),
-        "Lançamentos": _R("page_lancamentos"),
-        "Relatório de Entrada": _R("page_relatorio_entrada"),
-        "Relatório de Saída": _R("page_relatorio_saida"),
-        "Relatório de Missões": _R("page_relatorio_missoes"),
-        "Relatório de Dizimistas": _R("page_relatorio_dizimistas"),
-        "Visão Geral": _R("page_visao_geral"),
-        "Cadastro": _R("page_cadastro"),
-    }
-
-    pages.get(page, page_menu)(user)
+def render_stat_card(col, label: str, full_text: str):
+    col.markdown(
+        f"""
+        <div class="stat-card">
+          <div class="stat-label">{label}</div>
+          <div class="stat-value">{full_text}</div>
+          <div class="tooltip">{full_text}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 # ===================== PAGE: VISÃO GERAL =====================
 def page_visao_geral(user: "User"):
@@ -3014,19 +2998,61 @@ def page_cadastro(user: "User"):
                 st.success(f"{len(ids_u)} usuário(s) excluído(s)."); st.rerun()
 
 # ===================== MAIN =====================
-# ===================== MAIN / ROTEAMENTO =====================
 def main():
-    ensure_seed()
-    user = current_user()
-    if not user:
-        login_ui()
-        return   # <- importantíssimo: sai daqui para não montar nada por cima
+    try:
+        ensure_seed()
 
-    # página atual
-    st.session_state.setdefault("main_menu_page", "Menu")
-    render_current_page(user)
+        # -------- sessão / cookies --------
+        try:
+            cm = get_cookie_manager()
+            tok = cm.get(COOKIE_NAME)
+            data = _read_token(tok)
+            if data and not st.session_state.get("uid"):
+                with SessionLocal() as db:
+                    u = db.get(User, int(data["uid"]))
+                    if u:
+                        st.session_state.uid = u.id
+            if st.session_state.get("uid"):
+                _check_inactivity_and_logout(cm)
+                _update_last_active(cm)
+        except Exception:
+            pass
+
+        # -------- auth --------
+        user = current_user()
+        if not user:
+            login_ui()
+            return
+
+        # Força o menu a ser redesenhado a cada execução
+        st.session_state["sidebar_rendered"] = False
+
+        # -------- menu lateral (uma vez) --------
+        page = sidebar_common(user)
+
+        # -------- roteamento --------
+        if page == "Lançamentos":
+            page_lancamentos(user)
+        elif page == "Relatório de Entrada":
+            page_relatorio_entrada(user)
+        elif page == "Relatório de Saída":
+            page_relatorio_saida(user)
+        elif page == "Relatório de Dizimistas":
+            page_relatorio_dizimistas(user)
+        elif page == "Relatório de Missões":
+            if getattr(user, "role", "") == "TESOUREIRO":
+                page_relatorio_missoes_congregacao(user)
+            else:
+                page_relatorio_missoes(user)
+        elif page == "Visão Geral":
+            page_visao_geral(user)
+        elif page == "Cadastro":
+            page_cadastro(user)
+        else:
+            st.warning("Seleção de página inválida.")
+    except Exception as e:
+        st.error("Ocorreu um erro ao renderizar a aplicação.")
+        st.exception(e)
 
 if __name__ == "__main__":
     main()
-
-
