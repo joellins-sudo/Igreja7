@@ -423,6 +423,9 @@ def _to_float_brl(x: Any) -> float:
 
 # ===================== DB BASE & MODELS =====================
 # ===================== DB BASE & MODELS =====================
+# ===================== DB BASE & MODELS =====================
+from sqlalchemy import UniqueConstraint
+
 class Base(DeclarativeBase):
     pass
 
@@ -431,7 +434,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String, unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String)
-    role: Mapped[str] = mapped_column(String)  # 'SEDE', 'TESOUREIRO', 'TESOUREIRO MISSIONÁRIO'
+    role: Mapped[str] = mapped_column(String)
     congregation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("congregations.id"))
     congregation: Mapped[Optional["Congregation"]] = relationship(back_populates="users")
 
@@ -442,24 +445,39 @@ class Congregation(Base):
     users: Mapped[List["User"]] = relationship(back_populates="congregation")
     transactions: Mapped[List["Transaction"]] = relationship(back_populates="congregation")
     tithes: Mapped[List["Tithe"]] = relationship(back_populates="congregation")
+    sub_congregations: Mapped[List["SubCongregation"]] = relationship(back_populates="congregation", cascade="all, delete-orphan")
+
+class SubCongregation(Base):
+    __tablename__ = "sub_congregations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String, index=True)
+    congregation_id: Mapped[int] = mapped_column(ForeignKey("congregations.id"))
+    congregation: Mapped["Congregation"] = relationship(back_populates="sub_congregations")
+    transactions: Mapped[List["Transaction"]] = relationship(back_populates="sub_congregation")
+    tithes: Mapped[List["Tithe"]] = relationship(back_populates="sub_congregation")
+    __table_args__ = (
+        UniqueConstraint('name', 'congregation_id', name='_name_congregation_uc'),
+    )
 
 class Category(Base):
     __tablename__ = "categories"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String, unique=True, index=True)
-    type: Mapped[str] = mapped_column(String)  # 'DOAÇÃO' ou 'SAÍDA'
+    type: Mapped[str] = mapped_column(String)
     transactions: Mapped[List["Transaction"]] = relationship(back_populates="category")
 
 class Transaction(Base):
     __tablename__ = "transactions"
     id: Mapped[int] = mapped_column(primary_key=True)
     date: Mapped[date] = mapped_column(Date)
-    type: Mapped[str] = mapped_column(String)  # 'DOAÇÃO' ou 'SAÍDA'
+    type: Mapped[str] = mapped_column(String)
     category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"))
     amount: Mapped[float] = mapped_column(Float)
     description: Mapped[Optional[str]] = mapped_column(String)
     congregation_id: Mapped[int] = mapped_column(ForeignKey("congregations.id"))
     payment_method: Mapped[Optional[str]] = mapped_column(String, default=None)
+    sub_congregation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sub_congregations.id"))
+    sub_congregation: Mapped[Optional["SubCongregation"]] = relationship(back_populates="transactions")
     category: Mapped["Category"] = relationship(back_populates="transactions", lazy="joined")
     congregation: Mapped["Congregation"] = relationship(back_populates="transactions")
 
@@ -471,6 +489,9 @@ class Tithe(Base):
     amount: Mapped[float] = mapped_column(Float)
     congregation_id: Mapped[int] = mapped_column(ForeignKey("congregations.id"))
     payment_method: Mapped[Optional[str]] = mapped_column(String, default=None)
+    sub_congregation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sub_congregations.id"))
+    sub_congregation: Mapped[Optional["SubCongregation"]] = relationship(back_populates="tithes")
+    congregation: Mapped["Congregation"] = relationship(back_populates="tithes")
     
     # ================================================================
     # CAMPOS FALTANTES - ADICIONADOS AQUI:
