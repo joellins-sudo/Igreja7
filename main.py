@@ -661,28 +661,27 @@ def current_user():
         return db.get(User, uid)
 
 def login_ui():
-    # CSS base (o seu ADRF_LOGIN_CSS pode continuar)
-    st.markdown(ADRF_LOGIN_CSS, unsafe_allow_html=True)
+    # evita duplicar o formulário no mesmo run
+    if st.session_state.get("_adrf_login_drawn"):
+        return
+    st.session_state["_adrf_login_drawn"] = True
 
-    # === Centraliza a viewport e transforma o st.form em um "card" ===
+    # estilos (ok manter)
+    st.markdown(ADRF_LOGIN_CSS, unsafe_allow_html=True)
     LOGIN_CARD_CSS = """
     <style>
-      /* centraliza tudo vertical/horizontal */
       [data-testid="stAppViewContainer"] > .main{
         display:flex; align-items:center; justify-content:center;
         min-height:100vh; padding:0 !important;
       }
       header[data-testid="stHeader"]{ display:none; }
       footer{ visibility:hidden; }
-
-      /* deixa o formulário com cara de cartão e largura fixa */
       form[data-testid="stForm"]{
         width:520px; max-width:92vw; margin:0 auto;
         background:#fff; border:1px solid #E6E8F0; border-radius:14px;
         box-shadow:0 10px 30px rgba(16,24,40,.08);
         padding:28px 22px;
       }
-      /* inputs e botão mais bonitos dentro do card */
       form[data-testid="stForm"] .stTextInput>div>div>input,
       form[data-testid="stForm"] .stPassword>div>div>input{
         height:44px; font-size:1rem;
@@ -694,14 +693,10 @@ def login_ui():
     """
     st.markdown(LOGIN_CARD_CSS, unsafe_allow_html=True)
 
-    # === (REMOVA) Qualquer wrapper HTML aberto antes tipo:
-    # st.markdown("<div class='adrf-wrap'><div class='adrf-card'><div class='body'>", unsafe_allow_html=True)
-    # ... e o fechamento correspondente. Eles não "abraçam" widgets do Streamlit e viram um card vazio no topo.
-
     # LOGO (opcional)
     try:
         if os.path.exists(LOGO_PATH):
-            st.image(LOGO_PATH, caption=None, use_container_width=False, width=120)
+            st.image(LOGO_PATH, width=120)
         else:
             st.markdown(
                 "<div style='text-align:center; font:800 48px/1 Inter,system-ui; color:#1f66eb'>ADRF<span style='color:#74b816'>!</span></div>",
@@ -710,14 +705,10 @@ def login_ui():
     except Exception:
         pass
 
-    # === FORMULÁRIO DE LOGIN (dentro do card) ===
-    with st.form("adrf_login_form", clear_on_submit=False):
+    # >>>>>>  key NOVA para o form  <<<<<<
+    with st.form("adrf_login_form_v2", clear_on_submit=False):
         u = st.text_input("Usuário", placeholder="Usuário", key="adrf_user")
         p = st.text_input("Senha", type="password", placeholder="Senha", key="adrf_pass")
-
-        # Se você tiver combo de órgão/perfil, coloque aqui também:
-        # org = st.selectbox("Órgão", ["PCPE", "PMPE", "SDS", ...])
-
         ok = st.form_submit_button("ACESSAR")
 
     if ok:
@@ -728,10 +719,12 @@ def login_ui():
                 try:
                     cm = get_cookie_manager()
                     token = _make_token({"uid": int(user.id)})
-                    cm.set(COOKIE_NAME, token, expires_at=datetime.utcnow()+timedelta(days=30), key="auth_set")
+                    cm.set(COOKIE_NAME, token,
+                           expires_at=datetime.utcnow()+timedelta(days=30),
+                           key="auth_set")
                     _update_last_active(cm)
                 except Exception:
-                    st.warning("Login salvo só na sessão atual. Instale 'extra-streamlit-components' para lembrar o login.")
+                    st.warning("Login salvo só na sessão atual.")
                 st.rerun()
             else:
                 st.error("Usuário ou senha inválidos.")
@@ -3036,63 +3029,16 @@ def page_cadastro(user: "User"):
 # ===================== MAIN / ROTEAMENTO =====================
 def main():
     ensure_seed()
-
-    # garanta que a sidebar seja redesenhada a cada rerun
-    st.session_state["sidebar_rendered"] = False
-
-    # tenta restaurar login por cookie (se o pacote estiver instalado)
-    tok = None
-    try:
-        cm = get_cookie_manager()
-        _check_inactivity_and_logout(cm)
-        tok = cm.get(COOKIE_NAME)
-    except Exception:
-        cm = None
-        tok = None
-
-    if st.session_state.get("uid") is None and tok:
-        data = _read_token(tok)
-        if data and int(data.get("uid", 0)) > 0:
-            st.session_state["uid"] = int(data["uid"])
-
     user = current_user()
     if not user:
-        # sem usuário -> mostra o cartão de login
         login_ui()
-        return
+        return   # <- importantíssimo: sai daqui para não montar nada por cima
 
-    # desenha a sidebar e pega a página escolhida
-    page = sidebar_common(user)
-
-    # fallback de página
-    if "main_menu_page" not in st.session_state:
-        st.session_state["main_menu_page"] = "Menu"
-    page = st.session_state["main_menu_page"]
-
-    # ---------- roteamento ----------
-    if page == "Menu":
-        page_menu(user)
-    elif page == "Lançamentos":
-        page_lancamentos(user)
-    elif page == "Relatório de Entrada":
-        page_relatorio_entrada(user)
-    elif page == "Relatório de Saída":
-        page_relatorio_saida(user)
-    elif page == "Relatório de Missões":
-        # Tesoureiro vê o saldo da própria congregação; Sede/Tes. Missionário veem o geral
-        if getattr(user, "role", "") == "TESOUREIRO":
-            page_relatorio_missoes_congregacao(user)
-        else:
-            page_relatorio_missoes(user)
-    elif page == "Relatório de Dizimistas":
-        page_relatorio_dizimistas(user)
-    elif page == "Visão Geral":
-        page_visao_geral(user)
-    elif page == "Cadastro":
-        page_cadastro(user)
-    else:
-        page_menu(user)
+    # página atual
+    st.session_state.setdefault("main_menu_page", "Menu")
+    render_current_page(user)
 
 if __name__ == "__main__":
     main()
+
 
