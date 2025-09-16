@@ -3128,6 +3128,7 @@ def page_lancamentos(user: "User"):
                     st.rerun()
 
                     # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
+# ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 def page_relatorio_entrada(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -3146,11 +3147,21 @@ def page_relatorio_entrada(user: "User"):
             is_all = False
             cong_obj = congs[0] if congs else None
 
+        # --- Visão Agregada (SEDE) ---
         if is_all:
             st.info("Escopo: **Todas as congregações** — edite o total de entradas mensal por congregação abaixo.")
             _editor_entradas_agg_all(ordered, start, end)
+            
+            # Adiciona o total geral para a visão de todas as congregações
+            with SessionLocal() as _db_tot_in:
+                total_geral_in = 0.0
+                for _c in ordered:
+                    _t = _collect_month_data(_db_tot_in, _c.id, start, end)["totals"]
+                    total_geral_in += float(_t["entradas_total_sem_missoes"])
+            st.metric("Total geral de entradas (todas as congregações)", format_currency(total_geral_in))
             return
 
+        # --- Visão por Congregação Específica ---
         if not cong_obj:
             st.info("Selecione uma congregação."); return
 
@@ -3168,11 +3179,69 @@ def page_relatorio_entrada(user: "User"):
             key="re_entrada_sum_editor",
         )
         
+        # =================================================================
+        # NOVO BLOCO DE TOTAIS (GARANTINDO A EXIBIÇÃO CORRETA)
+        # =================================================================
+        try:
+            total_dizimo = 0.0
+            total_oferta = 0.0
+            total_geral = 0.0
+            if isinstance(edited, pd.DataFrame) and not edited.empty:
+                # Garante que os valores sejam numéricos para a soma
+                edited_calc = edited.copy()
+                edited_calc["Dízimo"] = edited_calc["Dízimo"].apply(_to_float_brl)
+                edited_calc["Oferta"] = edited_calc["Oferta"].apply(_to_float_brl)
+                
+                total_dizimo = edited_calc["Dízimo"].sum()
+                total_oferta = edited_calc["Oferta"].sum()
+                total_geral = total_dizimo + total_oferta
+        except Exception as e:
+            # Em caso de erro, os totais permanecerão zero, sem quebrar a aplicação
+            pass
+        
+        st.markdown("---")
+        st.subheader("Totais do Período (baseado na tabela acima)")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Soma Dízimos", format_currency(total_dizimo))
+        col2.metric("Soma Ofertas", format_currency(total_oferta))
+        col3.metric("Soma Geral", format_currency(total_geral))
+        st.markdown("---")
+        # =================================================================
+        # FIM DO BLOCO DE TOTAIS
+        # =================================================================
+
         def _save_sum():
             _apply_entrada_summary_changes(cong_obj.id, start, end, edited)
             st.toast("💾 Alterações salvas.", icon="✅")
             st.rerun()
         _save_btn(_save_sum, "entrada_sum")
+
+        # Seção para apagar linhas (mantida como estava)
+        if isinstance(edited, pd.DataFrame) and not edited.empty and ("Data do Culto" in edited.columns):
+            with st.expander("🗑️ Apagar linhas da tabela-resumo"):
+                try:
+                    _datas_ord = sorted({_to_date(d) for d in edited["Data do Culto"].tolist() if pd.notna(d)})
+                    _label_map = {format_date(d): d for d in _datas_ord}
+                    _rotulos = list(_label_map.keys())
+                except Exception:
+                    _rotulos, _label_map = [], {}
+
+                _sel_del = st.multiselect(
+                    "Selecione as datas que deseja APAGAR", options=_rotulos, key="re_entrada_sum_del_dates"
+                )
+                def _delete_selected_rows():
+                    if not _sel_del: return
+                    to_drop = {_label_map[x] for x in _sel_del if x in _label_map}
+                    edited_clean = edited.copy()
+                    edited_clean["Data do Culto"] = edited_clean["Data do Culto"].map(_to_date)
+                    edited_clean = edited_clean[~edited_clean["Data do Culto"].isin(to_drop)]
+                    _apply_entrada_summary_changes(cong_obj.id, start, end, edited_clean)
+                    st.toast("🗑️ Linhas apagadas com sucesso.", icon="✅")
+                    st.rerun()
+
+                st.button(
+                    "Apagar linhas selecionadas", type="secondary", on_click=_delete_selected_rows, key="btn_del_entrada_sum"
+                )
 # ===================== MAIN =====================
 def main():
     try:
