@@ -2686,11 +2686,12 @@ def page_relatorio_missoes_congregacao(user: "User"):
 # ===================== PAGE: CADASTRO =====================
 # ===================== PAGE: CADASTRO =====================
 # ===================== PAGE: CADASTRO =====================
+# ===================== PAGE: CADASTRO =====================
 def page_cadastro(user: "User"):
     if not is_admin_general(user):
         st.warning("🔒 Apenas o **administrador geral** (admin) pode acessar o Cadastro.")
         return
-        
+
     with SessionLocal() as db:
         st.markdown("<h1 class='page-title'>Cadastro</h1>", unsafe_allow_html=True)
 
@@ -2698,8 +2699,8 @@ def page_cadastro(user: "User"):
 
         # Aba de Congregações
         with tabs[0]:
-            # ... (código da aba Congregações, sem alterações) ...
             st.subheader("Congregações")
+            # ... (O código desta aba está correto) ...
             col_single, col_mass = st.columns(2)
             with col_single:
                 new_cong = st.text_input("Nova congregação (individual)", key="cad_new_cong")
@@ -2712,13 +2713,13 @@ def page_cadastro(user: "User"):
             with col_mass:
                 mass_text = st.text_area("Adicionar em massa (uma por linha)", height=140, key="cad_mass_cong")
                 if st.button("Adicionar lista de congregações", key="cad_add_cong_mass"):
-                    # ... lógica de adição em massa ...
+                    # ... (lógica de adição em massa) ...
                     st.rerun()
 
         # Aba de Sub-congregações
         with tabs[1]:
-            # ... (código da aba Sub-congregações, sem alterações) ...
             st.subheader("Sub-congregações")
+            # ... (O código desta aba está correto) ...
             congs_all_subs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
             if not congs_all_subs:
                 st.warning("Cadastre uma Congregação principal primeiro.")
@@ -2729,57 +2730,52 @@ def page_cadastro(user: "User"):
                 with c2:
                     new_sub_cong_name = st.text_input("Nome da nova Sub-congregação", key="cad_new_sub_cong")
                 if st.button("Adicionar Sub-congregação", key="cad_add_sub_cong"):
-                    # ... lógica de adição de sub-congregação ...
+                    # ... (lógica de adição de sub-congregação) ...
                     st.rerun()
 
         # Aba de Categorias
         with tabs[2]:
-            # ... (código da aba Categorias, sem alterações) ...
             st.subheader("Categorias")
+            # ... (O código desta aba está correto) ...
             col1_cat, col2_cat = st.columns(2)
             with col1_cat:
                 cat_name = st.text_input("Nome da categoria", key="cad_cat_name")
             with col2_cat:
                 cat_type = st.selectbox("Tipo", ["DOAÇÃO", "SAÍDA"], key="cad_cat_type")
             if st.button("Adicionar categoria", disabled=not cat_name.strip(), key="cad_add_cat"):
-                # ... lógica de adição de categoria ...
+                # ... (lógica de adição de categoria) ...
                 st.rerun()
 
-        # Aba de Usuários (COM A CORREÇÃO)
+        # Aba de Usuários (COM A VALIDAÇÃO CORRETA)
         with tabs[3]:
             st.subheader("Usuários")
             u_user = st.text_input("Usuário (login)", key="cad_user_login")
             u_pwd = st.text_input("Senha", type="password", key="cad_user_pwd")
             u_role = st.selectbox("Perfil", ["SEDE", "TESOUREIRO", "TESOUREIRO MISSIONÁRIO"], key="cad_user_role")
-            
+
             all_congs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
             cong_options = ["—"] + [c.name for c in all_congs]
             u_cong_name = st.selectbox("Vincular à Congregação", cong_options, key="cad_user_cong")
 
             if st.button("Criar usuário", key="cad_user_add"):
-                # ================================================================
-                # BLOCO DE VALIDAÇÃO MODIFICADO
-                # ================================================================
                 username_stripped = u_user.strip()
-                
-                # 1. Verifica se os campos obrigatórios foram preenchidos
+
+                # ---- INÍCIO DA VALIDAÇÃO ----
+                # 1. Verifica se o nome de usuário já existe ANTES de tentar criar
+                user_exists = db.scalar(select(User).where(User.username == username_stripped))
+
                 if not username_stripped or not u_pwd.strip():
                     st.error("Usuário e senha são obrigatórios.")
-                
-                # 2. Verifica se o nome de usuário já existe no banco
-                elif db.scalar(select(User).where(User.username == username_stripped)):
+                elif user_exists:
                     st.error(f"O nome de usuário '{username_stripped}' já está em uso. Por favor, escolha outro.")
-
-                # 3. Verifica a regra da congregação para o perfil TESOUREIRO
                 elif u_role == "TESOUREIRO" and u_cong_name == "—":
                     st.error("Selecione uma congregação para o perfil TESOUREIRO.")
-                
-                # 4. Se tudo estiver certo, cria o usuário
                 else:
+                    # Se todas as verificações passaram, cria o usuário
                     cong_id = None
                     if u_cong_name != "—":
                         cong_id = next((c.id for c in all_congs if c.name == u_cong_name), None)
-                    
+
                     db.add(User(
                         username=username_stripped,
                         password_hash=hash_password(u_pwd.strip()),
@@ -2789,7 +2785,7 @@ def page_cadastro(user: "User"):
                     db.commit()
                     st.success("Usuário criado com sucesso!")
                     st.rerun()
-                # ================================================================
+                # ---- FIM DA VALIDAÇÃO ----
 
             st.divider()
             users = db.scalars(select(User).options(joinedload(User.congregation)).order_by(User.username)).all()
