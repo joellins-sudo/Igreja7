@@ -1117,6 +1117,7 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
         edited = edited.dropna(subset=["Data do Culto"])
 
         # 3. Mapeia os valores desejados (want_dz, want_of) a partir do DF limpo
+        # 3. Mapeia os valores desejados (want_dz, want_of) a partir do DF limpo
         wanted = {r["Data do Culto"]: (float(r["Dízimo"]), float(r["Oferta"])) for _, r in edited.iterrows()}
         
         # Adiciona as datas que já existiam na base (para limpar ajustes se os valores foram zerados)
@@ -1125,6 +1126,12 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
         for d in all_dates:
             if d is None:
                 continue 
+            
+            # CHAVE DA CORREÇÃO:
+            # Se a data NÃO está no 'wanted', ele assume (0.0, 0.0), garantindo que o ajuste será zerado.
+            want_dz, want_of = wanted.get(d, (0.0, 0.0)) 
+            # ... o código continua para calcular o ajuste (adj_dz_new = want_dz - sum_dz_others)
+            # Se want_dz é 0.0, e sum_dz_others > 0.0, adj_dz_new será negativo, zerando o ajuste. 
             
             # Pega o que o usuário quer que seja o total do dia (pode ser 0.0 se a linha foi apagada)
             want_dz, want_of = wanted.get(d, (0.0, 0.0))
