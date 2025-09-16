@@ -737,12 +737,49 @@ def order_congs_sede_first(congs: List[Congregation]) -> List[Congregation]:
 
 def sidebar_common(user: "User") -> str:
     """
-    Desenha o menu lateral apenas uma vez e retorna a página selecionada.
-    Em reruns, mantém a escolha do usuário.
+    Desenha o menu lateral e retorna a página selecionada.
+    Utiliza o st.session_state para manter a última página escolhida.
     """
-    # Se já desenhou nesta execução, só devolve a última seleção
-    if st.session_state.get("sidebar_rendered", False):
-        return st.session_state.get("main_menu_page", "Visão Geral")
+    # Define o mapeamento de volta (do nome bonito para o nome puro da página)
+    MENU_PAGES = {
+        "Lançamentos": "📥",
+        "Relatório de Entrada": "📊",
+        "Relatório de Saída": "📉",
+        "Relatório de Missões": "🌍",
+        "Relatório de Dizimistas": "🧾",
+        "Visão Geral": "🏁",
+        "Cadastro": "🛠️",
+    }
+    
+    # 1. Define as opções disponíveis com base no papel
+    role = getattr(user, "role", "")
+    if role == "SEDE":
+        menu_options_plain = [
+            "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
+            "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Cadastro"
+        ]
+    elif role == "TESOUREIRO":
+        menu_options_plain = [
+            "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
+            "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"
+        ]
+    elif role == "TESOUREIRO MISSIONÁRIO":
+        menu_options_plain = ["Relatório de Missões"]
+    else:
+        menu_options_plain = ["Visão Geral"]
+
+    # Labels com ícones
+    menu_labels_pretty = [f"{MENU_PAGES.get(opt, '•')} {opt}" for opt in menu_options_plain]
+    label_to_page = {label: page for label, page in zip(menu_labels_pretty, menu_options_plain)}
+
+    # 2. Determina o índice padrão para o st.radio
+    current_page = st.session_state.get("main_menu_page", "Visão Geral")
+    try:
+        # Tenta usar o índice da última página visitada
+        default_index = menu_options_plain.index(current_page)
+    except ValueError:
+        # Se a página salva não estiver disponível para este perfil, usa o primeiro item
+        default_index = 0
 
     with st.sidebar:
         # Identidade / logo
@@ -753,69 +790,27 @@ def sidebar_common(user: "User") -> str:
             pass
         st.write(f"👤 **{getattr(user, 'username', 'Usuário')}** — *{getattr(user, 'role', '')}*")
 
-        # Ícones
-        MENU_ICONS = {
-            "Lançamentos": "📥",
-            "Relatório de Entrada": "📊",
-            "Relatório de Saída": "📉",
-            "Relatório de Missões": "🌍",
-            "Relatório de Dizimistas": "🧾",
-            "Visão Geral": "🏁",
-            "Cadastro": "🛠️",
-        }
-
-        # Opções conforme o papel
-        role = getattr(user, "role", "")
-        if role == "SEDE":
-            menu_options_plain = [
-                "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
-                "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Cadastro"
-            ]
-        elif role == "TESOUREIRO":
-            menu_options_plain = [
-                "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
-                "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"
-            ]
-        elif role == "TESOUREIRO MISSIONÁRIO":
-            menu_options_plain = ["Relatório de Missões"]
-        else:
-            menu_options_plain = ["Visão Geral"]
-
-        # Labels com ícones
-        menu_labels_pretty = [f"{MENU_ICONS.get(opt, '•')} {opt}" for opt in menu_options_plain]
-
-        # Chave estável do widget
-        state_key = f"main_menu_nav_{getattr(user, 'id', 'anon')}"
-
-        # Define valor inicial só uma vez (sem passar index no radio)
-        if state_key not in st.session_state:
-            # usa última página escolhida, se houver
-            prev_page = st.session_state.get("main_menu_page")
-            if prev_page in menu_options_plain:
-                init_label = f"{MENU_ICONS.get(prev_page, '•')} {prev_page}"
-            else:
-                init_label = menu_labels_pretty[0]
-            st.session_state[state_key] = init_label
-
+        # 3. Desenha o menu (o Streamlit gerencia a mudança de estado via 'key')
         sel_label = st.radio(
             "Menu",
             options=menu_labels_pretty,
-            key=state_key,
+            index=default_index,
+            key=f"main_menu_nav_{getattr(user, 'id', 'anon')}",
             label_visibility="visible",
         )
 
-        # Converte label -> página “pura”
-        sel_index = menu_labels_pretty.index(sel_label)
-        page = menu_options_plain[sel_index]
+        # Converte label selecionada -> nome puro da página
+        page = label_to_page.get(sel_label, "Visão Geral")
+        
+        # 4. Salva a nova escolha na sessão para manter o estado no próximo rerun
         st.session_state["main_menu_page"] = page
 
         st.divider()
         if st.button("Sair", key=f"btn_logout_{getattr(user, 'id', 'anon')}"):
             logout()
-            st.rerun() # <-- Garante que o logout é processado imediatamente
+            st.rerun() 
 
-        # Marca como renderizado
-        st.session_state["sidebar_rendered"] = True
+    return page
 
 # ======= NOVO: helper padrão para botões 'Salvar alterações' =======
 # ====== CORES P/ BOTÕES ======
