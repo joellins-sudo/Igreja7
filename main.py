@@ -2804,85 +2804,99 @@ def page_cadastro(user: "User"):
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS =====================
+# ===================== PAGE: LANÇAMENTOS =====================
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
         st.markdown(f"<h1 class='page-title'>Lançamentos</h1>", unsafe_allow_html=True)
+
+        # --- Variáveis de Contexto ---
         target_cong_obj = None
+        target_sub_cong_id = None
+        target_display_name = ""
+
+        # --- LÓGICA DE SELEÇÃO DE CONTEXTO ---
         if user.role == "SEDE":
             congs_all = order_congs_sede_first(cong_options_for(user, db))
-            cong_sel_name = st.selectbox("Selecione a Congregação Principal:", [c.name for c in congs_all], key="lan_cong_sel_sede")
-            target_cong_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
-        else:
-            target_cong_obj = db.get(Congregation, user.congregation_id)
-        
-        if not target_cong_obj:
-            st.error("Nenhuma congregação selecionada ou encontrada."); return
+            cong_sel_name = st.selectbox("1. Selecione a Congregação Principal:", [c.name for c in congs_all], key="lan_cong_sel_sede")
+            parent_cong_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
 
-        st.markdown(f"### CONGREGAÇÃO: {target_cong_obj.name.upper()}", unsafe_allow_html=True)
+            if parent_cong_obj:
+                sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
+                opcoes = {parent_cong_obj.name + " (Principal)": None}
+                for sub in sub_congs:
+                    opcoes[sub.name] = sub.id
+                
+                contexto_selecionado = st.selectbox("2. Lançar em:", list(opcoes.keys()), key="lan_sub_sel_sede")
+                target_cong_obj = parent_cong_obj
+                target_sub_cong_id = opcoes[contexto_selecionado]
+                target_display_name = contexto_selecionado
 
-        modo = st.radio("Modo de lançamento:", ["Formulário único", "Editar direto na tabela"], horizontal=True, key="lan_modo_sel")
-        st.divider()
+        elif user.role == "TESOUREIRO":
+            main_cong = db.get(Congregation, user.congregation_id)
+            if not main_cong:
+                st.error("Seu usuário não está vinculado a uma congregação principal.")
+                return
 
-        if modo == "Formulário único":
-            target_sub_cong_id = None
-            sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == target_cong_obj.id).order_by(SubCongregation.name)).all()
-            opcoes = {target_cong_obj.name + " (Principal)": None}
+            sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == main_cong.id).order_by(SubCongregation.name)).all()
+            opcoes = {main_cong.name + " (Principal)": None}
             for sub in sub_congs:
                 opcoes[sub.name] = sub.id
-            contexto_selecionado = st.selectbox("Lançar em:", list(opcoes.keys()), key="lan_sub_sel")
+
+            contexto_selecionado = st.selectbox("Selecione a unidade para fazer o lançamento:", list(opcoes.keys()), key="lan_context_sel_tesoureiro")
+            target_cong_obj = main_cong
             target_sub_cong_id = opcoes[contexto_selecionado]
-            st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
-            st.divider()
-            
-            with st.expander("➕ Lançar ENTRADA", expanded=True):
-                with st.form("form_entrada"):
-                    # Formulário de Entrada
-                    st.rerun()
+            target_display_name = contexto_selecionado
+        
+        else:
+            st.info("Seu perfil não tem permissão para realizar lançamentos.")
+            return
 
-            with st.expander("👤 Lançar DÍZIMO (Nominal)"):
-                with st.form("form_dizimo"):
-                    # Formulário de Dízimo
-                    st.rerun()
+        if not target_cong_obj:
+            st.error("Nenhuma congregação selecionada."); return
 
-            with st.expander("➖ Lançar SAÍDA"):
-                with st.form("form_saida"):
-                    # Formulário de Saída
-                    st.rerun()
+        st.markdown(f"#### Lançando em: *{target_display_name}*")
+        st.divider()
 
-        elif modo == "Editar direto na tabela":
-            st.info("A edição em tabela se aplica apenas à congregação principal, não às sub-congregações.")
-            ref_tab = get_month_selector("Mês de referência da tabela")
-            start_tab, end_tab = month_bounds(ref_tab)
-            
-            st.markdown("##### Entradas (Dízimo e Oferta)")
-            df_entradas = _entrada_summary_df(db, target_cong_obj.id, start_tab, end_tab, sub_cong_id=None)
-            edited_entradas = st.data_editor(df_entradas, use_container_width=True, hide_index=True, num_rows="dynamic", key="editor_entradas_lancamentos")
-            # Bloco de Totais para Entradas
-            try:
-                total_dizimo, total_oferta, total_geral = 0.0, 0.0, 0.0
-                if isinstance(edited_entradas, pd.DataFrame) and not edited_entradas.empty:
-                    df_calc = edited_entradas.copy()
-                    df_calc["Dízimo"] = df_calc["Dízimo"].map(_to_float_brl)
-                    df_calc["Oferta"] = df_calc["Oferta"].map(_to_float_brl)
-                    total_dizimo = df_calc["Dízimo"].sum()
-                    total_oferta = df_calc["Oferta"].sum()
-                    total_geral = total_dizimo + total_oferta
-            except Exception: pass
-            
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total Dízimos (tabela)", format_currency(total_dizimo))
-            col2.metric("Total Ofertas (tabela)", format_currency(total_oferta))
-            col3.metric("Total Geral (tabela)", format_currency(total_geral))
-            _save_btn(lambda: _apply_entrada_summary_changes(target_cong_obj.id, start_tab, end_tab, edited_entradas), f"lan_tab_{target_cong_obj.id}", "entrada")
+        # --- FORMULÁRIOS DE LANÇAMENTO ---
+        with st.expander("➕ Lançar ENTRADA", expanded=True):
+            with st.form("form_entrada"):
+                cats_in = [c for c in categories_for_type(db, TYPE_IN) if "ajuste" not in _norm(c.name)]
+                c1, c2 = st.columns(2)
+                with c1: ent_data = st.date_input("Data da Entrada", value=today_bahia(), key="ent_data")
+                with c2: ent_cat_name = st.selectbox("Categoria", [c.name for c in cats_in] or ["—"], key="ent_cat")
+                ent_desc = st.text_input("Descrição (opcional)", key="ent_desc")
+                ent_valor = st.number_input("Valor (R$)", min_value=0.01, format="%.2f", key="ent_valor")
+                if st.form_submit_button("Salvar ENTRADA", type="primary"):
+                    cat_obj = next((c for c in cats_in if c.name == ent_cat_name), None)
+                    if ent_valor and cat_obj:
+                        db.add(Transaction(date=ent_data, type=TYPE_IN, category_id=cat_obj.id, amount=ent_valor, description=(ent_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
+                        db.commit(); st.success("Entrada registrada!"); st.rerun()
 
-            st.markdown("---")
-            tithes = db.scalars(select(Tithe).where(Tithe.congregation_id == target_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id == None)).all()
-            _editor_dizimos(tithes, "Dizimistas do período (Congregação Principal)", force_cong_id=target_cong_obj.id)
+        with st.expander("👤 Lançar DÍZIMO (Nominal)"):
+            with st.form("form_dizimo"):
+                dz_data = st.date_input("Data do Dízimo", value=today_bahia(), key="dz_data")
+                dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
+                dz_valor = st.number_input("Valor (R$)", min_value=0.01, format="%.2f", key="dz_valor")
+                dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência"], key="dz_pay")
+                if st.form_submit_button("Salvar DIZIMISTA", type="primary"):
+                    if dz_valor and dz_nome.strip():
+                        db.add(Tithe(date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor, congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id, payment_method=dz_payment))
+                        db.commit(); st.success("Dízimo registrado!"); st.rerun()
 
-            st.markdown("---")
-            txs_out = db.scalars(select(Transaction).options(joinedload(Transaction.category)).where(Transaction.congregation_id == target_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_OUT, Transaction.sub_congregation_id == None)).all()
-            _editor_lancamentos(txs_out, "Saídas do período (Congregação Principal)", tx_type_hint=TYPE_OUT, force_cong_id=target_cong_obj.id)
+        with st.expander("➖ Lançar SAÍDA"):
+            with st.form("form_saida"):
+                cats_out = categories_for_type(db, TYPE_OUT)
+                c1, c2 = st.columns(2)
+                with c1: sai_data = st.date_input("Data da Saída", value=today_bahia(), key="sai_data")
+                with c2: sai_cat_name = st.selectbox("Categoria", [c.name for c in cats_out] or ["—"], key="sai_cat")
+                sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
+                sai_valor = st.number_input("Valor (R$)", min_value=0.01, format="%.2f", key="sai_valor")
+                if st.form_submit_button("Salvar SAÍDA", type="primary"):
+                    cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
+                    if sai_valor and cat_obj:
+                        db.add(Transaction(date=sai_data, type=TYPE_OUT, category_id=cat_obj.id, amount=sai_valor, description=(sai_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
+                        db.commit(); st.success("Saída registrada!"); st.rerun()
 
 
                     # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
