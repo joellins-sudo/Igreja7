@@ -741,52 +741,42 @@ def order_congs_sede_first(congs: List[Congregation]) -> List[Congregation]:
 
 def sidebar_common(user: "User") -> str:
     """
-    Desenha o menu lateral e retorna a página selecionada.
-    Utiliza o st.session_state para manter a última página escolhida.
+    Desenha o menu lateral e retorna a página selecionada, forçando a leitura
+    do estado da sessão para garantir a navegação.
     """
-    # Define o mapeamento de volta (do nome bonito para o nome puro da página)
+    
+    # 1. Definições de Menu (Mantidas)
     MENU_PAGES = {
-        "Lançamentos": "📥",
-        "Relatório de Entrada": "📊",
-        "Relatório de Saída": "📉",
-        "Relatório de Missões": "🌍",
-        "Relatório de Dizimistas": "🧾",
-        "Visão Geral": "🏁",
+        "Lançamentos": "📥", "Relatório de Entrada": "📊", "Relatório de Saída": "📉",
+        "Relatório de Missões": "🌍", "Relatório de Dizimistas": "🧾", "Visão Geral": "🏁",
         "Cadastro": "🛠️",
     }
     
-    # 1. Define as opções disponíveis com base no papel
     role = getattr(user, "role", "")
     if role == "SEDE":
-        menu_options_plain = [
-            "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
-            "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Cadastro"
-        ]
+        menu_options_plain = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Cadastro"]
     elif role == "TESOUREIRO":
-        menu_options_plain = [
-            "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
-            "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"
-        ]
+        menu_options_plain = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"]
     elif role == "TESOUREIRO MISSIONÁRIO":
         menu_options_plain = ["Relatório de Missões"]
     else:
         menu_options_plain = ["Visão Geral"]
 
-    # Labels com ícones
     menu_labels_pretty = [f"{MENU_PAGES.get(opt, '•')} {opt}" for opt in menu_options_plain]
     label_to_page = {label: page for label, page in zip(menu_labels_pretty, menu_options_plain)}
 
     # 2. Determina o índice padrão para o st.radio
-    current_page = st.session_state.get("main_menu_page", "Visão Geral")
+    # A chave é o nome que a variável de sessão de navegação terá.
+    session_key = "main_menu_page" 
+    current_page_name = st.session_state.get(session_key, "Visão Geral")
+    
     try:
-        # Tenta usar o índice da última página visitada
-        default_index = menu_options_plain.index(current_page)
+        default_index = menu_options_plain.index(current_page_name)
     except ValueError:
-        # Se a página salva não estiver disponível para este perfil, usa o primeiro item
-        default_index = 0
+        default_index = 0 # Fallback se a página salva não estiver mais disponível
 
     with st.sidebar:
-        # Identidade / logo
+        # Identidade e Logo (Mantidos)
         try:
             if os.path.exists(LOGO_PATH):
                 st.image(LOGO_PATH, use_column_width=True)
@@ -794,21 +784,20 @@ def sidebar_common(user: "User") -> str:
             pass
         st.write(f"👤 **{getattr(user, 'username', 'Usuário')}** — *{getattr(user, 'role', '')}*")
 
-        # 3. Desenha o menu (o Streamlit gerencia a mudança de estado via 'key')
+        # 3. Desenha o menu
         sel_label = st.radio(
             "Menu",
             options=menu_labels_pretty,
             index=default_index,
-            key=f"main_menu_nav_{getattr(user, 'id', 'anon')}",
+            # Usamos uma chave simples e única que não deve causar problemas de duplicação
+            key=session_key, 
             label_visibility="visible",
         )
 
-        # Converte label selecionada -> nome puro da página
+        # 4. Salva o valor da página selecionada
         page = label_to_page.get(sel_label, "Visão Geral")
+        st.session_state[session_key] = page
         
-        # 4. Salva a nova escolha na sessão para manter o estado no próximo rerun
-        st.session_state["main_menu_page"] = page
-
         st.divider()
         if st.button("Sair", key=f"btn_logout_{getattr(user, 'id', 'anon')}"):
             logout()
