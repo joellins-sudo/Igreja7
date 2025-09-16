@@ -984,7 +984,9 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
     old_ids = set(int(x) for x in o["ID"].tolist() if pd.notna(x))
     new_ids = set(int(x) for x in n["ID"].tolist() if pd.notna(x) and int(x) > 0)
     to_delete = list(old_ids - new_ids)
-    old_map = {int(r["ID"]): r for _, r in o.iterrows()}
+    
+    # CORREÇÃO: Adicionado filtro 'if pd.notna(r["ID"])' para evitar o erro int(None)
+    old_map = {int(r["ID"]): r for _, r in o.iterrows() if pd.notna(r["ID"])}
 
     with SessionLocal() as db:
         if to_delete:
@@ -1014,16 +1016,13 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
             if not is_new:
                 continue
             
-            # --- CORREÇÃO: VERIFICAÇÃO DE DADOS MÍNIMOS ---
             data = _to_date(row.get("Data"))
             nome = str(row.get("Dizimista","")).strip()
             amount = _to_float_brl(row.get("Valor"))
             forma = str(row.get("Forma de Pagamento","")).strip() or None
             
-            # Linha considerada inválida se: 1) nome está vazio ou 2) valor é zero/nulo
             if not nome or abs(amount) < 0.0001:
                 continue
-            # --- FIM CORREÇÃO ---
 
             cong_id = default_cong_id
             if cong_id is None and not o.empty:
