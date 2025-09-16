@@ -2801,25 +2801,42 @@ def page_cadastro(user: "User"):
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS =====================
+# ===================== PAGE: LANÇAMENTOS =====================
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
         st.markdown(f"<h1 class='page-title'>Lançamentos</h1>", unsafe_allow_html=True)
 
+        # --- Variáveis de Contexto ---
+        # Elas guardarão a congregação e sub-congregação onde o lançamento será feito.
         target_cong_obj = None
         target_sub_cong_id = None
         target_display_name = ""
 
         # --- LÓGICA DE SELEÇÃO DE CONTEXTO ---
+        # O comportamento muda dependendo do perfil do usuário.
+
         if user.role == "SEDE":
-            # Admin da SEDE pode escolher qualquer congregação principal
+            # 1. Admin da SEDE escolhe a congregação principal
             congs_all = order_congs_sede_first(cong_options_for(user, db))
-            cong_sel_name = st.selectbox("Selecione a Congregação para lançar:", [c.name for c in congs_all], key="lan_cong_sel_sede")
-            target_cong_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
-            target_display_name = target_cong_obj.name if target_cong_obj else "Nenhuma"
+            cong_sel_name = st.selectbox("1. Selecione a Congregação Principal:", [c.name for c in congs_all], key="lan_cong_sel_sede")
+            parent_cong_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
+
+            if parent_cong_obj:
+                # 2. Em seguida, escolhe a sub-congregação (ou a principal)
+                sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
+                opcoes = {parent_cong_obj.name + " (Principal)": None}
+                for sub in sub_congs:
+                    opcoes[sub.name] = sub.id
+                
+                contexto_selecionado = st.selectbox("2. Lançar em:", list(opcoes.keys()), key="lan_sub_sel_sede")
+                
+                target_cong_obj = parent_cong_obj
+                target_sub_cong_id = opcoes[contexto_selecionado]
+                target_display_name = contexto_selecionado
 
         elif user.role == "TESOUREIRO":
-            # Tesoureiro vê sua congregação principal e as sub-congregações dela
+            # Tesoureiro vê um menu único com sua congregação e as filhas dela
             main_cong = db.get(Congregation, user.congregation_id)
             if not main_cong:
                 st.error("Seu usuário não está vinculado a uma congregação principal.")
@@ -2827,34 +2844,27 @@ def page_lancamentos(user: "User"):
 
             sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == main_cong.id).order_by(SubCongregation.name)).all()
             
-            # Monta as opções para o dropdown
-            opcoes_contexto = {main_cong.name + " (Principal)": {"cong_id": main_cong.id, "sub_id": None}}
+            opcoes = {main_cong.name + " (Principal)": None}
             for sub in sub_congs:
-                opcoes_contexto[sub.name] = {"cong_id": main_cong.id, "sub_id": sub.id}
+                opcoes[sub.name] = sub.id
 
-            contexto_selecionado = st.selectbox(
-                "Selecione a unidade para fazer o lançamento:",
-                list(opcoes_contexto.keys()),
-                key="lan_context_sel_tesoureiro"
-            )
-
-            info_selecionada = opcoes_contexto[contexto_selecionado]
+            contexto_selecionado = st.selectbox("Selecione a unidade para fazer o lançamento:", list(opcoes.keys()), key="lan_context_sel_tesoureiro")
+            
             target_cong_obj = main_cong
-            target_sub_cong_id = info_selecionada["sub_id"]
+            target_sub_cong_id = opcoes[contexto_selecionado]
             target_display_name = contexto_selecionado
         
-        else: # Para outros perfis, se houver
+        else:
             st.info("Seu perfil não tem permissão para realizar lançamentos.")
             return
 
         if not target_cong_obj:
-            st.error("Nenhuma congregação selecionada ou encontrada.")
-            return
+            st.error("Nenhuma congregação selecionada."); return
 
         st.markdown(f"#### Lançando em: *{target_display_name}*")
         st.divider()
 
-        # --- FORMULÁRIOS DE LANÇAMENTO (usarão o contexto definido acima) ---
+        # --- FORMULÁRIOS DE LANÇAMENTO (Simplificados para usar o contexto do topo) ---
 
         with st.expander("➕ Lançar ENTRADA", expanded=True):
             with st.form("form_entrada"):
@@ -2868,14 +2878,8 @@ def page_lancamentos(user: "User"):
                 if st.form_submit_button("Salvar ENTRADA", type="primary"):
                     cat_obj = next((c for c in cats_in if c.name == ent_cat_name), None)
                     if ent_valor and cat_obj:
-                        db.add(Transaction(
-                            date=ent_data, type=TYPE_IN, category_id=cat_obj.id, 
-                            amount=ent_valor, description=(ent_desc or None), 
-                            congregation_id=target_cong_obj.id, 
-                            sub_congregation_id=target_sub_cong_id
-                        ))
+                        db.add(Transaction(date=ent_data, type=TYPE_IN, category_id=cat_obj.id, amount=ent_valor, description=(ent_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
                         db.commit(); st.success("Entrada registrada!"); st.rerun()
-                    else: st.error("Preencha categoria e valor.")
 
         with st.expander("👤 Lançar DÍZIMO (Nominal)"):
             with st.form("form_dizimo"):
@@ -2886,14 +2890,8 @@ def page_lancamentos(user: "User"):
                 
                 if st.form_submit_button("Salvar DIZIMISTA", type="primary"):
                     if dz_valor and dz_nome.strip():
-                        db.add(Tithe(
-                            date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor, 
-                            congregation_id=target_cong_obj.id, 
-                            sub_congregation_id=target_sub_cong_id, 
-                            payment_method=dz_payment
-                        ))
+                        db.add(Tithe(date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor, congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id, payment_method=dz_payment))
                         db.commit(); st.success("Dízimo registrado!"); st.rerun()
-                    else: st.error("Preencha nome e valor.")
 
         with st.expander("➖ Lançar SAÍDA"):
             with st.form("form_saida"):
@@ -2907,14 +2905,8 @@ def page_lancamentos(user: "User"):
                 if st.form_submit_button("Salvar SAÍDA", type="primary"):
                     cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
                     if sai_valor and cat_obj:
-                        db.add(Transaction(
-                            date=sai_data, type=TYPE_OUT, category_id=cat_obj.id, 
-                            amount=sai_valor, description=(sai_desc or None), 
-                            congregation_id=target_cong_obj.id, 
-                            sub_congregation_id=target_sub_cong_id
-                        ))
+                        db.add(Transaction(date=sai_data, type=TYPE_OUT, category_id=cat_obj.id, amount=sai_valor, description=(sai_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
                         db.commit(); st.success("Saída registrada!"); st.rerun()
-                    else: st.error("Preencha categoria e valor.")
 
                     # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
