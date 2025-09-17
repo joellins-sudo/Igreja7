@@ -2079,6 +2079,7 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
     subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=11, spaceAfter=12)
     heading_style = ParagraphStyle('heading', parent=styles['h2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
     normal_style = styles['Normal']
+    right_align_style = ParagraphStyle('rightAlign', parent=styles['Normal'], alignment=TA_RIGHT)
     signature_style = ParagraphStyle('signature', parent=styles['Normal'], alignment=TA_CENTER, spaceBefore=0)
     
     story: List = []
@@ -2104,9 +2105,10 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
         story.append(Paragraph(f"Detalhes da Unidade: {name}", heading_style))
         
         data = _collect_month_data(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)
-        totals = data["totals"]
-        grand_total_entradas += totals["entradas_total_sem_missoes"]
-        grand_total_saidas += totals["saidas_total"]
+        unit_total_entradas = data["totals"]["entradas_total_sem_missoes"]
+        unit_total_saidas = data["totals"]["saidas_total"]
+        grand_total_entradas += unit_total_entradas
+        grand_total_saidas += unit_total_saidas
 
         # Tabela de Entradas da Unidade
         story.append(Paragraph("<b>1. Entradas</b>", normal_style))
@@ -2114,54 +2116,73 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
         if not df_entradas.empty:
             data_in = [["Data do Culto", "Dízimo", "Oferta", "Total"]]
             for _, row in df_entradas.iterrows():
-                data_in.append([row["Data do Culto"].strftime("%d/%m/%Y"), format_currency(row["Dízimo"]), format_currency(row["Oferta"]), format_currency(row["Total"])])
-            tbl_in = Table(data_in, colWidths=[3.2*cm, 4.0*cm, 4.0*cm, 5.3*cm], repeatRows=1)
-            tbl_in.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('BACKGROUND', (0,0), (-1,0), colors.lightgrey), ('ALIGN', (1,1), (-1,-1), 'RIGHT')]))
+                data_in.append([
+                    row["Data do Culto"].strftime("%d/%m/%Y"),
+                    format_currency(row["Dízimo"]),
+                    format_currency(row["Oferta"]),
+                    format_currency(row["Total"])
+                ])
+            
+            total_entradas_paragraph = Paragraph(f"<b>{format_currency(unit_total_entradas)}</b>", right_align_style)
+            data_in.append([Paragraph("<b>Total da Unidade:</b>", right_align_style), "", "", total_entradas_paragraph])
+            
+            tbl_in = Table(data_in, colWidths=[3.2*cm, 4.0*cm, 4.0*cm, 5.3*cm])
+            tbl_in.setStyle(TableStyle([
+                ('GRID', (0,0), (-1,-1), 1, colors.grey), ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                ('ALIGN', (1,1), (-1,-1), 'RIGHT'), ('SPAN', (0,-1), (2,-1)), 
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)
+            ]))
             story.append(tbl_in)
         else:
             story.append(Paragraph("Nenhuma entrada registrada.", normal_style))
-        
-        # Nova Tabela de Resumo de Entradas
-        entry_summary_data = [
-            [Paragraph("<b>Total Dízimos</b>", normal_style), Paragraph("<b>Total Ofertas</b>", normal_style), Paragraph("<b>Total Geral Entradas</b>", normal_style)],
-            [format_currency(totals['dizimos']), format_currency(totals['ofertas']), format_currency(totals['entradas_total_sem_missoes'])]
-        ]
-        entry_summary_table = Table(entry_summary_data, colWidths=[4.17*cm, 4.17*cm, 8.16*cm])
-        entry_summary_table.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('BACKGROUND', (0,0), (-1,0), colors.lightgrey), ('ALIGN', (0,0), (-1,-1), 'CENTER')]))
-        story.append(entry_summary_table)
         story.append(Spacer(1, 0.5*cm))
 
         # Tabela de Saídas da Unidade
         story.append(Paragraph("<b>2. Saídas</b>", normal_style))
-        if data["tx_out"]:
+        txs_out = data["tx_out"]
+        if txs_out:
             data_out = [["Data", "Categoria", "Descrição", "Valor"]]
-            for t in data["tx_out"]:
+            for t in txs_out:
                 data_out.append([t.date.strftime("%d/%m/%Y"), t.category.name, t.description or "", format_currency(t.amount)])
-            tbl_out = Table(data_out, colWidths=[2.5*cm, 4.5*cm, 6.5*cm, 3*cm], repeatRows=1)
-            tbl_out.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('BACKGROUND', (0,0), (-1,0), colors.lightgrey), ('ALIGN', (3,1), (3,-1), 'RIGHT')]))
+            
+            total_saidas_paragraph = Paragraph(f"<b>{format_currency(unit_total_saidas)}</b>", right_align_style)
+            data_out.append([Paragraph("<b>Total da Unidade:</b>", right_align_style), "", "", total_saidas_paragraph])
+            
+            tbl_out = Table(data_out, colWidths=[2.5*cm, 4.5*cm, 6.5*cm, 3*cm])
+            tbl_out.setStyle(TableStyle([
+                ('GRID', (0,0), (-1,-1), 1, colors.grey), ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                ('ALIGN', (3,1), (3,-1), 'RIGHT'), ('SPAN', (0,-1), (2,-1)), 
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)
+            ]))
             story.append(tbl_out)
         else:
             story.append(Paragraph("Nenhuma saída registrada.", normal_style))
+        story.append(Spacer(1, 0.5*cm))
         
-        # Nova Tabela de Resumo de Saídas
-        exit_summary_data = [["Total Geral Saídas", format_currency(totals['saidas_total'])]]
-        exit_summary_table = Table(exit_summary_data, colWidths=[13.5*cm, 3*cm])
-        exit_summary_table.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('BACKGROUND', (0,0), (-1,-1), colors.lightgrey), ('ALIGN', (0,0), (-1,-1), 'RIGHT')]))
-        story.append(exit_summary_table)
-        story.append(Spacer(1, 1*cm))
+        if sub_congs:
+            story.append(Paragraph(f"<b>3. Resumo da Unidade: {name}</b>", normal_style))
+            unit_saldo = unit_total_entradas - unit_total_saidas
+            unit_summary_data = [
+                ["Total de Entradas da Unidade", format_currency(unit_total_entradas)],
+                ["Total de Saídas da Unidade", format_currency(unit_total_saidas)],
+                [Paragraph("<b>Saldo da Unidade</b>", normal_style), Paragraph(f"<b>{format_currency(unit_saldo)}</b>", normal_style)]
+            ]
+            tbl_unit_summary = Table(unit_summary_data, colWidths=[8*cm, 8.5*cm])
+            tbl_unit_summary.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,2), (-1,2), colors.lightyellow)]))
+            story.append(tbl_unit_summary)
 
-    # Resumo Financeiro Geral (apenas se houver subs)
-    if sub_congs:
-        story.append(Paragraph("Resumo Financeiro Geral (Principal + Subs)", heading_style))
-        saldo_final = grand_total_entradas - grand_total_saidas
-        summary_data = [
-            ["Total Geral de Entradas", format_currency(grand_total_entradas)],
-            ["Total Geral de Saídas", format_currency(grand_total_saidas)],
-            [Paragraph("<b>Saldo do Mês</b>", normal_style), Paragraph(f"<b>{format_currency(saldo_final)}</b>", normal_style)]
-        ]
-        tbl_summary = Table(summary_data, colWidths=[8*cm, 8.5*cm])
-        tbl_summary.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,2), (-1,2), colors.lightcyan)]))
-        story.append(tbl_summary)
+    # Resumo Financeiro Geral
+    story.append(Spacer(1, 1*cm))
+    story.append(Paragraph("Resumo Financeiro Geral", heading_style))
+    saldo_final = grand_total_entradas - grand_total_saidas
+    summary_data = [
+        ["Total Geral de Entradas", format_currency(grand_total_entradas)],
+        ["Total Geral de Saídas", format_currency(grand_total_saidas)],
+        [Paragraph("<b>Saldo do Mês (Entradas - Saídas)</b>", normal_style), Paragraph(f"<b>{format_currency(saldo_final)}</b>", normal_style)]
+    ]
+    tbl_summary = Table(summary_data, colWidths=[8*cm, 8.5*cm])
+    tbl_summary.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,2), (-1,2), colors.lightcyan)]))
+    story.append(tbl_summary)
     
     # Assinaturas
     story.append(Spacer(1, 2.5*cm))
