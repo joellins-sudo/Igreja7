@@ -1082,6 +1082,7 @@ def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFram
         
         wanted = {r["Data do Culto"]: (float(r["Dízimo"]), float(r["Oferta"])) for _, r in edited.iterrows()}
         
+        # LÓGICA CORRIGIDA: Compara as datas originais com as editadas
         orig_dates = set(pd.to_datetime(orig_df["Data do Culto"]).dt.date)
         edited_dates = set(wanted.keys())
         all_dates = sorted(list(orig_dates.union(edited_dates)))
@@ -1089,6 +1090,7 @@ def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFram
         for d in all_dates:
             if d is None: continue
             
+            # Se a data foi removida na edição, o valor desejado é zero.
             want_dz, want_of = wanted.get(d, (0.0, 0.0))
 
             # Busca lançamentos originais (sem ajustes) para o dia 'd'
@@ -2742,7 +2744,7 @@ def page_lancamentos(user: "User"):
             _editor_lancamentos(txs_out, f"Saídas - {contexto_tabela}", tx_type_hint=TYPE_OUT, force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
 
 def display_entry_hierarchy(congs_all: List[Congregation], start: date, end: date, db: Session):
-    """Gera e exibe um DataFrame com a hierarquia de entradas, com ordenação por valor."""
+    """Gera e exibe um DataFrame com a hierarquia de entradas, sem somar a principal com as subs."""
     
     st.info("Este é um relatório de visualização. A edição é feita na visão detalhada de cada unidade.")
     
@@ -2750,50 +2752,35 @@ def display_entry_hierarchy(congs_all: List[Congregation], start: date, end: dat
     grand_total = 0.0
 
     for cong in congs_all:
-        # Busca as sub-congregações para a congregação atual
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id).order_by(SubCongregation.name)).all()
         
-        # Coleta dados da congregação principal
         principal_totals = _collect_month_data(db, cong.id, start, end, sub_cong_id=None)["totals"]
         principal_entradas = principal_totals["entradas_total_sem_missoes"]
         
         # Se não houver subs, mostra apenas uma linha simples
         if not sub_congs:
-            report_data.append({
-                "Unidade": cong.name,
-                "Entradas": principal_entradas
-            })
+            report_data.append({"Unidade": cong.name, "Entradas": principal_entradas})
             grand_total += principal_entradas
-            continue  # Pula para a próxima congregação
+            continue
 
         # Se houver subs, monta a estrutura hierárquica
         subs_data = []
-        total_subs = 0.0
         for sub in sub_congs:
             sub_totals = _collect_month_data(db, cong.id, start, end, sub_cong_id=sub.id)["totals"]
             sub_entradas = sub_totals["entradas_total_sem_missoes"]
-            subs_data.append({
-                "Unidade": f"↳ {sub.name}",
-                "Entradas": sub_entradas
-            })
-            total_subs += sub_entradas
+            subs_data.append({"Unidade": f"↳ {sub.name}", "Entradas": sub_entradas})
             
-        # Ordena a lista de subs pelo valor de entrada, do maior para o menor
         subs_data.sort(key=lambda item: item["Entradas"], reverse=True)
-
-        cong_total = principal_entradas + total_subs
-        grand_total += cong_total
         
-        # Adiciona as linhas na ordem correta: principal, subs ordenadas, e total
-        report_data.append({
-            "Unidade": f"↳ {cong.name} (Principal)",
-            "Entradas": principal_entradas
-        })
+        # Adiciona um título para o grupo
+        report_data.append({"Unidade": f"**{cong.name}**", "Entradas": ""})
+        # Adiciona a linha da congregação principal
+        report_data.append({"Unidade": f"↳ {cong.name} (Principal)", "Entradas": principal_entradas})
+        # Adiciona as linhas das subs
         report_data.extend(subs_data)
-        report_data.append({
-            "Unidade": f"**{cong.name} (Total)**",
-            "Entradas": cong_total
-        })
+        
+        # Atualiza o total geral
+        grand_total += principal_entradas + sum(item["Entradas"] for item in subs_data)
 
     if not report_data:
         st.warning("Nenhum dado de entrada encontrado para o período."); return
@@ -2807,7 +2794,7 @@ def display_entry_hierarchy(congs_all: List[Congregation], start: date, end: dat
     st.metric("Total Geral de Entradas (todas as congregações)", format_currency(grand_total))
 
 def display_exit_hierarchy(congs_all: List[Congregation], start: date, end: date, db: Session):
-    """Gera e exibe um DataFrame com a hierarquia de saídas de congregações e sub-congregações."""
+    """Gera e exibe um DataFrame com a hierarquia de saídas, sem somar a principal com as subs."""
     
     st.info("Este é um relatório de visualização. A edição é feita na visão detalhada de cada unidade.")
     
@@ -2826,21 +2813,18 @@ def display_exit_hierarchy(congs_all: List[Congregation], start: date, end: date
             continue
 
         subs_data = []
-        total_subs = 0.0
         for sub in sub_congs:
             sub_totals = _collect_month_data(db, cong.id, start, end, sub_cong_id=sub.id)["totals"]
             sub_saidas = sub_totals["saidas_total"]
             subs_data.append({"Unidade": f"↳ {sub.name}", "Saídas": sub_saidas})
-            total_subs += sub_saidas
-        
+            
         subs_data.sort(key=lambda item: item["Saídas"], reverse=True)
             
-        cong_total = principal_saidas + total_subs
-        grand_total += cong_total
+        grand_total += principal_saidas + sum(item["Saídas"] for item in subs_data)
         
+        report_data.append({"Unidade": f"**{cong.name}**", "Saídas": ""})
         report_data.append({"Unidade": f"↳ {cong.name} (Principal)", "Saídas": principal_saidas})
         report_data.extend(subs_data)
-        report_data.append({"Unidade": f"**{cong.name} (Total)**", "Saídas": cong_total})
 
     if not report_data:
         st.warning("Nenhum dado de saída encontrado para o período."); return
@@ -2908,7 +2892,12 @@ def page_relatorio_entrada(user: "User"):
             for name, sub_id in all_units:
                 totals = _collect_month_data(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)["totals"]
                 total_entradas_unidade = totals["entradas_total_sem_missoes"]
-                rows.append({"Unidade": name, "Dízimos": totals["dizimos"], "Ofertas": totals["ofertas"], "Total Entradas": total_entradas_unidade})
+                rows.append({
+                    "Unidade": name,
+                    "Dízimos": totals["dizimos"],
+                    "Ofertas": totals["ofertas"],
+                    "Total Entradas": total_entradas_unidade
+                })
                 total_geral += total_entradas_unidade
             
             df_agg = pd.DataFrame(rows)
