@@ -898,16 +898,13 @@ def _submit_btn(label: str, key_suffix: str, theme: str = "neutral") -> bool:
     return clicked
 
 # ===================== APPLY CHANGES — LANÇAMENTOS / DÍZIMOS =====================
-def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: str, default_cong_id: Optional[int]):
+def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: str, default_cong_id: Optional[int], default_sub_cong_id: Optional[int] = None):
     def norm_df(df: pd.DataFrame) -> pd.DataFrame:
         d = df.copy()
-        if "Valor" in d.columns:
-            d["Valor"] = d["Valor"].map(_to_float_brl)
-        if "Data" in d.columns:
-            d["Data"] = d["Data"].map(_to_date)
-        for c in ("Categoria","Descrição"):
-            if c in d.columns:
-                d[c] = d[c].astype(str).fillna("")
+        if "Valor" in d.columns: d["Valor"] = d["Valor"].map(_to_float_brl)
+        if "Data" in d.columns: d["Data"] = d["Data"].map(_to_date)
+        for c in ("Categoria", "Descrição"):
+            if c in d.columns: d[c] = d[c].astype(str).fillna("")
         return d
 
     o = norm_df(orig_df)
@@ -916,94 +913,62 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
     old_ids = set(int(x) for x in o["ID"].tolist() if pd.notna(x))
     new_ids = set(int(x) for x in n["ID"].tolist() if pd.notna(x) and int(x) > 0)
     to_delete = list(old_ids - new_ids)
-    old_map = {int(r["ID"]): r for _, r in o.iterrows()}
+    old_map = {int(r["ID"]): r for _, r in o.iterrows() if pd.notna(r["ID"])}
 
     with SessionLocal() as db:
         cats = categories_for_type(db, tx_type)
         cat_by_name = {c.name: c for c in cats}
-
         if to_delete:
             db.query(Transaction).filter(Transaction.id.in_(to_delete)).delete(synchronize_session=False)
 
         for rid in sorted(new_ids & old_ids):
             old = old_map[rid]
             new = n.loc[n["ID"] == rid].iloc[0]
-            changed = False
             t = db.get(Transaction, rid)
-            if not t:
+            if not t: continue
+            
+            # Validação para edições
+            new_amount = _to_float_brl(new.get("Valor"))
+            new_cat_name = str(new.get("Categoria", "")).strip()
+            if abs(new_amount) < 0.01 or not new_cat_name:
+                st.warning(f"Alteração no ID {rid} ignorada: valor ou categoria inválidos.")
                 continue
-            if old["Data"] != new["Data"]:
-                t.date = _to_date(new["Data"]); changed = True
-            if str(old.get("Categoria","")) != str(new.get("Categoria","")) and "Categoria" in n.columns:
-                cat = cat_by_name.get(str(new["Categoria"]))
-                if cat:
-                    t.category_id = cat.id; changed = True
-            if float(old["Valor"]) != float(new["Valor"]):
-                t.amount = float(new["Valor"]); changed = True
-            if (old.get("Descrição","") or "") != (new.get("Descrição","") or ""):
-                t.description = (new.get("Descrição","") or None); changed = True
-            # NOVO: permitir mudar congregação no editor (quando houver _cong_id)
-            if "_cong_id" in n.columns:
-                old_cid = int(old.get("_cong_id", 0) or 0)
-                new_cid = int(new.get("_cong_id", 0) or 0)
-                if new_cid and new_cid != old_cid:
-                    t.congregation_id = new_cid; changed = True
-            if changed:
-                db.add(t)
+
+            changed = False
+            if t.date != _to_date(new["Data"]): t.date = _to_date(new["Data"]); changed = True
+            cat = cat_by_name.get(new_cat_name)
+            if cat and t.category_id != cat.id: t.category_id = cat.id; changed = True
+            if t.amount != new_amount: t.amount = new_amount; changed = True
+            if (t.description or "") != (new.get("Descrição", "") or ""): t.description = (new.get("Descrição", "") or None); changed = True
+            if changed: db.add(t)
 
         for _, row in n.iterrows():
             rid = row.get("ID", None)
             is_new = pd.isna(rid) or int(rid) <= 0 or int(rid) not in old_ids
-            if not is_new:
-                continue
-                
-            # --- CORREÇÃO: VERIFICAÇÃO DE DADOS MÍNIMOS ---
-            data = _to_date(row.get("Data"))
-            amount = _to_float_brl(row.get("Valor"))
-            desc = str(row.get("Descrição","")).strip() or None
-
-            # Linha considerada inválida se: 1) não tem data válida ou 2) valor é zero/nulo
-            if not data or abs(amount) < 0.0001:
-                # Linha nova e vazia, ignorar
-                continue
-            # --- FIM CORREÇÃO ---
+            if not is_new: continue
             
-            if "Categoria" in n.columns:
-                cat_name = str(row.get("Categoria","")).strip()
-                if not cat_name:
-                    continue
-                cat = cat_by_name.get(cat_name)
-                if not cat:
-                    continue
-            else:
-                # Missões (Saída) editor simples
-                cat = db.scalar(select(Category).where(Category.name == "Missões (Saída)"))
-                if not cat:
-                    continue
-            # NOVO: pegar congregação do próprio row (quando existir)
-            row_cid = int(row.get("_cong_id", 0) or 0)
-            cong_id = row_cid or default_cong_id
-            if cong_id is None:
-                if not o.empty:
-                    cong_id = int(o.iloc[0].get("_cong_id", 0)) or None
-            if cong_id is None:
-                continue
+            amount = _to_float_brl(row.get("Valor"))
+            cat_name = str(row.get("Categoria", "")).strip()
+            if not cat_name or abs(amount) < 0.01: continue
+
+            cat = cat_by_name.get(cat_name)
+            if not cat: continue
+            
             db.add(Transaction(
-                date=data, type=tx_type, category_id=cat.id, amount=float(amount),
-                description=desc, congregation_id=int(cong_id)
+                date=_to_date(row.get("Data")), type=tx_type, category_id=cat.id, 
+                amount=amount, description=(str(row.get("Descrição", "")).strip() or None),
+                congregation_id=int(default_cong_id),
+                sub_congregation_id=default_sub_cong_id
             ))
         db.commit()
 
-def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default_cong_id: Optional[int]):
+def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default_cong_id: Optional[int], default_sub_cong_id: Optional[int] = None):
     def norm_df(df: pd.DataFrame) -> pd.DataFrame:
         d = df.copy()
-        if "Valor" in d.columns:
-            d["Valor"] = d["Valor"].map(_to_float_brl)
-        if "Data" in d.columns:
-            d["Data"] = d["Data"].map(_to_date)
-        for c in ("Dizimista","Forma de Pagamento"):
-            if c in d.columns:
-                d[c] = d[c].astype(str).fillna("")
+        if "Valor" in d.columns: d["Valor"] = d["Valor"].map(_to_float_brl)
+        if "Data" in d.columns: d["Data"] = d["Data"].map(_to_date)
+        for c in ("Dizimista", "Forma de Pagamento"):
+            if c in d.columns: d[c] = d[c].astype(str).fillna("")
         return d
 
     o = norm_df(orig_df)
@@ -1012,7 +977,6 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
     old_ids = set(int(x) for x in o["ID"].tolist() if pd.notna(x))
     new_ids = set(int(x) for x in n["ID"].tolist() if pd.notna(x) and int(x) > 0)
     to_delete = list(old_ids - new_ids)
-    
     old_map = {int(r["ID"]): r for _, r in o.iterrows() if pd.notna(r["ID"])}
 
     with SessionLocal() as db:
@@ -1022,72 +986,39 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
         for rid in sorted(new_ids & old_ids):
             old = old_map[rid]
             new = n.loc[n["ID"] == rid].iloc[0]
+            t = db.get(Tithe, rid)
+            if not t: continue
             
             new_nome = str(new.get("Dizimista", "")).strip()
             new_amount = _to_float_brl(new.get("Valor"))
-
             if not new_nome or abs(new_amount) < 0.0001:
-                st.warning(f"A alteração para o ID {rid} foi ignorada porque o nome ou valor se tornou inválido.")
+                st.warning(f"Alteração no ID {rid} ignorada: nome ou valor inválido.")
                 continue
             
             changed = False
-            t = db.get(Tithe, rid)
-            if not t:
-                continue
-            
-            if t.date != _to_date(new["Data"]):
-                t.date = _to_date(new["Data"]); changed = True
-            if t.tither_name != new_nome:
-                t.tither_name = new_nome; changed = True
-            if t.amount != new_amount:
-                t.amount = new_amount; changed = True
-            if (t.payment_method or "") != (new["Forma de Pagamento"] or ""):
-                t.payment_method = (new["Forma de Pagamento"] or None); changed = True
-            
-            if changed:
-                db.add(t)
+            if t.date != _to_date(new["Data"]): t.date = _to_date(new["Data"]); changed = True
+            if t.tither_name != new_nome: t.tither_name = new_nome; changed = True
+            if t.amount != new_amount: t.amount = new_amount; changed = True
+            if (t.payment_method or "") != (new["Forma de Pagamento"] or ""): t.payment_method = (new["Forma de Pagamento"] or None); changed = True
+            if changed: db.add(t)
 
         for _, row in n.iterrows():
             rid = row.get("ID", None)
             is_new = pd.isna(rid) or int(rid) <= 0 or int(rid) not in old_ids
-            if not is_new:
-                continue
+            if not is_new: continue
             
-            data = _to_date(row.get("Data"))
-            nome = str(row.get("Dizimista","")).strip()
+            nome = str(row.get("Dizimista", "")).strip()
             amount = _to_float_brl(row.get("Valor"))
-            forma = str(row.get("Forma de Pagamento","")).strip() or None
+            if not nome or abs(amount) < 0.0001: continue
             
-            if not nome or abs(amount) < 0.0001:
-                continue
-
-            cong_id = default_cong_id
-            if cong_id is None and not o.empty:
-                cong_id = int(o.iloc[0].get("_cong_id", 0)) or None
-            if cong_id is None:
-                continue
-            
+            if default_cong_id is None: continue
             db.add(Tithe(
-                date=data, tither_name=nome, amount=float(amount),
-                congregation_id=int(cong_id), payment_method=forma
+                date=_to_date(row.get("Data")), tither_name=nome, amount=amount,
+                congregation_id=int(default_cong_id),
+                sub_congregation_id=default_sub_cong_id,
+                payment_method=(str(row.get("Forma de Pagamento", "")).strip() or None)
             ))
-
-        # ================================================================
-        # BLOCO try/except ADICIONADO PARA CAPTURAR IntegrityError
-        # ================================================================
-        try:
-            db.commit()
-            st.toast("💾 Alterações salvas com sucesso!", icon="✅")
-        except IntegrityError:
-            db.rollback() # Desfaz a transação que falhou
-            st.error(
-                "❌ Erro ao Salvar: A alteração resultaria em um registro duplicado. "
-                "Verifique se você não está tentando salvar um dizimista com nome e data que já existem. "
-                "Nenhuma alteração foi salva."
-            )
-        except Exception as e:
-            db.rollback()
-            st.error(f"Ocorreu um erro inesperado ao salvar: {e}")
+        db.commit()
         # ================================================================
 
 # ===================== RELATÓRIO DE ENTRADA — TABELA ÚNICA (EDIT SUMÁRIO) =====================
@@ -1229,65 +1160,44 @@ def _editor_lancamentos(
     titulo: str,
     tx_type_hint: Optional[str] = None,
     force_cong_id: Optional[int] = None,
+    force_sub_cong_id: Optional[int] = None
 ):
     tx_type = tx_type_hint or (transactions[0].type if transactions else TYPE_IN)
 
-    # categorias (já carregamos mesmo se não houver linhas)
     with SessionLocal() as db:
         cats = categories_for_type(db, tx_type)
         if tx_type == TYPE_IN:
             cats = [c for c in cats if "ajuste" not in _norm(c.name)]
         cat_names = [c.name for c in cats] or ["—"]
 
-    # congregação default (pode vir forçada)
-    cong_ids = {int(t.congregation_id) for t in transactions if t.congregation_id}
-    if force_cong_id:
-        cong_ids.add(int(force_cong_id))
-    default_cong_id = force_cong_id if force_cong_id else (list(cong_ids)[0] if len(cong_ids) == 1 else None)
-
-    # linhas
     rows = []
     if transactions:
         for t in transactions:
             rows.append({
-                "ID": t.id,
-                "Data": t.date,
+                "ID": t.id, "Data": t.date,
                 "Categoria": (t.category.name if t.category else ""),
-                "Valor": float(t.amount),
-                "Descrição": t.description or "",
+                "Valor": float(t.amount), "Descrição": t.description or "",
                 "_cong_id": int(t.congregation_id or 0),
             })
     else:
-        rows = [{
-            "ID": None,
-            "Data": today_bahia(),
-            "Categoria": (cat_names[0] if cat_names else ""),
-            "Valor": 0.0,
-            "Descrição": "",
-            "_cong_id": int(default_cong_id or 0),
-        }]
+        rows = [{"ID": None, "Data": today_bahia(), "Categoria": (cat_names[0] if cat_names else ""), "Valor": 0.0, "Descrição": "", "_cong_id": int(force_cong_id or 0)}]
 
-    df_full = pd.DataFrame(rows)     # mantém _cong_id
+    df_full = pd.DataFrame(rows)
     df_view = df_full.drop(columns=["_cong_id"])
 
     st.markdown(f"**{titulo}**")
-    allow_add = default_cong_id is not None
     edited_view = st.data_editor(
-        df_view,
-        use_container_width=True,
-        hide_index=True,
-        num_rows=("dynamic" if allow_add else "fixed"),
+        df_view, use_container_width=True, hide_index=True, num_rows="dynamic",
         column_config={
             "ID": st.column_config.Column("ID", disabled=True),
             "Data": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
             "Categoria": st.column_config.SelectboxColumn("Categoria", options=cat_names, required=True),
-            "Valor": st.column_config.NumberColumn("Valor (R$)", min_value=-999999999.0, step=1.0, format="R$ %.2f"),
+            "Valor": st.column_config.NumberColumn("Valor (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
             "Descrição": st.column_config.TextColumn("Descrição", max_chars=200),
         },
-        key=f"tx_editor_{titulo}",
+        key=f"tx_editor_{titulo.replace(' ', '_')}_{force_cong_id}_{force_sub_cong_id}",
     )
 
-    # === TOTAL da tabela ===
     try:
         _total_val = 0.0
         if isinstance(edited_view, pd.DataFrame) and not edited_view.empty and ("Valor" in edited_view.columns):
@@ -1296,69 +1206,41 @@ def _editor_lancamentos(
             _total_val = float(_ev["Valor"].sum())
     except Exception:
         _total_val = 0.0
-    _label_total = "Total de SAÍDAS (tabela)" if tx_type == TYPE_OUT else "Total de ENTRADAS (tabela)"
+    _label_total = "Total de Saídas (tabela)" if tx_type == TYPE_OUT else "Total de Entradas (tabela)"
     st.metric(_label_total, format_currency(_total_val))
 
     def _save():
-        _apply_tx_changes(df_full, edited_view, tx_type, default_cong_id)
+        _apply_tx_changes(df_full, edited_view, tx_type, force_cong_id, force_sub_cong_id)
         st.toast("💾 Alterações salvas.", icon="✅")
         st.rerun()
 
-    _save_btn(_save, f"tx_{titulo}", theme=("saida" if tx_type == TYPE_OUT else "entrada"))
+    _save_btn(_save, f"tx_{titulo.replace(' ', '_')}_{force_cong_id}_{force_sub_cong_id}", theme=("saida" if tx_type == TYPE_OUT else "entrada"))
 
 # ===== EDITOR DE DÍZIMOS (com force_cong_id e linha vazia) =====
 # ===== EDITOR DE DÍZIMOS (com total abaixo da tabela) =====
-def _editor_dizimos(tithes: List["Tithe"], titulo: str, force_cong_id: Optional[int] = None):
-    cong_ids = {int(t.congregation_id) for t in tithes if t.congregation_id}
-    if force_cong_id:
-        cong_ids.add(int(force_cong_id))
-    default_cong_id = force_cong_id if force_cong_id else (list(cong_ids)[0] if len(cong_ids) == 1 else None)
-
+def _editor_dizimos(tithes: List["Tithe"], titulo: str, force_cong_id: Optional[int] = None, force_sub_cong_id: Optional[int] = None):
     rows = []
     if tithes:
-        rows = [{
-            "ID": t.id,
-            "Data": t.date,
-            "Dizimista": t.tither_name,
-            "Valor": float(t.amount),
-            "Forma de Pagamento": t.payment_method or "",
-            "_cong_id": int(t.congregation_id or 0),
-        } for t in tithes]
+        rows = [{"ID": t.id, "Data": t.date, "Dizimista": t.tither_name, "Valor": float(t.amount), "Forma de Pagamento": t.payment_method or "", "_cong_id": int(t.congregation_id or 0)} for t in tithes]
     else:
-        rows = [{
-            "ID": None,
-            "Data": today_bahia(),
-            "Dizimista": "",
-            "Valor": 0.0,
-            "Forma de Pagamento": "",
-            "_cong_id": int(default_cong_id or 0),
-        }]
+        rows = [{"ID": None, "Data": today_bahia(), "Dizimista": "", "Valor": 0.0, "Forma de Pagamento": "", "_cong_id": int(force_cong_id or 0)}]
 
     df_full = pd.DataFrame(rows)
     df_view = df_full.drop(columns=["_cong_id"])
 
     st.markdown(f"**{titulo}**")
-    allow_add = default_cong_id is not None
     edited_view = st.data_editor(
-        df_view,
-        use_container_width=True,
-        hide_index=True,
-        num_rows=("dynamic" if allow_add else "fixed"),
+        df_view, use_container_width=True, hide_index=True, num_rows="dynamic",
         column_config={
             "ID": st.column_config.Column("ID", disabled=True),
             "Data": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
             "Dizimista": st.column_config.TextColumn("Dizimista", max_chars=120, required=True),
-            "Valor": st.column_config.NumberColumn("Valor (R$)", min_value=-999999999.0, step=1.0, format="R$ %.2f"),
-            "Forma de Pagamento": st.column_config.SelectboxColumn(
-                "Forma de Pagamento",
-                options=["Dinheiro","PIX","Cartão","Transferência",""],
-                required=False
-            ),
+            "Valor": st.column_config.NumberColumn("Valor (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
+            "Forma de Pagamento": st.column_config.SelectboxColumn("Forma de Pagamento", options=["Dinheiro", "PIX", "Cartão", "Transferência", ""], required=False),
         },
-        key=f"tithe_editor_{titulo}",
+        key=f"tithe_editor_{titulo.replace(' ', '_')}_{force_cong_id}_{force_sub_cong_id}",
     )
 
-    # === TOTAL da tabela ===
     try:
         _total_val = 0.0
         if isinstance(edited_view, pd.DataFrame) and not edited_view.empty and ("Valor" in edited_view.columns):
@@ -1370,11 +1252,11 @@ def _editor_dizimos(tithes: List["Tithe"], titulo: str, force_cong_id: Optional[
     st.metric("Total de DÍZIMOS (tabela)", format_currency(_total_val))
 
     def _save():
-        _apply_tithe_changes(df_full, edited_view, default_cong_id)
+        _apply_tithe_changes(df_full, edited_view, force_cong_id, force_sub_cong_id)
         st.toast("💾 Alterações salvas.", icon="✅")
         st.rerun()
 
-    _save_btn(_save, f"tithe_{titulo}", theme="dizimista")
+    _save_btn(_save, f"tithe_{titulo.replace(' ', '_')}_{force_cong_id}_{force_sub_cong_id}", theme="dizimista")
 
 # ===== MISSÕES: Editores específicos =====
 def _editor_missions_outflows(saidas: List["Transaction"], titulo: str, congs_all: List["Congregation"]):
@@ -2790,31 +2672,16 @@ def page_lancamentos(user: "User"):
 
         st.markdown(f"### CONGREGAÇÃO: {parent_cong_obj.name.upper()}")
 
-        modo = st.radio(
-            "Modo de lançamento:",
-            ["Formulário único", "Editar direto na tabela"],
-            horizontal=True,
-            key="lan_modo_sel"
-        )
+        modo = st.radio("Modo de lançamento:", ["Formulário único", "Editar direto na tabela"], horizontal=True, key="lan_modo_sel")
         st.divider()
 
         if modo == "Formulário único":
             target_cong_obj = parent_cong_obj
-            sub_congs = db.scalars(
-                select(SubCongregation)
-                .where(SubCongregation.congregation_id == parent_cong_obj.id)
-                .order_by(SubCongregation.name)
-            ).all()
-            
+            sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
             opcoes = {f"{parent_cong_obj.name} (Principal)": None}
             for sub in sub_congs:
                 opcoes[sub.name] = sub.id
-            
-            contexto_selecionado = st.selectbox(
-                "Lançar em:", 
-                list(opcoes.keys()), 
-                key="lan_sub_sel_context"
-            )
+            contexto_selecionado = st.selectbox("Lançar em:", list(opcoes.keys()), key="lan_sub_sel_context")
             target_sub_cong_id = opcoes[contexto_selecionado]
             st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
             st.divider()
@@ -2833,8 +2700,7 @@ def page_lancamentos(user: "User"):
                             if cat_obj:
                                 db.add(Transaction(date=ent_data, type=TYPE_IN, category_id=cat_obj.id, amount=ent_valor, description=(ent_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
                                 db.commit(); st.success("Entrada registrada!"); st.rerun()
-                        else:
-                            st.warning("O valor da entrada deve ser maior que zero.")
+                        else: st.warning("O valor da entrada deve ser maior que zero.")
 
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
                 with st.form("form_dizimo"):
@@ -2846,8 +2712,7 @@ def page_lancamentos(user: "User"):
                         if dz_valor > 0 and dz_nome.strip():
                             db.add(Tithe(date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor, congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id, payment_method=dz_payment))
                             db.commit(); st.success("Dízimo registrado!"); st.rerun()
-                        else:
-                            st.warning("O nome e o valor são obrigatórios, e o valor deve ser maior que zero.")
+                        else: st.warning("O nome e o valor são obrigatórios, e o valor deve ser maior que zero.")
 
             with st.expander("➖ Lançar SAÍDA"):
                 with st.form("form_saida"):
@@ -2863,16 +2728,23 @@ def page_lancamentos(user: "User"):
                             if cat_obj:
                                 db.add(Transaction(date=sai_data, type=TYPE_OUT, category_id=cat_obj.id, amount=sai_valor, description=(sai_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
                                 db.commit(); st.success("Saída registrada!"); st.rerun()
-                        else:
-                            st.warning("O valor da saída deve ser maior que zero.")
+                        else: st.warning("O valor da saída deve ser maior que zero.")
 
         elif modo == "Editar direto na tabela":
-            st.info(f"Modo de edição rápida para a congregação: **{parent_cong_obj.name} (Principal)**. Lançamentos de sub-congregações não são exibidos aqui.")
+            st.markdown(f"### Edição em Tabela para: {parent_cong_obj.name}")
+            sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
+            opcoes_tabela = {f"{parent_cong_obj.name} (Principal)": None}
+            for sub in sub_congs:
+                opcoes_tabela[sub.name] = sub.id
+            contexto_tabela = st.selectbox("Selecione a unidade para editar:", list(opcoes_tabela.keys()), key="lan_tabela_contexto")
+            target_sub_cong_id = opcoes_tabela[contexto_tabela]
+
+            st.info(f"Editando lançamentos de: **{contexto_tabela}**")
             ref_tab = get_month_selector("Mês de referência da tabela")
             start_tab, end_tab = month_bounds(ref_tab)
             
             st.markdown("##### Entradas (Dízimo e Oferta)")
-            df_entradas = _entrada_summary_df(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=None)
+            df_entradas = _entrada_summary_df(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
             if df_entradas.empty:
                 df_entradas = pd.DataFrame([{"Data do Culto": today_bahia(), "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0}])
             edited_entradas = st.data_editor(df_entradas, use_container_width=True, hide_index=True, num_rows="dynamic", key="editor_entradas_lancamentos")
@@ -2888,17 +2760,17 @@ def page_lancamentos(user: "User"):
             col1.metric("Total Dízimos (tabela)", format_currency(total_dizimo))
             col2.metric("Total Ofertas (tabela)", format_currency(total_oferta))
             col3.metric("Total Geral (tabela)", format_currency(total_geral))
-            _save_btn(lambda: _apply_entrada_summary_changes(parent_cong_obj.id, start_tab, end_tab, edited_entradas, sub_cong_id=None), f"lan_tab_{parent_cong_obj.id}", "entrada")
+            _save_btn(lambda: _apply_entrada_summary_changes(parent_cong_obj.id, start_tab, end_tab, edited_entradas, sub_cong_id=target_sub_cong_id), f"lan_tab_{parent_cong_obj.id}_{target_sub_cong_id}", "entrada")
 
             st.markdown("---")
-            tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id.is_(None))
+            tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id == target_sub_cong_id)
             tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
-            _editor_dizimos(tithes, "Dizimistas do período (Congregação Principal)", force_cong_id=parent_cong_obj.id)
+            _editor_dizimos(tithes, f"Dizimistas - {contexto_tabela}", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
 
             st.markdown("---")
-            txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_OUT, Transaction.sub_congregation_id.is_(None))
+            txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_OUT, Transaction.sub_congregation_id == target_sub_cong_id)
             txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
-            _editor_lancamentos(txs_out, "Saídas do período (Congregação Principal)", tx_type_hint=TYPE_OUT, force_cong_id=parent_cong_obj.id)
+            _editor_lancamentos(txs_out, f"Saídas - {contexto_tabela}", tx_type_hint=TYPE_OUT, force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
 
 
                     # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
