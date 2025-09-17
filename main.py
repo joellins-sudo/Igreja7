@@ -1738,11 +1738,7 @@ def page_relatorio_saida(user: "User"):
         
         if user.role == "SEDE":
             congs_all = order_congs_sede_first(cong_options_for(user, db))
-            escopo_opts = [
-                "-- Relatório Hierárquico (Visualização) --", 
-                "-- Visão Agregada (Editável) --"
-            ] + [c.name for c in congs_all]
-            
+            escopo_opts = ["-- Relatório Hierárquico (Visualização) --", "-- Visão Agregada (Editável) --"] + [c.name for c in congs_all]
             escopo_selecionado = st.selectbox("Selecione o escopo do relatório:", escopo_opts, key="rs_sede_escopo")
             
             if escopo_selecionado == "-- Relatório Hierárquico (Visualização) --":
