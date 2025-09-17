@@ -2904,25 +2904,17 @@ def page_lancamentos(user: "User"):
             _editor_lancamentos(txs_out, f"Saídas - {contexto_tabela}", tx_type_hint=TYPE_OUT, force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
 
 def display_entry_hierarchy(congs_all: List[Congregation], start: date, end: date, db: Session):
-    """Gera e exibe um DataFrame com a hierarquia de entradas, sem somar a principal com as subs."""
     st.info("Este é um relatório de visualização. A edição é feita na visão detalhada de cada unidade.")
-    
     report_data = []
     grand_total = 0.0
-
     for cong in congs_all:
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id).order_by(SubCongregation.name)).all()
-        
         principal_totals = _collect_month_data(db, cong.id, start, end, sub_cong_id=None)["totals"]
         principal_entradas = principal_totals["entradas_total_sem_missoes"]
-        
-        # Se não houver subs, mostra apenas uma linha simples
         if not sub_congs:
             report_data.append({"Unidade": cong.name, "Entradas": principal_entradas})
             grand_total += principal_entradas
             continue
-
-        # Se houver subs, monta a estrutura hierárquica
         subs_data = []
         total_subs = 0.0
         for sub in sub_congs:
@@ -2930,47 +2922,29 @@ def display_entry_hierarchy(congs_all: List[Congregation], start: date, end: dat
             sub_entradas = sub_totals["entradas_total_sem_missoes"]
             subs_data.append({"Unidade": f"↳ {sub.name}", "Entradas": sub_entradas})
             total_subs += sub_entradas
-            
         subs_data.sort(key=lambda item: item["Entradas"], reverse=True)
-        
-        # Adiciona um título para o grupo
         report_data.append({"Unidade": f"**{cong.name}**", "Entradas": ""})
-        # Adiciona a linha da congregação principal e das subs
         report_data.append({"Unidade": f"↳ {cong.name} (Principal)", "Entradas": principal_entradas})
         report_data.extend(subs_data)
-        
-        # Atualiza o total geral
         grand_total += principal_entradas + total_subs
-
     if not report_data:
         st.warning("Nenhum dado de entrada encontrado para o período."); return
-
     df_report = pd.DataFrame(report_data)
-    
-    st.dataframe(
-        df_report.style.format({"Entradas": format_currency}).hide(axis="index"),
-        use_container_width=True
-    )
+    st.dataframe(df_report.style.format({"Entradas": format_currency}).hide(axis="index"), use_container_width=True)
     st.metric("Total Geral de Entradas (todas as congregações)", format_currency(grand_total))
 
 def display_exit_hierarchy(congs_all: List[Congregation], start: date, end: date, db: Session):
-    """Gera e exibe um DataFrame com a hierarquia de saídas, sem somar a principal com as subs."""
     st.info("Este é um relatório de visualização. A edição é feita na visão detalhada de cada unidade.")
-    
     report_data = []
     grand_total = 0.0
-
     for cong in congs_all:
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id).order_by(SubCongregation.name)).all()
-        
         principal_totals = _collect_month_data(db, cong.id, start, end, sub_cong_id=None)["totals"]
         principal_saidas = principal_totals["saidas_total"]
-        
         if not sub_congs:
             report_data.append({"Unidade": cong.name, "Saídas": principal_saidas})
             grand_total += principal_saidas
             continue
-
         subs_data = []
         total_subs = 0.0
         for sub in sub_congs:
@@ -2978,24 +2952,15 @@ def display_exit_hierarchy(congs_all: List[Congregation], start: date, end: date
             sub_saidas = sub_totals["saidas_total"]
             subs_data.append({"Unidade": f"↳ {sub.name}", "Saídas": sub_saidas})
             total_subs += sub_saidas
-            
         subs_data.sort(key=lambda item: item["Saídas"], reverse=True)
-            
         grand_total += principal_saidas + total_subs
-        
         report_data.append({"Unidade": f"**{cong.name}**", "Saídas": ""})
         report_data.append({"Unidade": f"↳ {cong.name} (Principal)", "Saídas": principal_saidas})
         report_data.extend(subs_data)
-
     if not report_data:
         st.warning("Nenhum dado de saída encontrado para o período."); return
-
     df_report = pd.DataFrame(report_data)
-    
-    st.dataframe(
-        df_report.style.format({"Saídas": format_currency}).hide(axis="index"),
-        use_container_width=True
-    )
+    st.dataframe(df_report.style.format({"Saídas": format_currency}).hide(axis="index"), use_container_width=True)
     st.metric("Total Geral de Saídas (todas as congregações)", format_currency(grand_total))
                    
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
