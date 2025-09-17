@@ -927,7 +927,6 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
             t = db.get(Transaction, rid)
             if not t: continue
             
-            # Validação para edições
             new_amount = _to_float_brl(new.get("Valor"))
             new_cat_name = str(new.get("Categoria", "")).strip()
             if abs(new_amount) < 0.01 or not new_cat_name:
@@ -940,6 +939,10 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
             if cat and t.category_id != cat.id: t.category_id = cat.id; changed = True
             if t.amount != new_amount: t.amount = new_amount; changed = True
             if (t.description or "") != (new.get("Descrição", "") or ""): t.description = (new.get("Descrição", "") or None); changed = True
+            if "_cong_id" in n.columns:
+                new_cid = int(new.get("_cong_id", 0) or 0)
+                if new_cid and new_cid != t.congregation_id:
+                    t.congregation_id = new_cid; changed = True
             if changed: db.add(t)
 
         for _, row in n.iterrows():
@@ -954,10 +957,21 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
             cat = cat_by_name.get(cat_name)
             if not cat: continue
             
+            # --- LÓGICA DE BUSCA DE ID CORRIGIDA ---
+            # Prioriza o ID da linha (para o editor de missões)
+            cong_id = int(row.get("_cong_id", 0) or 0)
+            # Se não houver na linha, usa o padrão (para outros editores)
+            if not cong_id:
+                cong_id = default_cong_id
+            
+            # Se ainda assim não houver um ID válido, pula a linha.
+            if not cong_id:
+                continue
+
             db.add(Transaction(
                 date=_to_date(row.get("Data")), type=tx_type, category_id=cat.id, 
                 amount=amount, description=(str(row.get("Descrição", "")).strip() or None),
-                congregation_id=int(default_cong_id),
+                congregation_id=cong_id,
                 sub_congregation_id=default_sub_cong_id
             ))
         db.commit()
@@ -1037,11 +1051,17 @@ def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date, sub_c
         Transaction.type.in_((TYPE_IN, "RECEITA")), func.lower(Category.name) == "oferta"
     )
 
-    # Aplica filtro de sub-congregação se necessário
+    # --- LÓGICA DE FILTRO CORRIGIDA ---
     if sub_cong_id is not None:
+        # Filtra por uma sub-congregação específica
         tithes_q = tithes_q.where(Tithe.sub_congregation_id == sub_cong_id)
         diz_trans_q = diz_trans_q.where(Transaction.sub_congregation_id == sub_cong_id)
         oferta_trans_q = oferta_trans_q.where(Transaction.sub_congregation_id == sub_cong_id)
+    else:
+        # Filtra APENAS para a congregação principal (onde não há sub_congregation_id)
+        tithes_q = tithes_q.where(Tithe.sub_congregation_id.is_(None))
+        diz_trans_q = diz_trans_q.where(Transaction.sub_congregation_id.is_(None))
+        oferta_trans_q = oferta_trans_q.where(Transaction.sub_congregation_id.is_(None))
 
     # Executa queries
     tithes = db.execute(tithes_q.group_by(Tithe.date)).all()
@@ -1414,35 +1434,65 @@ def _editor_missions_entries_agg(congs_all: List["Congregation"], start: date, e
 
 # ====== EDITORES AGREGADOS (TODAS AS CONGREGAÇÕES) — ENTRADAS / SAÍDAS ======
 # ====== EDITORES AGREGADOS (TODAS AS CONGREGAÇÕES) — ENTRADAS / SAÍDAS ======
-def _editor_entradas_agg_all(congs_all: List["Congregation"], start: date, end: date):
+def _editor_entradas_agg_all(congs_all: List[Congregation], start: date, end: date):
     with SessionLocal() as db:
-        rows = []
+        rows_data = []
+        # Primeiro, colete os dados de todas as unidades (principais e subs)
         for c in congs_all:
-            totals = _collect_month_data(db, c.id, start, end, sub_cong_id=None)["totals"]
-            rows.append({"Congregação": c.name, "Total (R$)": float(totals["entradas_total_sem_missoes"])})
+            # Dados da congregação principal
+            principal_totals = _collect_month_data(db, c.id, start, end, sub_cong_id=None)["totals"]
+            rows_data.append({
+                "unidade_display": f"{c.name} (Principal)",
+                "valor": float(principal_totals["entradas_total_sem_missoes"]),
+                "cong_id": c.id,
+                "cong_name": c.name, # Adicionado para ordenação primária
+                "sub_id": None,
+                "is_sub": False
+            })
+            
+            # Dados das sub-congregações
+            sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == c.id)).all()
+            for sub in sub_congs:
+                sub_totals = _collect_month_data(db, c.id, start, end, sub_cong_id=sub.id)["totals"]
+                rows_data.append({
+                    "unidade_display": f"↳ {sub.name}",
+                    "valor": float(sub_totals["entradas_total_sem_missoes"]),
+                    "cong_id": c.id,
+                    "cong_name": c.name, # Adicionado para ordenação primária
+                    "sub_id": sub.id,
+                    "is_sub": True
+                })
+
+        # --- LÓGICA DE ORDENAÇÃO CORRIGIDA ---
+        # Ordena por nome da congregação, depois pela flag "is_sub" (False vem antes de True), e por fim pelo valor descendente.
+        rows_data.sort(key=lambda x: (x["cong_name"], x["is_sub"], -x["valor"]))
+        # ------------------------------------
+
+        df_full = pd.DataFrame(rows_data)
         
-        df_view = pd.DataFrame(rows)
-        if not df_view.empty:
-            df_view = df_view.sort_values("Total (R$)", ascending=False).reset_index(drop=True)
+        df_view = df_full[["unidade_display", "valor"]].rename(columns={"unidade_display": "Unidade", "valor": "Total (R$)"})
 
     edited = st.data_editor(
-        df_view, use_container_width=True, hide_index=True, num_rows="dynamic",
+        df_view,
+        use_container_width=True, hide_index=True,
         column_config={
-            "Congregação": st.column_config.SelectboxColumn("Congregação", options=[c.name for c in order_congs_sede_first(congs_all)], required=True),
-            "Total (R$)": st.column_config.NumberColumn("Total (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
+            "Unidade": st.column_config.TextColumn("Unidade", disabled=True),
+            "Total (R$)": st.column_config.NumberColumn("Total (R$)", min_value=0.0, format="R$ %.2f"),
         },
-        key="agg_in_all_editor",
+        key="agg_in_all_editor_hierarchical",
     )
 
     total_geral = 0.0
     if isinstance(edited, pd.DataFrame) and not edited.empty:
         total_geral = edited["Total (R$)"].map(_to_float_brl).sum()
-    st.metric("Total Geral de Entradas (todas as congregações)", format_currency(total_geral))
+    st.metric("Total Geral de Entradas (todas as unidades)", format_currency(total_geral))
 
     def _save():
-        st.toast("💾 Funcionalidade de salvar o editor agregado ainda em desenvolvimento.", icon="⚠️")
+        # A lógica de salvamento precisa ser ajustada para o novo formato
+        st.toast("💾 Funcionalidade de salvar esta tabela está em desenvolvimento.", icon="⚠️")
+        # st.rerun() # Desativado temporariamente
 
-    _save_btn(_save, "agg_in_all")
+    _save_btn(_save, "agg_in_all_hierarchical")
 
 def _editor_saidas_agg_all(congs_all: List["Congregation"], start: date, end: date):
     with SessionLocal() as db:
@@ -1537,12 +1587,18 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, sub_cong_id: O
         Transaction.congregation_id == cong_id
     )
 
-    # Aplica o filtro da sub-congregação, se fornecido
+    # --- LÓGICA DE FILTRO CORRIGIDA ---
+    # Aplica o filtro da sub-congregação, tratando o caso "Principal" (None) explicitamente
     if sub_cong_id is not None:
-        # Se sub_cong_id for um número, filtra por ele. Se for None, filtra onde não há sub.
+        # Filtra por uma sub-congregação específica
         tx_in_query = tx_in_query.where(Transaction.sub_congregation_id == sub_cong_id)
         tithes_query = tithes_query.where(Tithe.sub_congregation_id == sub_cong_id)
         tx_out_query = tx_out_query.where(Transaction.sub_congregation_id == sub_cong_id)
+    else:
+        # Filtra APENAS para a congregação principal (onde não há sub_congregation_id)
+        tx_in_query = tx_in_query.where(Transaction.sub_congregation_id.is_(None))
+        tithes_query = tithes_query.where(Tithe.sub_congregation_id.is_(None))
+        tx_out_query = tx_out_query.where(Transaction.sub_congregation_id.is_(None))
     
     # Executa as queries
     tx_in = db.scalars(tx_in_query.order_by(Transaction.date)).all()
@@ -2745,7 +2801,6 @@ def page_lancamentos(user: "User"):
 
 def display_entry_hierarchy(congs_all: List[Congregation], start: date, end: date, db: Session):
     """Gera e exibe um DataFrame com a hierarquia de entradas, sem somar a principal com as subs."""
-    
     st.info("Este é um relatório de visualização. A edição é feita na visão detalhada de cada unidade.")
     
     report_data = []
@@ -2765,22 +2820,23 @@ def display_entry_hierarchy(congs_all: List[Congregation], start: date, end: dat
 
         # Se houver subs, monta a estrutura hierárquica
         subs_data = []
+        total_subs = 0.0
         for sub in sub_congs:
             sub_totals = _collect_month_data(db, cong.id, start, end, sub_cong_id=sub.id)["totals"]
             sub_entradas = sub_totals["entradas_total_sem_missoes"]
             subs_data.append({"Unidade": f"↳ {sub.name}", "Entradas": sub_entradas})
+            total_subs += sub_entradas
             
         subs_data.sort(key=lambda item: item["Entradas"], reverse=True)
         
         # Adiciona um título para o grupo
         report_data.append({"Unidade": f"**{cong.name}**", "Entradas": ""})
-        # Adiciona a linha da congregação principal
+        # Adiciona a linha da congregação principal e das subs
         report_data.append({"Unidade": f"↳ {cong.name} (Principal)", "Entradas": principal_entradas})
-        # Adiciona as linhas das subs
         report_data.extend(subs_data)
         
         # Atualiza o total geral
-        grand_total += principal_entradas + sum(item["Entradas"] for item in subs_data)
+        grand_total += principal_entradas + total_subs
 
     if not report_data:
         st.warning("Nenhum dado de entrada encontrado para o período."); return
@@ -2795,7 +2851,6 @@ def display_entry_hierarchy(congs_all: List[Congregation], start: date, end: dat
 
 def display_exit_hierarchy(congs_all: List[Congregation], start: date, end: date, db: Session):
     """Gera e exibe um DataFrame com a hierarquia de saídas, sem somar a principal com as subs."""
-    
     st.info("Este é um relatório de visualização. A edição é feita na visão detalhada de cada unidade.")
     
     report_data = []
@@ -2813,14 +2868,16 @@ def display_exit_hierarchy(congs_all: List[Congregation], start: date, end: date
             continue
 
         subs_data = []
+        total_subs = 0.0
         for sub in sub_congs:
             sub_totals = _collect_month_data(db, cong.id, start, end, sub_cong_id=sub.id)["totals"]
             sub_saidas = sub_totals["saidas_total"]
             subs_data.append({"Unidade": f"↳ {sub.name}", "Saídas": sub_saidas})
+            total_subs += sub_saidas
             
         subs_data.sort(key=lambda item: item["Saídas"], reverse=True)
             
-        grand_total += principal_saidas + sum(item["Saídas"] for item in subs_data)
+        grand_total += principal_saidas + total_subs
         
         report_data.append({"Unidade": f"**{cong.name}**", "Saídas": ""})
         report_data.append({"Unidade": f"↳ {cong.name} (Principal)", "Saídas": principal_saidas})
