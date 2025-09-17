@@ -2815,7 +2815,6 @@ def display_entry_hierarchy(congs_all: List[Congregation], start: date, end: dat
 def display_exit_hierarchy(congs_all: List[Congregation], start: date, end: date, db: Session):
     """Gera e exibe um DataFrame com a hierarquia de saídas de congregações e sub-congregações."""
     
-    # A PARTIR DAQUI, TODO O CONTEÚDO DA FUNÇÃO DEVE ESTAR INDENTADO (COM RECUO)
     st.info("Este é um relatório de visualização. A edição é feita na visão detalhada de cada unidade.")
     
     report_data = []
@@ -2839,6 +2838,8 @@ def display_exit_hierarchy(congs_all: List[Congregation], start: date, end: date
             sub_saidas = sub_totals["saidas_total"]
             subs_data.append({"Unidade": f"↳ {sub.name}", "Saídas": sub_saidas})
             total_subs += sub_saidas
+        
+        subs_data.sort(key=lambda item: item["Saídas"], reverse=True)
             
         cong_total = principal_saidas + total_subs
         grand_total += cong_total
