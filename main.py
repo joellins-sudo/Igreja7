@@ -2645,7 +2645,7 @@ def page_cadastro(user: "User"):
                             ids_to_delete_final = [c.id for c in eligible_congs if c.name in names_del]
                             db.query(Congregation).filter(Congregation.id.in_(ids_to_delete_final)).delete(synchronize_session=False)
                             db.commit(); st.success("Congregações excluídas."); st.rerun()
-
+        
         # Aba de Sub-congregações
         with tabs[1]:
             st.subheader("Sub-congregações")
@@ -2671,6 +2671,7 @@ def page_cadastro(user: "User"):
                             db.commit()
                             st.success(f"Sub-congregação '{nome_valido}' adicionada a '{cong_mae_obj.name}'.")
                             st.rerun()
+
             st.divider()
             subs = db.scalars(select(SubCongregation).options(joinedload(SubCongregation.congregation)).order_by(SubCongregation.name)).all()
             if subs:
@@ -2691,7 +2692,7 @@ def page_cadastro(user: "User"):
                             ids_to_delete_final = [s.id for s in eligible_subs if s.name in names_del]
                             db.query(SubCongregation).filter(SubCongregation.id.in_(ids_to_delete_final)).delete(synchronize_session=False)
                             db.commit(); st.success("Sub-congregações excluídas."); st.rerun()
-
+                            
         # Aba de Categorias
         with tabs[2]:
             st.subheader("Categorias")
