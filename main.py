@@ -1082,7 +1082,6 @@ def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFram
         
         wanted = {r["Data do Culto"]: (float(r["Dízimo"]), float(r["Oferta"])) for _, r in edited.iterrows()}
         
-        # LÓGICA CORRIGIDA: Compara as datas originais com as editadas
         orig_dates = set(pd.to_datetime(orig_df["Data do Culto"]).dt.date)
         edited_dates = set(wanted.keys())
         all_dates = sorted(list(orig_dates.union(edited_dates)))
@@ -1090,7 +1089,6 @@ def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFram
         for d in all_dates:
             if d is None: continue
             
-            # Se a data foi removida na edição, o valor desejado é zero.
             want_dz, want_of = wanted.get(d, (0.0, 0.0))
 
             # Busca lançamentos originais (sem ajustes) para o dia 'd'
@@ -1104,7 +1102,6 @@ def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFram
             sum_of_others_q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(and_(Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_ofe.id, Transaction.sub_congregation_id == sub_cong_id, func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC))
             sum_of_others = float(db.scalar(sum_of_others_q) or 0.0)
 
-            # Calcula o ajuste necessário para chegar ao valor desejado
             adj_dz_new = want_dz - sum_dz_others
             adj_of_new = want_of - sum_of_others
 
