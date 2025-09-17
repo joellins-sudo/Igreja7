@@ -2168,13 +2168,13 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
     story.append(Paragraph(f"Referente a: {ref.strftime('%B de %Y')}", subtitle_style))
     story.append(Spacer(1, 0.5*cm))
 
-    # Coleta de dados para a unidade específica
-    data = _collect_month_data(db, cong_id, start, end, sub_cong_id=sub_id)
+    # --- CORREÇÃO AQUI: Usa a variável correta 'sub_cong_id' ---
+    data = _collect_month_data(db, cong_id, start, end, sub_cong_id=sub_cong_id)
     totals = data["totals"]
     
     # Tabela de Entradas
     story.append(Paragraph("1. Entradas (Dízimo e Oferta)", heading_style))
-    df_entradas = _entrada_summary_df(db, cong_id, start, end, sub_cong_id=sub_id)
+    df_entradas = _entrada_summary_df(db, cong_id, start, end, sub_cong_id=sub_cong_id)
     if not df_entradas.empty:
         data_in = [["Data do Culto", "Dízimo", "Oferta", "Total"]]
         for _, row in df_entradas.iterrows():
