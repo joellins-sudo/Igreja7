@@ -1037,11 +1037,17 @@ def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date, sub_c
         Transaction.type.in_((TYPE_IN, "RECEITA")), func.lower(Category.name) == "oferta"
     )
 
-    # Aplica filtro de sub-congregação se necessário
+    # --- LÓGICA DE FILTRO CORRIGIDA ---
     if sub_cong_id is not None:
+        # Filtra por uma sub-congregação específica
         tithes_q = tithes_q.where(Tithe.sub_congregation_id == sub_cong_id)
         diz_trans_q = diz_trans_q.where(Transaction.sub_congregation_id == sub_cong_id)
         oferta_trans_q = oferta_trans_q.where(Transaction.sub_congregation_id == sub_cong_id)
+    else:
+        # Filtra APENAS para a congregação principal (onde não há sub_congregation_id)
+        tithes_q = tithes_q.where(Tithe.sub_congregation_id.is_(None))
+        diz_trans_q = diz_trans_q.where(Transaction.sub_congregation_id.is_(None))
+        oferta_trans_q = oferta_trans_q.where(Transaction.sub_congregation_id.is_(None))
 
     # Executa queries
     tithes = db.execute(tithes_q.group_by(Tithe.date)).all()
