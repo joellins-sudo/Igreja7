@@ -2251,6 +2251,7 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
     subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=11, spaceAfter=12)
     heading_style = ParagraphStyle('heading', parent=styles['h2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
     normal_style = styles['Normal']
+    right_align_style = ParagraphStyle('right', parent=styles['Normal'], alignment=2) # 2 = TA_RIGHT
     signature_style = ParagraphStyle('signature', parent=styles['Normal'], alignment=TA_CENTER, spaceBefore=0)
     
     story: List = []
@@ -2293,15 +2294,14 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
                     format_currency(row["Oferta"]),
                     format_currency(row["Total"])
                 ])
-            # --- CORREÇÃO APLICADA AQUI ---
-            total_entradas_paragraph = Paragraph(f"<b>{format_currency(unit_total_entradas)}</b>", normal_style)
-            data_in.append([Paragraph("<b>Total da Unidade:</b>", styles['RightAlign']), "", "", total_entradas_paragraph])
+            total_entradas_paragraph = Paragraph(f"<b>{format_currency(unit_total_entradas)}</b>", right_align_style)
+            data_in.append([Paragraph("<b>Total da Unidade:</b>", right_align_style), "", "", total_entradas_paragraph])
             
             tbl_in = Table(data_in, colWidths=[3.2*cm, 4.0*cm, 4.0*cm, 5.3*cm])
             tbl_in.setStyle(TableStyle([
                 ('GRID', (0,0), (-1,-1), 1, colors.grey), ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-                ('ALIGN', (1,1), (-1,-1), 'RIGHT'), ('SPAN', (0,-1), (2,-1)), ('ALIGN', (0,-1), (0,-1), 'RIGHT'),
-                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)
+                ('ALIGN', (1,1), (-1,-1), 'RIGHT'), ('SPAN', (0,-1), (2,-1)), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)
             ]))
             story.append(tbl_in)
         else:
@@ -2315,15 +2315,14 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
             data_out = [["Data", "Categoria", "Descrição", "Valor"]]
             for t in txs_out:
                 data_out.append([t.date.strftime("%d/%m/%Y"), t.category.name, t.description or "", format_currency(t.amount)])
-            # --- CORREÇÃO APLICADA AQUI ---
-            total_saidas_paragraph = Paragraph(f"<b>{format_currency(unit_total_saidas)}</b>", normal_style)
-            data_out.append([Paragraph("<b>Total da Unidade:</b>", styles['RightAlign']), "", "", total_saidas_paragraph])
+            total_saidas_paragraph = Paragraph(f"<b>{format_currency(unit_total_saidas)}</b>", right_align_style)
+            data_out.append([Paragraph("<b>Total da Unidade:</b>", right_align_style), "", "", total_saidas_paragraph])
             
             tbl_out = Table(data_out, colWidths=[2.5*cm, 4.5*cm, 6.5*cm, 3*cm])
             tbl_out.setStyle(TableStyle([
                 ('GRID', (0,0), (-1,-1), 1, colors.grey), ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-                ('ALIGN', (3,1), (3,-1), 'RIGHT'), ('SPAN', (0,-1), (2,-1)), ('ALIGN', (0,-1), (0,-1), 'RIGHT'),
-                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)
+                ('ALIGN', (3,1), (3,-1), 'RIGHT'), ('SPAN', (0,-1), (2,-1)), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)
             ]))
             story.append(tbl_out)
         else:
