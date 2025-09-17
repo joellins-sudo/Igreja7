@@ -2146,6 +2146,100 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
     doc.build(story)
     return buf.getvalue()
 
+def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_name: str, ref: date, db: Session) -> bytes:
+    """Gera um PDF de prestação de contas para uma única unidade (principal ou sub)."""
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
+    styles = getSampleStyleSheet()
+    start, end = month_bounds(ref)
+
+    # Estilos
+    title_style = ParagraphStyle('title', parent=styles['h1'], alignment=TA_CENTER, fontSize=16, spaceAfter=4)
+    subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=11, spaceAfter=12)
+    heading_style = ParagraphStyle('heading', parent=styles['h2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
+    normal_style = styles['Normal']
+    signature_style = ParagraphStyle('signature', parent=styles['Normal'], alignment=TA_CENTER, spaceBefore=0)
+    
+    story: List = []
+
+    # Cabeçalho do Documento
+    story.append(Paragraph("Prestação de Contas Mensal", title_style))
+    story.append(Paragraph(f"Unidade: {unit_name}", subtitle_style))
+    story.append(Paragraph(f"Referente a: {ref.strftime('%B de %Y')}", subtitle_style))
+    story.append(Spacer(1, 0.5*cm))
+
+    # Coleta de dados para a unidade específica
+    data = _collect_month_data(db, cong_id, start, end, sub_cong_id=sub_id)
+    totals = data["totals"]
+    
+    # Tabela de Entradas
+    story.append(Paragraph("1. Entradas (Dízimo e Oferta)", heading_style))
+    df_entradas = _entrada_summary_df(db, cong_id, start, end, sub_cong_id=sub_id)
+    if not df_entradas.empty:
+        data_in = [["Data do Culto", "Dízimo", "Oferta", "Total"]]
+        for _, row in df_entradas.iterrows():
+            data_in.append([
+                row["Data do Culto"].strftime("%d/%m/%Y"),
+                format_currency(row["Dízimo"]),
+                format_currency(row["Oferta"]),
+                format_currency(row["Total"])
+            ])
+        total_p = Paragraph(f"<b>{format_currency(totals['entradas_total_sem_missoes'])}</b>", normal_style)
+        data_in.append(["", "", Paragraph("<b>Total de Entradas:</b>", normal_style), total_p])
+        
+        tbl_in = Table(data_in, colWidths=[3.2*cm, 4.0*cm, 4.0*cm, 5.3*cm])
+        tbl_in.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 1, colors.grey), ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+            ('ALIGN', (1,1), (-1,-1), 'RIGHT'), ('SPAN', (0,-1), (2,-1)), ('ALIGN', (0,-1), (0,-1), 'RIGHT'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)
+        ]))
+        story.append(tbl_in)
+    else:
+        story.append(Paragraph("Nenhuma entrada registrada.", normal_style))
+    story.append(Spacer(1, 0.5*cm))
+
+    # Tabela de Saídas
+    story.append(Paragraph("2. Saídas", heading_style))
+    if data["tx_out"]:
+        data_out = [["Data", "Categoria", "Descrição", "Valor"]]
+        for t in data["tx_out"]:
+            data_out.append([t.date.strftime("%d/%m/%Y"), t.category.name, t.description or "", format_currency(t.amount)])
+        total_p = Paragraph(f"<b>{format_currency(totals['saidas_total'])}</b>", normal_style)
+        data_out.append(["", "", Paragraph("<b>Total de Saídas:</b>", normal_style), total_p])
+        
+        tbl_out = Table(data_out, colWidths=[2.5*cm, 4.5*cm, 6.5*cm, 3*cm])
+        tbl_out.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 1, colors.grey), ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+            ('ALIGN', (3,1), (3,-1), 'RIGHT'), ('SPAN', (0,-1), (2,-1)), ('ALIGN', (0,-1), (0,-1), 'RIGHT'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)
+        ]))
+        story.append(tbl_out)
+    else:
+        story.append(Paragraph("Nenhuma saída registrada.", normal_style))
+    story.append(Spacer(1, 1*cm))
+
+    # Tabela de Resumo Financeiro
+    story.append(Paragraph("3. Resumo Financeiro da Unidade", heading_style))
+    summary_data = [
+        ["Total de Entradas", format_currency(totals["entradas_total_sem_missoes"])],
+        ["Total de Saídas", format_currency(totals["saidas_total"])],
+        [Paragraph("<b>Saldo do Mês</b>", normal_style), Paragraph(f"<b>{format_currency(totals['saldo'])}</b>", normal_style)]
+    ]
+    tbl_summary = Table(summary_data, colWidths=[8*cm, 8.5*cm])
+    tbl_summary.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,2), (-1,2), colors.lightcyan)]))
+    story.append(tbl_summary)
+
+    # Assinaturas
+    story.append(Spacer(1, 2.5*cm))
+    assinaturas = ["Dirigente da Congregação", "Responsável pelas Ofertas"]
+    for assinatura in assinaturas:
+        story.append(Paragraph("_" * 40, signature_style))
+        story.append(Paragraph(assinatura, signature_style))
+        story.append(Spacer(1, 0.8*cm))
+
+    doc.build(story)
+    return buf.getvalue()
+
 def build_consolidated_pdf(congs_all: List[Congregation], ref: date, db: Session) -> bytes:
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
