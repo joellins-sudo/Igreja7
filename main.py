@@ -1420,35 +1420,78 @@ def _editor_missions_entries_agg(congs_all: List["Congregation"], start: date, e
 
 # ====== EDITORES AGREGADOS (TODAS AS CONGREGAÇÕES) — ENTRADAS / SAÍDAS ======
 # ====== EDITORES AGREGADOS (TODAS AS CONGREGAÇÕES) — ENTRADAS / SAÍDAS ======
-def _editor_entradas_agg_all(congs_all: List["Congregation"], start: date, end: date):
+def _editor_entradas_agg_all(congs_all: List[Congregation], start: date, end: date):
     with SessionLocal() as db:
-        rows = []
+        rows_data = []
+        # Primeiro, colete os dados de todas as unidades (principais e subs)
         for c in congs_all:
-            totals = _collect_month_data(db, c.id, start, end, sub_cong_id=None)["totals"]
-            rows.append({"Congregação": c.name, "Total (R$)": float(totals["entradas_total_sem_missoes"])})
+            # Dados da congregação principal
+            principal_totals = _collect_month_data(db, c.id, start, end, sub_cong_id=None)["totals"]
+            rows_data.append({
+                "unidade_display": f"{c.name} (Principal)",
+                "valor": float(principal_totals["entradas_total_sem_missoes"]),
+                "cong_id": c.id,
+                "sub_id": None,
+                "is_sub": False
+            })
+            
+            # Dados das sub-congregações
+            sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == c.id)).all()
+            for sub in sub_congs:
+                sub_totals = _collect_month_data(db, c.id, start, end, sub_cong_id=sub.id)["totals"]
+                rows_data.append({
+                    "unidade_display": f"↳ {sub.name}",
+                    "valor": float(sub_totals["entradas_total_sem_missoes"]),
+                    "cong_id": c.id,
+                    "sub_id": sub.id,
+                    "is_sub": True
+                })
+
+        # Ordena a lista: primeiro por congregação, depois colocando a principal no topo, e depois as subs por valor
+        rows_data.sort(key=lambda x: (x["cong_id"], not x["is_sub"], -x["valor"]))
+
+        df_full = pd.DataFrame(rows_data)
         
-        df_view = pd.DataFrame(rows)
-        if not df_view.empty:
-            df_view = df_view.sort_values("Total (R$)", ascending=False).reset_index(drop=True)
+        # Prepara o DataFrame para exibição (sem as colunas de ID)
+        df_view = df_full[["unidade_display", "valor"]].rename(columns={"unidade_display": "Unidade", "valor": "Total (R$)"})
 
     edited = st.data_editor(
-        df_view, use_container_width=True, hide_index=True, num_rows="dynamic",
+        df_view,
+        use_container_width=True, hide_index=True,
         column_config={
-            "Congregação": st.column_config.SelectboxColumn("Congregação", options=[c.name for c in order_congs_sede_first(congs_all)], required=True),
-            "Total (R$)": st.column_config.NumberColumn("Total (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
+            "Unidade": st.column_config.TextColumn("Unidade", disabled=True),
+            "Total (R$)": st.column_config.NumberColumn("Total (R$)", min_value=0.0, format="R$ %.2f"),
         },
-        key="agg_in_all_editor",
+        key="agg_in_all_editor_hierarchical",
     )
 
     total_geral = 0.0
     if isinstance(edited, pd.DataFrame) and not edited.empty:
         total_geral = edited["Total (R$)"].map(_to_float_brl).sum()
-    st.metric("Total Geral de Entradas (todas as congregações)", format_currency(total_geral))
+    st.metric("Total Geral de Entradas (todas as unidades)", format_currency(total_geral))
 
     def _save():
-        st.toast("💾 Funcionalidade de salvar o editor agregado ainda em desenvolvimento.", icon="⚠️")
+        # Lógica de salvamento reconstruída para a nova estrutura
+        edited_with_ids = df_full.copy()
+        edited_with_ids["valor"] = edited["Total (R$)"].map(_to_float_brl)
 
-    _save_btn(_save, "agg_in_all")
+        for _, row in edited_with_ids.iterrows():
+            cong_id = row["cong_id"]
+            sub_id = row["sub_id"]
+            
+            # Cria um dataframe de uma linha para a função de salvar
+            orig_row_df = pd.DataFrame([{"Data do Culto": start, "Dízimo": row["valor"], "Oferta": 0.0}])
+            edited_row_df = pd.DataFrame([{"Data do Culto": start, "Dízimo": row["valor"], "Oferta": 0.0}])
+            
+            # Usa a função de ajuste para zerar o dia e colocar o novo valor como ajuste de dízimo
+            # NOTA: Esta é uma simplificação. A função _apply... lida com dízimos e ofertas.
+            # Aqui, para simplificar, estamos ajustando o total no campo "Dízimo".
+            _apply_entrada_summary_changes(orig_row_df, edited_row_df, cong_id, start, end, sub_cong_id=sub_id)
+            
+        st.toast("💾 Alterações salvas com sucesso!", icon="✅")
+        st.rerun()
+
+    _save_btn(_save, "agg_in_all_hierarchical")
 
 def _editor_saidas_agg_all(congs_all: List["Congregation"], start: date, end: date):
     with SessionLocal() as db:
