@@ -2686,13 +2686,11 @@ def page_lancamentos(user: "User"):
                     ent_desc = st.text_input("Descrição (opcional)", key="ent_desc")
                     ent_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="ent_valor")
                     if st.form_submit_button("Salvar ENTRADA", type="primary"):
-                        if ent_valor > 0:
-                            cat_obj = next((c for c in cats_in if c.name == ent_cat_name), None)
-                            if cat_obj:
-                                db.add(Transaction(date=ent_data, type=TYPE_IN, category_id=cat_obj.id, amount=ent_valor, description=(ent_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
-                                db.commit(); st.success("Entrada registrada!"); st.rerun()
+                        if ent_valor > 0 and cat_obj := next((c for c in cats_in if c.name == ent_cat_name), None):
+                            db.add(Transaction(date=ent_data, type=TYPE_IN, category_id=cat_obj.id, amount=ent_valor, description=(ent_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
+                            db.commit(); st.success("Entrada registrada!"); st.rerun()
                         else:
-                            st.warning("O valor da entrada deve ser maior que zero.")
+                            st.warning("O valor da entrada deve ser maior que zero e uma categoria deve ser selecionada.")
 
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
                 with st.form("form_dizimo"):
@@ -2716,13 +2714,11 @@ def page_lancamentos(user: "User"):
                     sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
                     sai_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="sai_valor")
                     if st.form_submit_button("Salvar SAÍDA", type="primary"):
-                        if sai_valor > 0:
-                            cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
-                            if cat_obj:
-                                db.add(Transaction(date=sai_data, type=TYPE_OUT, category_id=cat_obj.id, amount=sai_valor, description=(sai_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
-                                db.commit(); st.success("Saída registrada!"); st.rerun()
+                        if sai_valor > 0 and (cat_obj := next((c for c in cats_out if c.name == sai_cat_name), None)):
+                            db.add(Transaction(date=sai_data, type=TYPE_OUT, category_id=cat_obj.id, amount=sai_valor, description=(sai_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
+                            db.commit(); st.success("Saída registrada!"); st.rerun()
                         else:
-                            st.warning("O valor da saída deve ser maior que zero.")
+                            st.warning("O valor da saída deve ser maior que zero e uma categoria deve ser selecionada.")
 
         elif modo == "Editar direto na tabela":
             st.info(f"Modo de edição rápida para a congregação: **{parent_cong_obj.name} (Principal)**. Lançamentos de sub-congregações não são exibidos aqui.")
@@ -2733,6 +2729,7 @@ def page_lancamentos(user: "User"):
             df_entradas = _entrada_summary_df(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=None)
             if df_entradas.empty:
                 df_entradas = pd.DataFrame([{"Data do Culto": today_bahia(), "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0}])
+            
             edited_entradas = st.data_editor(df_entradas, use_container_width=True, hide_index=True, num_rows="dynamic", key="editor_entradas_lancamentos")
             
             try:
@@ -2746,7 +2743,20 @@ def page_lancamentos(user: "User"):
             col1.metric("Total Dízimos (tabela)", format_currency(total_dizimo))
             col2.metric("Total Ofertas (tabela)", format_currency(total_oferta))
             col3.metric("Total Geral (tabela)", format_currency(total_geral))
-            _save_btn(lambda: _apply_entrada_summary_changes(parent_cong_obj.id, start_tab, end_tab, edited_entradas, sub_cong_id=None), f"lan_tab_{parent_cong_obj.id}", "entrada")
+            
+            # CORREÇÃO NA CHAMADA ABAIXO:
+            _save_btn(
+                lambda: _apply_entrada_summary_changes(
+                    orig_df=df_entradas,
+                    edited_df=edited_entradas,
+                    cong_id=parent_cong_obj.id,
+                    start=start_tab,
+                    end=end_tab,
+                    sub_cong_id=None
+                ), 
+                f"lan_tab_{parent_cong_obj.id}", 
+                "entrada"
+            )
 
             st.markdown("---")
             tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id.is_(None))
