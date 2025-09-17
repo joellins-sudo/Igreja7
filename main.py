@@ -2886,8 +2886,6 @@ def page_lancamentos(user: "User"):
             st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
             st.divider()
             
-            # --- Adicionado wrapper CSS para colorir os botões ---
-            st.markdown("<div class='adrf-entrada'>", unsafe_allow_html=True)
             with st.expander("➕ Lançar ENTRADA", expanded=True):
                 with st.form("form_entrada"):
                     cats_in = [c for c in categories_for_type(db, TYPE_IN) if "ajuste" not in _norm(c.name)]
@@ -2896,27 +2894,27 @@ def page_lancamentos(user: "User"):
                     with c2: ent_cat_name = st.selectbox("Categoria", [c.name for c in cats_in] or ["—"], key="ent_cat")
                     ent_desc = st.text_input("Descrição (opcional)", key="ent_desc")
                     ent_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="ent_valor")
-                    if st.form_submit_button("Salvar ENTRADA", type="primary"):
+                    
+                    # --- CORREÇÃO APLICADA AQUI ---
+                    if _submit_btn("Salvar ENTRADA", "form_entrada_btn", theme="entrada"):
                         cat_obj = next((c for c in cats_in if c.name == ent_cat_name), None)
                         if ent_valor > 0 and cat_obj:
                             db.add(Transaction(date=ent_data, type=TYPE_IN, category_id=cat_obj.id, amount=ent_valor, description=(ent_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
                             db.commit(); st.success("Entrada registrada!"); st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
 
-            st.markdown("<div class='adrf-dizimo'>", unsafe_allow_html=True)
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
                 with st.form("form_dizimo"):
                     dz_data = st.date_input("Data do Dízimo", value=today_bahia(), key="dz_data")
                     dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
                     dz_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="dz_valor")
                     dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência"], key="dz_pay")
-                    if st.form_submit_button("Salvar DIZIMISTA", type="primary"):
+                    
+                    # --- CORREÇÃO APLICADA AQUI ---
+                    if _submit_btn("Salvar DIZIMISTA", "form_dizimo_btn", theme="dizimista"):
                         if dz_valor > 0 and dz_nome.strip():
                             db.add(Tithe(date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor, congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id, payment_method=dz_payment))
                             db.commit(); st.success("Dízimo registrado!"); st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
 
-            st.markdown("<div class='adrf-saida'>", unsafe_allow_html=True)
             with st.expander("➖ Lançar SAÍDA"):
                 with st.form("form_saida"):
                     cats_out = categories_for_type(db, TYPE_OUT)
@@ -2925,12 +2923,13 @@ def page_lancamentos(user: "User"):
                     with c2: sai_cat_name = st.selectbox("Categoria", [c.name for c in cats_out] or ["—"], key="sai_cat")
                     sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
                     sai_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="sai_valor")
-                    if st.form_submit_button("Salvar SAÍDA", type="primary"):
+
+                    # --- CORREÇÃO APLICADA AQUI ---
+                    if _submit_btn("Salvar SAÍDA", "form_saida_btn", theme="saida"):
                         cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
                         if sai_valor > 0 and cat_obj:
                             db.add(Transaction(date=sai_data, type=TYPE_OUT, category_id=cat_obj.id, amount=sai_valor, description=(sai_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
                             db.commit(); st.success("Saída registrada!"); st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
         
         elif modo == "Editar direto na tabela":
             contexto_tabela = f"{parent_cong_obj.name} (Principal)"
