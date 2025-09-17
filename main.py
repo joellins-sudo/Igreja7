@@ -2773,7 +2773,7 @@ def page_lancamentos(user: "User"):
             _editor_lancamentos(txs_out, f"Saídas - {contexto_tabela}", tx_type_hint=TYPE_OUT, force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
 
 def display_entry_hierarchy(congs_all: List[Congregation], start: date, end: date, db: Session):
-    """Gera e exibe um DataFrame com a hierarquia de entradas de congregações e sub-congregações."""
+    """Gera e exibe um DataFrame com a hierarquia de entradas, com lógica condicional."""
     
     st.info("Este é um relatório de visualização. A edição é feita na visão detalhada de cada unidade.")
     
@@ -2781,13 +2781,27 @@ def display_entry_hierarchy(congs_all: List[Congregation], start: date, end: dat
     grand_total = 0.0
 
     for cong in congs_all:
+        # Busca as sub-congregações para a congregação atual
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id).order_by(SubCongregation.name)).all()
         
-        # Coleta dados da congregação principal
+        # --- LÓGICA CONDICIONAL ---
+        # Se não houver subs, mostra apenas uma linha simples
+        if not sub_congs:
+            totals = _collect_month_data(db, cong.id, start, end, sub_cong_id=None)["totals"]
+            entradas = totals["entradas_total_sem_missoes"]
+            report_data.append({
+                "Unidade": cong.name,  # Nome simples, sem "(Principal)" ou "(Total)"
+                "Entradas": entradas
+            })
+            grand_total += entradas
+            continue  # Pula para a próxima congregação
+
+        # Se houver subs, monta a estrutura hierárquica
+        # 1. Coleta dados da congregação principal
         principal_totals = _collect_month_data(db, cong.id, start, end, sub_cong_id=None)["totals"]
         principal_entradas = principal_totals["entradas_total_sem_missoes"]
         
-        # Coleta dados das sub-congregações
+        # 2. Coleta dados das sub-congregações
         subs_data = []
         total_subs = 0.0
         for sub in sub_congs:
@@ -2799,26 +2813,26 @@ def display_entry_hierarchy(congs_all: List[Congregation], start: date, end: dat
             })
             total_subs += sub_entradas
             
-        # Calcula o total da congregação (principal + subs)
+        # 3. Calcula o total da família e o total geral
         cong_total = principal_entradas + total_subs
         grand_total += cong_total
         
-        # Adiciona a linha de total para a congregação
-        report_data.append({
-            "Unidade": f"**{cong.name} (Total)**",
-            "Entradas": cong_total
-        })
-        # Adiciona a linha da congregação principal
+        # --- ORDEM DE EXIBIÇÃO ALTERADA ---
+        # Primeiro, adiciona a linha da congregação principal
         report_data.append({
             "Unidade": f"↳ {cong.name} (Principal)",
             "Entradas": principal_entradas
         })
-        # Adiciona as linhas das subs
+        # Depois, adiciona as linhas das subs
         report_data.extend(subs_data)
+        # Por último, adiciona a linha de total para a congregação
+        report_data.append({
+            "Unidade": f"**{cong.name} (Total)**",
+            "Entradas": cong_total
+        })
 
     if not report_data:
-        st.warning("Nenhum dado de entrada encontrado para o período.")
-        return
+        st.warning("Nenhum dado de entrada encontrado para o período."); return
 
     df_report = pd.DataFrame(report_data)
     
