@@ -1064,7 +1064,7 @@ def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date, sub_c
     
     return pd.DataFrame(rows)
 
-def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_df: pd.DataFrame, sub_cong_id: Optional[int] = None):
+def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None):
     with SessionLocal() as db:
         cats_in = categories_for_type(db, TYPE_IN)
         cat_diz = next((c for c in cats_in if _norm(c.name) in ("dizimo", "dízimo")), None)
@@ -1074,82 +1074,56 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
 
         edited = edited_df.copy()
         
+        # Limpa e prepara o dataframe editado
         for col in ["Dízimo", "Oferta"]:
             edited[col] = edited[col].map(_to_float_brl)
-            edited = edited.dropna(subset=[col])
-        
         edited["Data do Culto"] = edited["Data do Culto"].map(lambda x: _to_date(x) if pd.notna(x) else None)
-        edited = edited.dropna(subset=["Data do Culto"])
-
+        edited.dropna(subset=["Data do Culto"], inplace=True)
+        
         wanted = {r["Data do Culto"]: (float(r["Dízimo"]), float(r["Oferta"])) for _, r in edited.iterrows()}
         
-        all_dates = sorted(list(wanted.keys()))
+        # LÓGICA CORRIGIDA: Compara as datas originais com as editadas
+        orig_dates = set(pd.to_datetime(orig_df["Data do Culto"]).dt.date)
+        edited_dates = set(wanted.keys())
+        all_dates = sorted(list(orig_dates.union(edited_dates)))
         
         for d in all_dates:
             if d is None: continue
             
+            # Se a data foi removida na edição, o valor desejado é zero.
             want_dz, want_of = wanted.get(d, (0.0, 0.0))
 
-            # --- BUSCA DE LANÇAMENTOS ORIGINAIS (agora filtrando por sub_cong_id) ---
-            
-            # Dízimos (Tithe)
-            sum_dz_tithes_q = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
-                and_(Tithe.congregation_id == cong_id, Tithe.date == d, Tithe.sub_congregation_id == sub_cong_id)
-            )
+            # Busca lançamentos originais (sem ajustes) para o dia 'd'
+            sum_dz_tithes_q = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(and_(Tithe.congregation_id == cong_id, Tithe.date == d, Tithe.sub_congregation_id == sub_cong_id))
             sum_dz_tithes = float(db.scalar(sum_dz_tithes_q) or 0.0)
             
-            # Transações Dízimo (sem ajuste)
-            sum_dz_tx_no_adj_q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).join(Category).where(
-                and_(Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_diz.id,
-                     Transaction.sub_congregation_id == sub_cong_id,
-                     func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC)
-            )
+            sum_dz_tx_no_adj_q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).join(Category).where(and_(Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_diz.id, Transaction.sub_congregation_id == sub_cong_id, func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC))
             sum_dz_tx_no_adj = float(db.scalar(sum_dz_tx_no_adj_q) or 0.0)
             sum_dz_others = max(sum_dz_tithes, sum_dz_tx_no_adj)
             
-            # Transações Oferta (sem ajuste)
-            sum_of_others_q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
-                and_(Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_ofe.id,
-                     Transaction.sub_congregation_id == sub_cong_id,
-                     func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC)
-            )
+            sum_of_others_q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(and_(Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_ofe.id, Transaction.sub_congregation_id == sub_cong_id, func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC))
             sum_of_others = float(db.scalar(sum_of_others_q) or 0.0)
 
+            # Calcula o ajuste necessário para chegar ao valor desejado
             adj_dz_new = want_dz - sum_dz_others
             adj_of_new = want_of - sum_of_others
 
-            # Busca ajustes existentes
-            adj_dz_q = select(Transaction).where(
-                Transaction.congregation_id == cong_id, Transaction.date == d,
-                Transaction.category_id == cat_diz.id, Transaction.sub_congregation_id == sub_cong_id,
-                func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC
-            )
-            adj_dz = db.scalar(adj_dz_q)
+            # Busca e atualiza/cria/deleta os ajustes no banco
+            adj_dz = db.scalar(select(Transaction).where(Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_diz.id, Transaction.sub_congregation_id == sub_cong_id, func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC))
+            adj_of = db.scalar(select(Transaction).where(Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_ofe.id, Transaction.sub_congregation_id == sub_cong_id, func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC))
 
-            adj_of_q = select(Transaction).where(
-                Transaction.congregation_id == cong_id, Transaction.date == d,
-                Transaction.category_id == cat_ofe.id, Transaction.sub_congregation_id == sub_cong_id,
-                func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC
-            )
-            adj_of = db.scalar(adj_of_q)
-
-            # Aplica ou remove ajuste de Dízimo
-            if abs(adj_dz_new) < 0.0001:
+            if abs(adj_dz_new) < 0.001:
                 if adj_dz: db.delete(adj_dz)
             else:
                 if adj_dz: adj_dz.amount = float(adj_dz_new)
-                else:
-                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id, amount=float(adj_dz_new),
-                                       description=ADJ_ENTRY_DESC, congregation_id=cong_id, sub_congregation_id=sub_cong_id))
+                else: db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id, amount=float(adj_dz_new), description=ADJ_ENTRY_DESC, congregation_id=cong_id, sub_congregation_id=sub_cong_id))
 
-            # Aplica ou remove ajuste de Oferta
-            if abs(adj_of_new) < 0.0001:
+            if abs(adj_of_new) < 0.001:
                 if adj_of: db.delete(adj_of)
             else:
                 if adj_of: adj_of.amount = float(adj_of_new)
-                else:
-                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=float(adj_of_new),
-                                       description=ADJ_ENTRY_DESC, congregation_id=cong_id, sub_congregation_id=sub_cong_id))
+                else: db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=float(adj_of_new), description=ADJ_ENTRY_DESC, congregation_id=cong_id, sub_congregation_id=sub_cong_id))
+        
         db.commit()
 
 # ===================== EDITORES INLINE REUTILIZÁVEIS (com botão Salvar) =====================
@@ -2935,8 +2909,7 @@ def page_relatorio_entrada(user: "User"):
         st.divider()
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
         
-        opcoes = {"-- Todas (Principal + Subs) --": "ALL"}
-        opcoes[parent_cong_obj.name + " (Principal)"] = None
+        opcoes = {"-- Todas (Principal + Subs) --": "ALL", parent_cong_obj.name + " (Principal)": None}
         for sub in sub_congs:
             opcoes[sub.name] = sub.id
 
@@ -2951,12 +2924,7 @@ def page_relatorio_entrada(user: "User"):
             for name, sub_id in all_units:
                 totals = _collect_month_data(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)["totals"]
                 total_entradas_unidade = totals["entradas_total_sem_missoes"]
-                rows.append({
-                    "Unidade": name,
-                    "Dízimos": totals["dizimos"],
-                    "Ofertas": totals["ofertas"],
-                    "Total Entradas": total_entradas_unidade
-                })
+                rows.append({"Unidade": name, "Dízimos": totals["dizimos"], "Ofertas": totals["ofertas"], "Total Entradas": total_entradas_unidade})
                 total_geral += total_entradas_unidade
             
             df_agg = pd.DataFrame(rows)
@@ -2967,10 +2935,7 @@ def page_relatorio_entrada(user: "User"):
             base_df = _entrada_summary_df(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id_or_all)
             
             edited_df = st.data_editor(
-                base_df,
-                use_container_width=True,
-                hide_index=True,
-                num_rows="dynamic",
+                base_df, use_container_width=True, hide_index=True, num_rows="dynamic",
                 column_config={
                     "Data do Culto": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
                     "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", format="R$ %.2f"),
@@ -2998,7 +2963,13 @@ def page_relatorio_entrada(user: "User"):
             col3.metric("Soma Geral (tabela)", format_currency(total_geral_unidade))
 
             def _save_summary():
-                _apply_entrada_summary_changes(parent_cong_obj.id, start, end, edited_df, sub_cong_id=target_sub_cong_id_or_all)
+                _apply_entrada_summary_changes(
+                    orig_df=base_df, 
+                    edited_df=edited_df, 
+                    cong_id=parent_cong_obj.id, 
+                    start=start, end=end, 
+                    sub_cong_id=target_sub_cong_id_or_all
+                )
                 st.toast("💾 Alterações salvas com sucesso!", icon="✅")
                 st.rerun()
 
