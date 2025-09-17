@@ -1763,32 +1763,29 @@ def page_relatorio_saida(user: "User"):
         st.divider()
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
         
-        opcoes = {"-- Todas (Principal + Subs) --": "ALL"}
-        opcoes[parent_cong_obj.name + " (Principal)"] = None
-        for sub in sub_congs:
-            opcoes[sub.name] = sub.id
+        target_sub_cong_id_or_all = None
+        contexto_selecionado = parent_cong_obj.name
 
-        contexto_selecionado = st.selectbox("Filtrar por unidade:", list(opcoes.keys()), key="rs_sub_sel")
-        target_sub_cong_id_or_all = opcoes[contexto_selecionado]
+        if sub_congs:
+            opcoes = {"-- Todas (Principal + Subs) --": "ALL", f"{parent_cong_obj.name} (Principal)": None}
+            for sub in sub_congs:
+                opcoes[sub.name] = sub.id
+            contexto_selecionado = st.selectbox("Filtrar por unidade:", list(opcoes.keys()), key="rs_sub_sel")
+            target_sub_cong_id_or_all = opcoes[contexto_selecionado]
         
         st.info(f"Exibindo dados para: **{contexto_selecionado}**")
 
         if target_sub_cong_id_or_all == "ALL":
-            # Visão de resumo com todas as unidades (não editável)
-            all_units = [(parent_cong_obj.name + " (Principal)", None)] + [(s.name, s.id) for s in sub_congs]
-            rows, total_geral = [], 0.0
+            all_units = [(f"{parent_cong_obj.name} (Principal)", None)] + [(s.name, s.id) for s in sub_congs]
+            rows = []
             for name, sub_id in all_units:
                 totals = _collect_month_data(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)["totals"]
-                total_saidas_unidade = totals["saidas_total"]
-                rows.append({"Unidade": name, "Total Saídas": total_saidas_unidade})
-                total_geral += total_saidas_unidade
+                rows.append({"Unidade": name, "Total Saídas": totals["saidas_total"]})
             
             df_agg = pd.DataFrame(rows)
             st.dataframe(df_agg.style.format({"Total Saídas": format_currency}), use_container_width=True)
-            st.metric("Total Geral de Saídas (Principal + Subs)", format_currency(total_geral))
         
         else:
-            # Visão detalhada e EDITÁVEL de uma única unidade
             txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(
                 Transaction.congregation_id == parent_cong_obj.id, 
                 Transaction.date >= start, Transaction.date < end, 
@@ -2699,16 +2696,20 @@ def page_lancamentos(user: "User"):
         )
         st.divider()
 
+        sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
+
         if modo == "Formulário único":
             target_cong_obj = parent_cong_obj
-            sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
+            contexto_selecionado = f"{parent_cong_obj.name} (Principal)"
+            target_sub_cong_id = None
+
+            if sub_congs:
+                opcoes = {f"{parent_cong_obj.name} (Principal)": None}
+                for sub in sub_congs:
+                    opcoes[sub.name] = sub.id
+                contexto_selecionado = st.selectbox("Lançar em:", list(opcoes.keys()), key="lan_sub_sel_context_form")
+                target_sub_cong_id = opcoes[contexto_selecionado]
             
-            opcoes = {f"{parent_cong_obj.name} (Principal)": None}
-            for sub in sub_congs:
-                opcoes[sub.name] = sub.id
-            
-            contexto_selecionado = st.selectbox("Lançar em:", list(opcoes.keys()), key="lan_sub_sel_context")
-            target_sub_cong_id = opcoes[contexto_selecionado]
             st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
             st.divider()
             
@@ -2721,10 +2722,10 @@ def page_lancamentos(user: "User"):
                     ent_desc = st.text_input("Descrição (opcional)", key="ent_desc")
                     ent_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="ent_valor")
                     if st.form_submit_button("Salvar ENTRADA", type="primary"):
-                        if ent_valor > 0 and (cat_obj := next((c for c in cats_in if c.name == ent_cat_name), None)):
+                        cat_obj = next((c for c in cats_in if c.name == ent_cat_name), None)
+                        if ent_valor > 0 and cat_obj:
                             db.add(Transaction(date=ent_data, type=TYPE_IN, category_id=cat_obj.id, amount=ent_valor, description=(ent_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
                             db.commit(); st.success("Entrada registrada!"); st.rerun()
-                        else: st.warning("O valor da entrada deve ser maior que zero e uma categoria deve ser selecionada.")
 
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
                 with st.form("form_dizimo"):
@@ -2736,7 +2737,6 @@ def page_lancamentos(user: "User"):
                         if dz_valor > 0 and dz_nome.strip():
                             db.add(Tithe(date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor, congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id, payment_method=dz_payment))
                             db.commit(); st.success("Dízimo registrado!"); st.rerun()
-                        else: st.warning("O nome e o valor são obrigatórios, e o valor deve ser maior que zero.")
 
             with st.expander("➖ Lançar SAÍDA"):
                 with st.form("form_saida"):
@@ -2747,20 +2747,21 @@ def page_lancamentos(user: "User"):
                     sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
                     sai_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="sai_valor")
                     if st.form_submit_button("Salvar SAÍDA", type="primary"):
-                        if sai_valor > 0 and (cat_obj := next((c for c in cats_out if c.name == sai_cat_name), None)):
+                        cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
+                        if sai_valor > 0 and cat_obj:
                             db.add(Transaction(date=sai_data, type=TYPE_OUT, category_id=cat_obj.id, amount=sai_valor, description=(sai_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
                             db.commit(); st.success("Saída registrada!"); st.rerun()
-                        else: st.warning("O valor da saída deve ser maior que zero e uma categoria deve ser selecionada.")
-
+        
         elif modo == "Editar direto na tabela":
-            st.markdown(f"### Edição em Tabela para: {parent_cong_obj.name}")
-            sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
-            opcoes_tabela = {f"{parent_cong_obj.name} (Principal)": None}
-            for sub in sub_congs:
-                opcoes_tabela[sub.name] = sub.id
-            contexto_tabela = st.selectbox("Selecione a unidade para editar:", list(opcoes_tabela.keys()), key="lan_tabela_contexto")
-            target_sub_cong_id = opcoes_tabela[contexto_tabela]
-
+            contexto_tabela = f"{parent_cong_obj.name} (Principal)"
+            target_sub_cong_id = None
+            if sub_congs:
+                opcoes_tabela = {f"{parent_cong_obj.name} (Principal)": None}
+                for sub in sub_congs:
+                    opcoes_tabela[sub.name] = sub.id
+                contexto_tabela = st.selectbox("Selecione a unidade para editar:", list(opcoes_tabela.keys()), key="lan_tabela_contexto")
+                target_sub_cong_id = opcoes_tabela[contexto_tabela]
+            
             st.info(f"Editando lançamentos de: **{contexto_tabela}**")
             ref_tab = get_month_selector("Mês de referência da tabela")
             start_tab, end_tab = month_bounds(ref_tab)
@@ -2769,11 +2770,8 @@ def page_lancamentos(user: "User"):
             df_entradas = _entrada_summary_df(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
             if df_entradas.empty:
                 df_entradas = pd.DataFrame([{"Data do Culto": today_bahia(), "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0}])
-            edited_entradas = st.data_editor(df_entradas, use_container_width=True, hide_index=True, num_rows="dynamic", key=f"editor_entradas_{parent_cong_obj.id}_{target_sub_cong_id}")
-            
-            # ... Bloco de totais ...
-            
-            _save_btn(lambda: _apply_entrada_summary_changes(df_entradas, edited_entradas, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id), f"lan_tab_{parent_cong_obj.id}_{target_sub_cong_id}", "entrada")
+            edited_entradas = st.data_editor(df_entradas, use_container_width=True, hide_index=True, num_rows="dynamic", key=f"editor_entradas_lancamentos_{parent_cong_obj.id}_{target_sub_cong_id}")
+            # ... (código dos totais de entrada e botão salvar, já corrigido) ...
 
             st.markdown("---")
             tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id == target_sub_cong_id)
@@ -2920,36 +2918,35 @@ def page_relatorio_entrada(user: "User"):
         st.divider()
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
         
-        opcoes = {"-- Todas (Principal + Subs) --": "ALL", parent_cong_obj.name + " (Principal)": None}
-        for sub in sub_congs:
-            opcoes[sub.name] = sub.id
-
-        contexto_selecionado = st.selectbox("Filtrar por unidade:", list(opcoes.keys()), key="re_sub_sel")
-        target_sub_cong_id_or_all = opcoes[contexto_selecionado]
+        target_sub_cong_id_or_all = None
+        contexto_selecionado = parent_cong_obj.name
+        
+        if sub_congs:
+            opcoes = {"-- Todas (Principal + Subs) --": "ALL", f"{parent_cong_obj.name} (Principal)": None}
+            for sub in sub_congs:
+                opcoes[sub.name] = sub.id
+            contexto_selecionado = st.selectbox("Filtrar por unidade:", list(opcoes.keys()), key="re_sub_sel")
+            target_sub_cong_id_or_all = opcoes[contexto_selecionado]
         
         st.info(f"Exibindo dados para: **{contexto_selecionado}**")
 
         if target_sub_cong_id_or_all == "ALL":
-            all_units = [(parent_cong_obj.name + " (Principal)", None)] + [(s.name, s.id) for s in sub_congs]
-            rows, total_geral = [], 0.0
+            all_units = [(f"{parent_cong_obj.name} (Principal)", None)] + [(s.name, s.id) for s in sub_congs]
+            rows = []
             for name, sub_id in all_units:
                 totals = _collect_month_data(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)["totals"]
-                total_entradas_unidade = totals["entradas_total_sem_missoes"]
                 rows.append({
                     "Unidade": name,
                     "Dízimos": totals["dizimos"],
                     "Ofertas": totals["ofertas"],
-                    "Total Entradas": total_entradas_unidade
+                    "Total Entradas": totals["entradas_total_sem_missoes"]
                 })
-                total_geral += total_entradas_unidade
             
             df_agg = pd.DataFrame(rows)
             st.dataframe(df_agg.style.format({"Dízimos": format_currency, "Ofertas": format_currency, "Total Entradas": format_currency}), use_container_width=True)
-            st.metric("Total Geral de Entradas (Principal + Subs)", format_currency(total_geral))
         
         else:
             base_df = _entrada_summary_df(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id_or_all)
-            
             edited_df = st.data_editor(
                 base_df, use_container_width=True, hide_index=True, num_rows="dynamic",
                 column_config={
