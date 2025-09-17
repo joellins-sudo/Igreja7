@@ -1813,31 +1813,56 @@ def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, m
     story.append(Paragraph("Relatório de Pesquisa de Dizimistas", title_style))
     story.append(Paragraph(f"Ano: {ano_pesq} | Congregação: {cong_sel} | Mês: {mes_sel}", subtitle_style))
     if (nome_q or "").strip():
-        story.append(Paragraph(f"Filtrado por: '{nome_q}'", subtitle_style))
+        story.append(Paragraph(f"Filtrado por nome: '{nome_q}'", subtitle_style))
     story.append(Spacer(1, 0.5*cm))
 
-    data_table = [df.columns.tolist()] + df.values.tolist()
-    total_value = float(df["Total no ano (R$)"].sum())
-    total_row = ["", "", "", "Total Geral:", total_value, "", ""]
-    data_table.append(total_row)
-    for row in data_table[1:]:
-        if isinstance(row[4], float):
-            row[4] = format_currency(row[4])
+    df_pdf = df.copy()
+    
+    # --- LÓGICA PARA REMOVER A COLUNA CONDICIONALMENTE ---
+    is_specific_cong_report = (cong_sel != "Todas")
+    
+    if is_specific_cong_report and "Congregação" in df_pdf.columns:
+        df_pdf = df_pdf.drop(columns=["Congregação"])
+        # Ajusta o template da linha de total e as larguras das colunas
+        col_widths = [4*cm, 2.5*cm, 3*cm, 3*cm, 2.5*cm, 2.5*cm]
+        total_row_template = ["", "", "Total Geral:", 0.0, "", ""]
+    else:
+        # Mantém a configuração original se for para "Todas"
+        col_widths = [3.5*cm, 3.5*cm, 2.0*cm, 2.5*cm, 2.5*cm, 2.0*cm, 2.0*cm]
+        total_row_template = ["", "", "", "Total Geral:", 0.0, "", ""]
+    # ----------------------------------------------------
 
-    tbl = Table(data_table, colWidths=[3.5*cm, 3.5*cm, 2.0*cm, 2.5*cm, 2.5*cm, 2.0*cm, 2.0*cm])
+    # Prepara os dados para a tabela
+    data_table = [df_pdf.columns.tolist()] + df_pdf.values.tolist()
+    total_value = float(df_pdf["Total no ano (R$)"].sum())
+    
+    # Encontra o índice correto para inserir o total
+    total_column_index = -1
+    try:
+        total_column_index = df_pdf.columns.tolist().index("Total no ano (R$)" )
+        total_row_template[total_column_index] = total_value
+    except ValueError:
+        pass # Coluna de total não encontrada, não faz nada
+    
+    data_table.append(total_row_template)
+    
+    # Formata a coluna de valor como moeda
+    if total_column_index != -1:
+        for row in data_table[1:]:
+            if isinstance(row[total_column_index], (float, int)):
+                row[total_column_index] = format_currency(row[total_column_index])
+
+    tbl = Table(data_table, colWidths=col_widths)
     tbl.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
         ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-        ("ALIGN", (4, 1), (4, -1), "RIGHT"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ]))
     story.append(tbl)
     story.append(Spacer(1, 0.5*cm))
-    story.append(Paragraph(f"Dizimistas encontrados: **{len(df)}**", styles['Normal']))
-    story.append(Paragraph(f"Total geral da pesquisa: **{format_currency(total_value)}**", styles['Normal']))
+    story.append(Paragraph(f"Dizimistas encontrados: <b>{len(df)}</b>", styles['Normal']))
+    story.append(Paragraph(f"Total geral da pesquisa: <b>{format_currency(total_value)}</b>", styles['Normal']))
 
     doc.build(story)
     return buf.getvalue()
