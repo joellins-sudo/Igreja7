@@ -1756,74 +1756,79 @@ def page_relatorio_dizimistas(user: "User"):
 def page_relatorio_saida(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
-        # sidebar_common(user) <--- CHAMADA REMOVIDA
-
         st.markdown("<h1 class='page-title'>Relatório de Saída</h1>", unsafe_allow_html=True)
         ref = get_month_selector()
         start, end = month_bounds(ref)
 
-        congs = cong_options_for(user, db)
+        parent_cong_obj = None
+        
         if user.role == "SEDE":
-            ordered = order_congs_sede_first(congs)
-            esc_opt = ["Todas as congregações"] + [c.name for c in ordered]
-            esc = st.selectbox("Escopo", esc_opt, key="rs_escopo")
-            is_all = (esc == "Todas as congregações")
-            cong_obj = None if is_all else next(c for c in ordered if c.name == esc)
+            congs_all = order_congs_sede_first(cong_options_for(user, db))
+            escopo_opts = [
+                "-- Relatório Hierárquico (Visualização) --", 
+                "-- Visão Agregada (Editável) --"
+            ] + [c.name for c in congs_all]
+            
+            escopo_selecionado = st.selectbox("Selecione o escopo do relatório:", escopo_opts, key="rs_sede_escopo")
+            
+            if escopo_selecionado == "-- Relatório Hierárquico (Visualização) --":
+                display_exit_hierarchy(congs_all, start, end, db)
+                return
+            elif escopo_selecionado == "-- Visão Agregada (Editável) --":
+                st.info("Modo de edição do total de saídas por congregação principal.")
+                _editor_saidas_agg_all(congs_all, start, end)
+                return
+            else:
+                parent_cong_obj = next((c for c in congs_all if c.name == escopo_selecionado), None)
+        else: # TESOUREIRO
+            parent_cong_obj = db.get(Congregation, user.congregation_id)
+
+        if not parent_cong_obj:
+            st.info("Nenhuma congregação para analisar."); return
+
+        st.divider()
+        sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
+        
+        opcoes = {"-- Todas (Principal + Subs) --": "ALL"}
+        opcoes[parent_cong_obj.name + " (Principal)"] = None
+        for sub in sub_congs:
+            opcoes[sub.name] = sub.id
+
+        contexto_selecionado = st.selectbox("Filtrar por unidade:", list(opcoes.keys()), key="rs_sub_sel")
+        target_sub_cong_id_or_all = opcoes[contexto_selecionado]
+        
+        st.info(f"Exibindo dados para: **{contexto_selecionado}**")
+
+        if target_sub_cong_id_or_all == "ALL":
+            # Visão de resumo com todas as unidades (não editável)
+            all_units = [(parent_cong_obj.name + " (Principal)", None)] + [(s.name, s.id) for s in sub_congs]
+            rows, total_geral = [], 0.0
+            for name, sub_id in all_units:
+                totals = _collect_month_data(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)["totals"]
+                total_saidas_unidade = totals["saidas_total"]
+                rows.append({"Unidade": name, "Total Saídas": total_saidas_unidade})
+                total_geral += total_saidas_unidade
+            
+            df_agg = pd.DataFrame(rows)
+            st.dataframe(df_agg.style.format({"Total Saídas": format_currency}), use_container_width=True)
+            st.metric("Total Geral de Saídas (Principal + Subs)", format_currency(total_geral))
+        
         else:
-            cong_obj = congs[0] if congs else None; is_all = False
-
-        if is_all:
-            st.info("Escopo: **Todas as congregações** — edite o total mensal de saídas por congregação abaixo.")
-            _editor_saidas_agg_all(ordered, start, end)
-
-            # === [BLOCO 7: Total geral de SAÍDAS (todas as congregações)] ===
-            with SessionLocal() as _db_tot_out:
-                total_geral_out = 0.0
-                for _c in ordered:
-                    _t = _collect_month_data(_db_tot_out, _c.id, start, end)["totals"]
-                    total_geral_out += float(_t["saidas_total"])
-            st.metric("Total geral de SAÍDAS (todas as congregações)", format_currency(total_geral_out))
-            # === [FIM DO BLOCO 7] ===
-
-            st.divider()
-            with SessionLocal() as db2:
-                rows = []
-                for c in ordered:
-                    total = _collect_month_data(db2, c.id, start, end)["totals"]["saidas_total"]
-                    rows.append({"Congregação": c.name, "Total Saídas (R$)": float(total)})
-            csv = pd.DataFrame(rows).to_csv(index=False).encode("utf-8-sig")
-            st.download_button("⬇️ Baixar CSV (Saídas por congregação)", data=csv, file_name=f"saidas_congregacoes_{start.strftime('%Y-%m')}.csv", mime="text/csv")
-            return
-
-        if not cong_obj:
-            st.info("Sem congregação vinculada."); return
-        st.info(f"Escopo: **{cong_obj.name}**")
-
-        q = select(Transaction).options(joinedload(Transaction.category)).where(
-            Transaction.date >= start, Transaction.date < end, Transaction.type.in_(("SAÍDA", "DESPESA")),
-            Transaction.congregation_id == cong_obj.id
-        )
-        txs = db.scalars(q).all()
-
-        total_saidas = sum(float(t.amount) for t in txs)
-        st.metric("Total de saídas", format_currency(total_saidas))
-
-        st.divider()
-        _editor_lancamentos(txs, "Saídas do período (editar na tabela)", tx_type_hint=TYPE_OUT)
-
-        st.divider()
-        rows_csv = [{
-            "Data": t.date.strftime("%Y-%m-%d"),
-            "Congregação": t.congregation.name,
-            "Tipo da saída": t.category.name,
-            "Valor": float(t.amount),
-            "Descrição": t.description or ""
-        } for t in txs]
-        csv = pd.DataFrame(rows_csv).to_csv(index=False).encode("utf-8-sig")
-        st.download_button(
-            "⬇️ Baixar CSV das SAÍDAS do período",
-            data=csv, file_name=f"saidas_{start.strftime('%Y-%m')}.csv", mime="text/csv"
-        )
+            # Visão detalhada e EDITÁVEL de uma única unidade
+            txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(
+                Transaction.congregation_id == parent_cong_obj.id, 
+                Transaction.date >= start, Transaction.date < end, 
+                Transaction.type == TYPE_OUT, 
+                Transaction.sub_congregation_id == target_sub_cong_id_or_all
+            )
+            txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
+            _editor_lancamentos(
+                txs_out, 
+                f"Saídas - {contexto_selecionado}", 
+                tx_type_hint=TYPE_OUT, 
+                force_cong_id=parent_cong_obj.id, 
+                force_sub_cong_id=target_sub_cong_id_or_all
+            )
 
 # ===================== PAGE: RELATÓRIO DE DIZIMISTAS =====================
 def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, mes_sel: str, nome_q: str) -> bytes:
@@ -2841,6 +2846,55 @@ def display_entry_hierarchy(congs_all: List[Congregation], start: date, end: dat
         use_container_width=True
     )
     st.metric("Total Geral de Entradas (todas as congregações)", format_currency(grand_total))
+
+    def display_exit_hierarchy(congs_all: List[Congregation], start: date, end: date, db: Session):
+    """Gera e exibe um DataFrame com a hierarquia de saídas de congregações e sub-congregações."""
+    
+    st.info("Este é um relatório de visualização. A edição é feita na visão detalhada de cada unidade.")
+    
+    report_data = []
+    grand_total = 0.0
+
+    for cong in congs_all:
+        sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id).order_by(SubCongregation.name)).all()
+        
+        # Coleta dados da congregação principal
+        principal_totals = _collect_month_data(db, cong.id, start, end, sub_cong_id=None)["totals"]
+        principal_saidas = principal_totals["saidas_total"]
+        
+        # Se não houver subs, mostra apenas uma linha simples
+        if not sub_congs:
+            report_data.append({"Unidade": cong.name, "Saídas": principal_saidas})
+            grand_total += principal_saidas
+            continue
+
+        # Se houver subs, monta a estrutura hierárquica
+        subs_data = []
+        total_subs = 0.0
+        for sub in sub_congs:
+            sub_totals = _collect_month_data(db, cong.id, start, end, sub_cong_id=sub.id)["totals"]
+            sub_saidas = sub_totals["saidas_total"]
+            subs_data.append({"Unidade": f"↳ {sub.name}", "Saídas": sub_saidas})
+            total_subs += sub_saidas
+            
+        cong_total = principal_saidas + total_subs
+        grand_total += cong_total
+        
+        # Adiciona as linhas na ordem correta
+        report_data.append({"Unidade": f"↳ {cong.name} (Principal)", "Saídas": principal_saidas})
+        report_data.extend(subs_data)
+        report_data.append({"Unidade": f"**{cong.name} (Total)**", "Saídas": cong_total})
+
+    if not report_data:
+        st.warning("Nenhum dado de saída encontrado para o período."); return
+
+    df_report = pd.DataFrame(report_data)
+    
+    st.dataframe(
+        df_report.style.format({"Saídas": format_currency}).hide(axis="index"),
+        use_container_width=True
+    )
+    st.metric("Total Geral de Saídas (todas as congregações)", format_currency(grand_total))
                    
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 
