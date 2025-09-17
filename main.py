@@ -1331,6 +1331,7 @@ def _editor_missions_outflows(saidas: List["Transaction"], titulo: str, congs_al
 
 def _editor_missions_entries_agg(congs_all: List[Congregation], start: date, end: date, titulo: str):
     with SessionLocal() as db:
+        # Lógica para buscar os totais de missões por congregação
         q = select(
             Congregation.name, 
             func.sum(Transaction.amount)
@@ -1341,13 +1342,11 @@ def _editor_missions_entries_agg(congs_all: List[Congregation], start: date, end
         ).group_by(Congregation.name)
         
         sums = db.execute(q).all()
-        
         rows = [{"Congregação": name, "Valor": float(val or 0.0)} for name, val in sums]
-        
-        # Ordena a lista de entradas pelo maior valor
         rows.sort(key=lambda x: x["Valor"], reverse=True)
 
     df_view = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["Congregação", "Valor"])
+    df_orig = df_view.copy() # Guarda o estado original para comparação
 
     edited_view = st.data_editor(
         df_view,
@@ -1371,8 +1370,55 @@ def _editor_missions_entries_agg(congs_all: List[Congregation], start: date, end
     st.metric("Total de ENTRADAS de Missões (mês corrente)", format_currency(_total_in_missions))
     
     def _save():
-        # A lógica de salvamento para esta tabela complexa precisa ser implementada com cuidado
-        st.toast("💾 Funcionalidade de salvar esta tabela ainda está em desenvolvimento.", icon="⚠️")
+        with SessionLocal() as db:
+            by_name = {c.name: c.id for c in congs_all}
+            cat_miss = db.scalar(select(Category).where(func.lower(Category.name).in_(("missões", "missoes"))))
+            if not cat_miss:
+                st.error("Categoria 'Missões' não encontrada."); return
+
+            # Lógica de ajuste (similar à de outras tabelas agregadas)
+            orig_map = {row["Congregação"]: row["Valor"] for _, row in df_orig.iterrows()}
+            edited_map = {row["Congregação"]: row["Valor"] for _, row in edited_view.iterrows()}
+
+            all_congs_in_tables = set(orig_map.keys()) | set(edited_map.keys())
+
+            for cong_name in all_congs_in_tables:
+                cong_id = by_name.get(cong_name)
+                if not cong_id: continue
+
+                valor_antigo = orig_map.get(cong_name, 0.0)
+                valor_novo = edited_map.get(cong_name, 0.0)
+                
+                if abs(valor_antigo - valor_novo) > 0.01: # Se houve mudança
+                    ajuste_necessario = valor_novo - valor_antigo
+                    
+                    # Procura por um ajuste existente para este mês e congregação
+                    q_adj = select(Transaction).where(
+                        Transaction.congregation_id == cong_id,
+                        Transaction.category_id == cat_miss.id,
+                        Transaction.description == ADJ_MISS_IN_DESC,
+                        Transaction.date >= start, Transaction.date < end
+                    )
+                    adj_existente = db.scalar(q_adj)
+
+                    if adj_existente:
+                        novo_valor_ajuste = adj_existente.amount + ajuste_necessario
+                        if abs(novo_valor_ajuste) < 0.01:
+                            db.delete(adj_existente)
+                        else:
+                            adj_existente.amount = novo_valor_ajuste
+                            db.add(adj_existente)
+                    elif abs(ajuste_necessario) >= 0.01:
+                        novo_ajuste = Transaction(
+                            date=start, type=TYPE_IN, category_id=cat_miss.id,
+                            amount=ajuste_necessario, description=ADJ_MISS_IN_DESC,
+                            congregation_id=cong_id
+                        )
+                        db.add(novo_ajuste)
+            
+            db.commit()
+        st.toast("💾 Alterações salvas com sucesso!", icon="✅")
+        st.rerun()
         
     _save_btn(_save, f"missoes_in_{titulo}")
 
