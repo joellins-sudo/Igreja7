@@ -2043,8 +2043,9 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
                     format_currency(row["Oferta"]),
                     format_currency(row["Total"])
                 ])
-            total_entradas_paragraph = Paragraph(f"<b>{format_currency(unit_total_entradas)}</b>", normal_style)
-            data_in.append(["", "", Paragraph("<b>Total da Unidade:</b>", normal_style), total_entradas_paragraph])
+            # --- CORREÇÃO APLICADA AQUI ---
+            total_entradas_paragraph = Paragraph(f"<b>{format_currency(unit_total_entradas)}</b>", styles['Normal'])
+            data_in.append(["", "", Paragraph("<b>Total da Unidade:</b>", styles['Normal']), total_entradas_paragraph])
             
             tbl_in = Table(data_in, colWidths=[3.2*cm, 4.0*cm, 4.0*cm, 5.3*cm])
             tbl_in.setStyle(TableStyle([
@@ -2064,8 +2065,9 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
             data_out = [["Data", "Categoria", "Descrição", "Valor"]]
             for t in txs_out:
                 data_out.append([t.date.strftime("%d/%m/%Y"), t.category.name, t.description or "", format_currency(t.amount)])
+            # --- CORREÇÃO APLICADA AQUI ---
             total_saidas_paragraph = Paragraph(f"<b>{format_currency(unit_total_saidas)}</b>", normal_style)
-            data_out.append(["", "", Paragraph("<b>Total da Unidade:</b>", normal_style), total_saidas_paragraph])
+            data_out.append(["", "", Paragraph("<b>Total da Unidade:</b>", styles['Normal']), total_saidas_paragraph])
             
             tbl_out = Table(data_out, colWidths=[2.5*cm, 4.5*cm, 6.5*cm, 3*cm])
             tbl_out.setStyle(TableStyle([
@@ -2078,7 +2080,6 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
             story.append(Paragraph("Nenhuma saída registrada.", normal_style))
         story.append(Spacer(1, 0.5*cm))
         
-        # Resumo da Unidade (SÓ APARECE SE HOUVER SUBS)
         if sub_congs:
             story.append(Paragraph(f"<b>3. Resumo da Unidade: {name}</b>", normal_style))
             unit_saldo = unit_total_entradas - unit_total_saidas
