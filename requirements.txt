@@ -5,7 +5,7 @@ reportlab==4.2.2
 streamlit-aggrid==0.3.4.post3
 extra-streamlit-components>=0.1.60
 psycopg2-binary
-# Forçando atualização em 17/09/2025
+
 
 
 
