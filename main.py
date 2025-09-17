@@ -2047,99 +2047,87 @@ def page_relatorio_dizimistas(user: "User"):
             st.caption("Nenhum resultado para os filtros informados.")
 
 # ===================== PDFs =====================
-def build_full_statement_pdf(cong_id: int, cong_name: str, ref: date) -> bytes:
+def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> bytes:
     buf = BytesIO()
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('title', parent=styles['Heading1'], alignment=TA_CENTER, fontSize=16, spaceAfter=8)
-    subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=12, textColor=colors.black, spaceAfter=12)
-    heading_style = ParagraphStyle('heading', parent=styles['Heading2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
-
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
+    styles = getSampleStyleSheet()
+    start, end = month_bounds(ref)
+
+    # Estilos
+    title_style = ParagraphStyle('title', parent=styles['h1'], alignment=TA_CENTER, fontSize=16, spaceAfter=4)
+    subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=11, spaceAfter=12)
+    heading_style = ParagraphStyle('heading', parent=styles['h2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
+    normal_style = styles['Normal']
+    
     story: List = []
 
-    with SessionLocal() as db:
-        start, end = month_bounds(ref)
-        data = _collect_month_data(db, cong_id, start, end)
+    # Coleta de dados
+    parent_cong_obj = db.get(Congregation, parent_cong_id)
+    sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
+    all_units = [(f"{parent_cong_obj.name} (Principal)", None)] + [(s.name, s.id) for s in sub_congs]
 
-        # [EQ FIX]: calcular Dízimo por data usando equivalência (max entre tithes e tx 'Dízimo'), e Oferta somada normalmente
-        tithe_by_date = defaultdict(float)
-        for t in data["tithes"]:
-            tithe_by_date[t.date] += float(t.amount)
+    grand_total_entradas = 0.0
+    grand_total_saidas = 0.0
 
-        diz_tx_by_date = defaultdict(float)
-        oferta_by_date = defaultdict(float)
-        for t in data["tx_in"]:
-            if t.category and _norm(t.category.name) in ("dizimo","dízimo"):
-                diz_tx_by_date[t.date] += float(t.amount)
-            elif t.category and _norm(t.category.name) == "oferta":
-                oferta_by_date[t.date] += float(t.amount)
-
-        all_dates = sorted(set(list(tithe_by_date.keys()) + list(diz_tx_by_date.keys()) + list(oferta_by_date.keys())))
-        tx_in_data = [["Data do Culto", "Dízimo", "Oferta", "Total"]]
-        for d in all_dates:
-            dz = max(float(tithe_by_date.get(d, 0.0)), float(diz_tx_by_date.get(d, 0.0)))  # [EQ FIX]
-            ofe = float(oferta_by_date.get(d, 0.0))
-            tx_in_data.append([d.strftime("%d/%m/%Y"), format_currency(dz), format_currency(ofe), format_currency(dz + ofe)])
-
-        tx_out_data = [["Data", "Categoria", "Descrição", "Valor"]]
-        tx_out_data.extend([[t.date.strftime("%d/%m/%Y"), t.category.name, t.description or "", format_currency(t.amount)] for t in data["tx_out"]])
-
-    story.append(Paragraph("Prestação de Contas Mensal", title_style))
-    story.append(Paragraph(f"Congregação: {cong_name}", subtitle_style))
+    # Cabeçalho do Documento
+    story.append(Paragraph("Prestação de Contas Mensal Detalhada", title_style))
+    story.append(Paragraph(f"Congregação: {parent_cong_obj.name} e suas unidades", subtitle_style))
     story.append(Paragraph(f"Referente a: {ref.strftime('%B de %Y')}", subtitle_style))
-
-    story.append(Paragraph("1. Entradas (Resumo: Dízimo e Oferta)", heading_style))
-    if len(tx_in_data) > 1:
-        tbl_in = Table(tx_in_data, colWidths=[3.2*cm, 4.0*cm, 4.0*cm, 5.3*cm])
-        tbl_in.setStyle(TableStyle([
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-            ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ]))
-        story.append(tbl_in)
-    else:
-        story.append(Paragraph("Nenhuma entrada registrada.", styles['Normal']))
     story.append(Spacer(1, 0.5*cm))
 
-    story.append(Paragraph("2. Saídas", heading_style))
-    if len(tx_out_data) > 1:
-        tbl_out = Table(tx_out_data, colWidths=[2.5*cm, 4.5*cm, 7.5*cm, 3.5*cm])
-        tbl_out.setStyle(TableStyle([
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("ALIGN", (3, 1), (3, -1), "RIGHT"),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-        ]))
-        story.append(tbl_out)
-    else:
-        story.append(Paragraph("Nenhuma saída registrado.", styles['Normal']))
-    story.append(Spacer(1, 1*cm))
+    # Loop para gerar tabelas de cada unidade
+    for name, sub_id in all_units:
+        data = _collect_month_data(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)
+        
+        # Tabela de Entradas da Unidade
+        story.append(Paragraph(f"Entradas: {name}", heading_style))
+        tx_in_data = [["Data", "Dízimo/Oferta", "Valor"]]
+        unit_total_entradas = data["totals"]["entradas_total_sem_missoes"]
+        grand_total_entradas += unit_total_entradas
+        
+        # Aqui simplificamos para mostrar todas as entradas juntas
+        for t in data["tx_in"]:
+             tx_in_data.append([t.date.strftime("%d/%m/%Y"), t.category.name, format_currency(t.amount)])
+        for t in data["tithes"]:
+             tx_in_data.append([t.date.strftime("%d/%m/%Y"), "Dízimo (Nominal)", format_currency(t.amount)])
+        
+        if len(tx_in_data) > 1:
+            tbl_in = Table(tx_in_data, colWidths=[3*cm, 9*cm, 4.5*cm])
+            # ... estilos da tabela ...
+            story.append(tbl_in)
+        else:
+            story.append(Paragraph("Nenhuma entrada registrada.", normal_style))
+        story.append(Paragraph(f"<b>Total de Entradas da Unidade: {format_currency(unit_total_entradas)}</b>", normal_style))
+        story.append(Spacer(1, 0.5*cm))
 
-    story.append(Paragraph("3. Resumo Financeiro do Mês", heading_style))
-    with SessionLocal() as db:
-        start, end = month_bounds(ref)
-        totals = _collect_month_data(db, cong_id, start, end)["totals"]
+        # Tabela de Saídas da Unidade
+        story.append(Paragraph(f"Saídas: {name}", heading_style))
+        tx_out_data = [["Data", "Categoria", "Descrição", "Valor"]]
+        unit_total_saidas = data["totals"]["saidas_total"]
+        grand_total_saidas += unit_total_saidas
+        for t in data["tx_out"]:
+            tx_out_data.append([t.date.strftime("%d/%m/%Y"), t.category.name, t.description or "", format_currency(t.amount)])
+
+        if len(tx_out_data) > 1:
+            tbl_out = Table(tx_out_data, colWidths=[2.5*cm, 4.5*cm, 6.5*cm, 3*cm])
+            # ... estilos da tabela ...
+            story.append(tbl_out)
+        else:
+            story.append(Paragraph("Nenhuma saída registrada.", normal_style))
+        story.append(Paragraph(f"<b>Total de Saídas da Unidade: {format_currency(unit_total_saidas)}</b>", normal_style))
+        story.append(Spacer(1, 1*cm))
+
+    # --- Tabela Final: Resumo Financeiro Geral ---
+    story.append(Paragraph("Resumo Financeiro Geral (Principal + Subs)", heading_style))
+    saldo_final = grand_total_entradas - grand_total_saidas
     summary_data = [
-        ["Total de Dízimos", format_currency(totals["dizimos"])],
-        ["Total de Ofertas", format_currency(totals.get("ofertas", 0.0))],
-        ["Total de Entradas (caixa principal)", format_currency(totals["entradas_total_sem_missoes"])],
-        ["Total de Saídas", format_currency(totals["saidas_total"])],
-        ["Saldo do Mês", format_currency(totals["entradas_total_sem_missoes"] - totals["saidas_total"])],
+        ["Total Geral de Entradas", format_currency(grand_total_entradas)],
+        ["Total Geral de Saídas", format_currency(grand_total_saidas)],
+        [Paragraph("<b>Saldo do Mês (Entradas - Saídas)</b>", normal_style), Paragraph(f"<b>{format_currency(saldo_final)}</b>", normal_style)]
     ]
-    summary_table = Table(summary_data, colWidths=[8*cm, 8*cm])
-    summary_table.setStyle(TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#e2fbe2")),
-        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-    ]))
-    story.append(summary_table)
+    tbl_summary = Table(summary_data, colWidths=[8*cm, 8*cm])
+    tbl_summary.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightcyan)]))
+    story.append(tbl_summary)
 
     doc.build(story)
     return buf.getvalue()
@@ -2261,30 +2249,17 @@ def page_visao_geral(user: "User"):
         congs = cong_options_for(user, db)
         ordered = order_congs_sede_first(congs)
         
-        agg_total = []
         if user.role == "SEDE":
             st.info("Escopo: **Todas as congregações**")
+            agg_total = []
             for c in ordered:
                 totals = _collect_month_data(db, c.id, start, end)["totals"]
                 agg_total.append((c.name, totals["entradas_total_sem_missoes"], totals["saidas_total"], totals["saldo"], totals["missoes"]))
-        elif congs:
-            cong_obj = congs[0]
-            st.info(f"Escopo: **{cong_obj.name}**")
-            totals = _collect_month_data(db, cong_obj.id, start, end)["totals"]
-            agg_total.append((cong_obj.name, totals["entradas_total_sem_missoes"], totals["saidas_total"], totals["saldo"], totals["missoes"]))
-        else:
-            st.info("Sem congregação vinculada.")
-            return
-
-        # ---- Exibição na Tela (Sem Alterações) ----
-        if user.role == "SEDE":
+            
             df_rank = pd.DataFrame([{"Congregação": n, "Entradas": v, "Saídas": s, "Saldo": sal} for (n, v, s, sal, _m) in agg_total])
             if not df_rank.empty:
                 df_sorted = df_rank.sort_values("Entradas", ascending=False).reset_index(drop=True)
-                st.dataframe(
-                    df_sorted.assign(**{"Entradas": df_sorted["Entradas"].map(format_currency), "Saídas": df_sorted["Saídas"].map(format_currency), "Saldo": df_sorted["Saldo"].map(format_currency)}),
-                    use_container_width=True, hide_index=True
-                )
+                st.dataframe(df_sorted.style.format({"Entradas": format_currency, "Saídas": format_currency, "Saldo": format_currency}), use_container_width=True)
                 
                 _tot_in  = sum(v for (_, v, _, _, _) in agg_total)
                 _tot_out = sum(s for (_, _, s, _, _) in agg_total)
@@ -2295,40 +2270,48 @@ def page_visao_geral(user: "User"):
                 c1.metric("Total de Entradas (geral)", format_currency(_tot_in))
                 c2.metric("Total de Saídas (geral)", format_currency(_tot_out))
                 c3.metric("Saldo (geral)", format_currency(_tot_saldo))
-
-        if user.role != "SEDE" and agg_total:
-            st.divider()
-            st.subheader("Resumo Financeiro Mensal")
-            # ... (código da tabela de resumo para Tesoureiro) ...
         
+        elif congs: # LÓGICA PARA TESOUREIRO
+            parent_cong_obj = congs[0]
+            st.info(f"Escopo: **{parent_cong_obj.name} e suas unidades**")
+            
+            sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
+            all_units = [(f"{parent_cong_obj.name} (Principal)", None)] + [(s.name, s.id) for s in sub_congs]
+            
+            rows = []
+            for name, sub_id in all_units:
+                totals = _collect_month_data(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)["totals"]
+                rows.append({
+                    "Unidade": name,
+                    "Entradas": totals["entradas_total_sem_missoes"],
+                    "Saídas": totals["saidas_total"],
+                    "Saldo": totals["saldo"]
+                })
+            
+            df_summary = pd.DataFrame(rows)
+            st.dataframe(df_summary.style.format({"Entradas": format_currency, "Saídas": format_currency, "Saldo": format_currency}), use_container_width=True)
+        else:
+            st.info("Sem congregação vinculada.")
+            return
+
         st.divider()
         st.subheader("Downloads de Relatórios (PDF)")
         
-        # --- Botão para o NOVO Relatório Geral Detalhado ---
         if user.role == "SEDE":
             st.download_button(
-                "⬇️ Baixar PDF do Relatório Geral (Detalhado)",
-                data=build_consolidated_pdf(ordered, ref, db), # Chamada para a nova função
+                "⬇️ Baixar PDF do Relatório Geral",
+                data=build_consolidated_pdf(ordered, ref, db),
                 file_name=f"relatorio_geral_detalhado_{ref.strftime('%Y-%m')}.pdf",
                 mime="application/pdf",
-                key=f"dl_pdf_relatorio_geral_detalhado_{ref.strftime('%Y_%m')}"
+                key=f"dl_pdf_relatorio_geral_detalhado"
             )
-
-        # --- Seção para o Relatório Individual (funcionalidade mantida) ---
-        st.markdown("###### Relatório Individual por Congregação")
-        if user.role == "SEDE":
-            sel_name = st.selectbox("Selecione a Congregação para o relatório individual:", [c.name for c in ordered], key="pc_cong_sel_vg")
-            cong_obj_pdf = next((c for c in ordered if c.name == sel_name), None)
-        else:
-            cong_obj_pdf = congs[0] if congs else None
-
-        if cong_obj_pdf:
+        else: # TESOUREIRO
             st.download_button(
-                f"⬇️ Baixar PDF de {cong_obj_pdf.name}",
-                data=build_full_statement_pdf(cong_obj_pdf.id, cong_obj_pdf.name, ref),
-                file_name=f"prestacao_{_norm(cong_obj_pdf.name)}_{ref.strftime('%Y-%m')}.pdf",
+                f"⬇️ Baixar PDF de {parent_cong_obj.name} (Detalhado)",
+                data=build_full_statement_pdf(parent_cong_obj.id, ref, db),
+                file_name=f"prestacao_{_norm(parent_cong_obj.name)}_{ref.strftime('%Y-%m')}.pdf",
                 mime="application/pdf",
-                key=f"dl_pdf_prestacao_{_norm(cong_obj_pdf.name)}_{ref.strftime('%Y_%m')}"
+                key=f"dl_pdf_prestacao_{_norm(parent_cong_obj.name)}"
             )
 
 # ===================== COLETA MISSÕES =====================
