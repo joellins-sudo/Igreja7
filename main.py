@@ -1133,117 +1133,92 @@ def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date, sub_c
     
     return pd.DataFrame(rows)
 
-def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_df: pd.DataFrame):
+def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_df: pd.DataFrame, sub_cong_id: Optional[int] = None):
     with SessionLocal() as db:
         cats_in = categories_for_type(db, TYPE_IN)
-        cat_diz = next((c for c in cats_in if _norm(c.name) in ("dizimo","dízimo")), None)
+        cat_diz = next((c for c in cats_in if _norm(c.name) in ("dizimo", "dízimo")), None)
         cat_ofe = next((c for c in cats_in if _norm(c.name) == "oferta"), None)
         if not (cat_diz and cat_ofe):
             st.error("Categorias 'Dízimo' e/ou 'Oferta' não encontradas."); return
 
-        def current_sums():
-            base = _entrada_summary_df(db, cong_id, start, end)
-            base["Data do Culto"] = base["Data do Culto"].map(_to_date)
-            bydate = {r["Data do Culto"]: (float(r["Dízimo"]), float(r["Oferta"])) for _, r in base.iterrows()}
-            return bydate
-
-        baseline = current_sums()
         edited = edited_df.copy()
         
-        # 1. Converte Colunas numéricas de forma segura e remove linhas sem valores válidos
         for col in ["Dízimo", "Oferta"]:
-            edited[col] = edited[col].map(_to_float_brl) 
-            edited = edited.dropna(subset=[col]) 
+            edited[col] = edited[col].map(_to_float_brl)
+            edited = edited.dropna(subset=[col])
         
-        # 2. Converte Data e remove linhas sem data válida
         edited["Data do Culto"] = edited["Data do Culto"].map(lambda x: _to_date(x) if pd.notna(x) else None)
         edited = edited.dropna(subset=["Data do Culto"])
 
-        # 3. Mapeia os valores desejados (want_dz, want_of) a partir do DF limpo
         wanted = {r["Data do Culto"]: (float(r["Dízimo"]), float(r["Oferta"])) for _, r in edited.iterrows()}
         
-        # Adiciona as datas que já existiam na base (para limpar ajustes se os valores foram zerados)
-        all_dates = sorted(set(list(baseline.keys()) + list(wanted.keys())))
+        all_dates = sorted(list(wanted.keys()))
         
         for d in all_dates:
-            if d is None:
-                continue 
+            if d is None: continue
             
-            # Pega o que o usuário quer que seja o total do dia (0.0 se a linha foi apagada no editor)
             want_dz, want_of = wanted.get(d, (0.0, 0.0))
 
-            # --- BUSCA DE LANÇAMENTOS ORIGINAIS (SEM AJUSTE) APENAS PARA A DATA 'd' ---
+            # --- BUSCA DE LANÇAMENTOS ORIGINAIS (agora filtrando por sub_cong_id) ---
             
-            # Tithe (apenas desta data)
-            sum_dz_tithes = float(db.scalar(
-                select(func.coalesce(func.sum(Tithe.amount), 0.0))
-                .where(and_(Tithe.congregation_id == cong_id, Tithe.date == d))
-            ) or 0.0)
+            # Dízimos (Tithe)
+            sum_dz_tithes_q = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
+                and_(Tithe.congregation_id == cong_id, Tithe.date == d, Tithe.sub_congregation_id == sub_cong_id)
+            )
+            sum_dz_tithes = float(db.scalar(sum_dz_tithes_q) or 0.0)
             
-            # Transações Dízimo (apenas desta data, sem ajuste)
-            sum_dz_tx_no_adj = float(db.scalar(
-                select(func.coalesce(func.sum(Transaction.amount), 0.0))
-                .join(Category, Transaction.category_id == Category.id)
-                .where(and_(
-                    Transaction.congregation_id == cong_id,
-                    Transaction.date == d, # <--- FILTRO CRÍTICO
-                    Transaction.type.in_((TYPE_IN, "RECEITA")),
-                    Transaction.category_id == cat_diz.id,
-                    func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
-                ))
-            ) or 0.0)
+            # Transações Dízimo (sem ajuste)
+            sum_dz_tx_no_adj_q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).join(Category).where(
+                and_(Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_diz.id,
+                     Transaction.sub_congregation_id == sub_cong_id,
+                     func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC)
+            )
+            sum_dz_tx_no_adj = float(db.scalar(sum_dz_tx_no_adj_q) or 0.0)
             sum_dz_others = max(sum_dz_tithes, sum_dz_tx_no_adj)
             
-            # Transações Oferta (apenas desta data, sem ajuste)
-            sum_of_others = float(db.scalar(
-                select(func.coalesce(func.sum(Transaction.amount), 0.0))
-                .where(and_(
-                    Transaction.congregation_id == cong_id,
-                    Transaction.date == d, # <--- FILTRO CRÍTICO
-                    Transaction.type.in_((TYPE_IN, "RECEITA")),
-                    Transaction.category_id == cat_ofe.id,
-                    func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
-                ))
-            ) or 0.0)
+            # Transações Oferta (sem ajuste)
+            sum_of_others_q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+                and_(Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_ofe.id,
+                     Transaction.sub_congregation_id == sub_cong_id,
+                     func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC)
+            )
+            sum_of_others = float(db.scalar(sum_of_others_q) or 0.0)
 
-            # --- FIM DA BUSCA ---
-
-            # Calcula o novo ajuste necessário para atingir o valor desejado
             adj_dz_new = want_dz - sum_dz_others
             adj_of_new = want_of - sum_of_others
 
-            # Busca ajustes existentes (também filtrando pela data 'd')
-            adj_dz = db.scalar(select(Transaction).where(
+            # Busca ajustes existentes
+            adj_dz_q = select(Transaction).where(
                 Transaction.congregation_id == cong_id, Transaction.date == d,
-                Transaction.type.in_((TYPE_IN, "RECEITA")), Transaction.category_id == cat_diz.id,
+                Transaction.category_id == cat_diz.id, Transaction.sub_congregation_id == sub_cong_id,
                 func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC
-            ))
-            adj_of = db.scalar(select(Transaction).where(
-                Transaction.congregation_id == cong_id, Transaction.date == d,
-                Transaction.type.in_((TYPE_IN, "RECEITA")), Transaction.category_id == cat_ofe.id,
-                func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC
-            ))
+            )
+            adj_dz = db.scalar(adj_dz_q)
 
-            # Aplica ou remove o ajuste de Dízimo
-            # Se adj_dz_new é zero, e houver ajuste existente, ele o deleta (limpa ajuste antigo)
+            adj_of_q = select(Transaction).where(
+                Transaction.congregation_id == cong_id, Transaction.date == d,
+                Transaction.category_id == cat_ofe.id, Transaction.sub_congregation_id == sub_cong_id,
+                func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC
+            )
+            adj_of = db.scalar(adj_of_q)
+
+            # Aplica ou remove ajuste de Dízimo
             if abs(adj_dz_new) < 0.0001:
                 if adj_dz: db.delete(adj_dz)
             else:
-                if adj_dz: adj_dz.amount = float(adj_dz_new); db.add(adj_dz)
+                if adj_dz: adj_dz.amount = float(adj_dz_new)
                 else:
-                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id,
-                                       amount=float(adj_dz_new), description=ADJ_ENTRY_DESC,
-                                       congregation_id=cong_id))
+                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id, amount=float(adj_dz_new),
+                                       description=ADJ_ENTRY_DESC, congregation_id=cong_id, sub_congregation_id=sub_cong_id))
 
-            # Aplica ou remove o ajuste de Oferta
+            # Aplica ou remove ajuste de Oferta
             if abs(adj_of_new) < 0.0001:
                 if adj_of: db.delete(adj_of)
             else:
-                if adj_of: adj_of.amount = float(adj_of_new); db.add(adj_of)
+                if adj_of: adj_of.amount = float(adj_of_new)
                 else:
-                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id,
-                                       amount=float(adj_of_new), description=ADJ_ENTRY_DESC,
-                                       congregation_id=cong_id))
+                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=float(adj_of_new),
+                                       description=ADJ_ENTRY_DESC, congregation_id=cong_id, sub_congregation_id=sub_cong_id))
         db.commit()
 
 # ===================== EDITORES INLINE REUTILIZÁVEIS (com botão Salvar) =====================
@@ -2910,7 +2885,6 @@ def page_relatorio_entrada(user: "User"):
 
         parent_cong_obj = None
         
-        # O comportamento da página muda com base no perfil do usuário
         if user.role == "SEDE":
             congs_all = order_congs_sede_first(cong_options_for(user, db))
             escopo_opts = ["-- Visão Agregada Editável --"] + [c.name for c in congs_all]
@@ -2922,18 +2896,16 @@ def page_relatorio_entrada(user: "User"):
                 return
             else:
                 parent_cong_obj = next((c for c in congs_all if c.name == escopo_selecionado), None)
-        else: # TESOUREIRO vê diretamente sua congregação
+        else:
             parent_cong_obj = db.get(Congregation, user.congregation_id)
 
         if not parent_cong_obj:
             st.info("Nenhuma congregação para analisar."); return
 
-        # Se uma congregação específica foi selecionada, mostramos o filtro de sub-unidades
         st.divider()
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
         
-        opcoes = {"-- Todas (Principal + Subs) --": "ALL"}
-        opcoes[parent_cong_obj.name + " (Principal)"] = None
+        opcoes = {"-- Todas (Principal + Subs) --": "ALL", parent_cong_obj.name + " (Principal)": None}
         for sub in sub_congs:
             opcoes[sub.name] = sub.id
 
@@ -2943,7 +2915,7 @@ def page_relatorio_entrada(user: "User"):
         st.info(f"Exibindo dados para: **{contexto_selecionado}**")
 
         if target_sub_cong_id_or_all == "ALL":
-            # Visão de resumo com todas as unidades (não editável)
+            # Visão de resumo (não editável)
             all_units = [(parent_cong_obj.name + " (Principal)", None)] + [(s.name, s.id) for s in sub_congs]
             rows, total_geral = [], 0.0
             for name, sub_id in all_units:
@@ -2951,20 +2923,16 @@ def page_relatorio_entrada(user: "User"):
                 total_entradas_unidade = totals["entradas_total_sem_missoes"]
                 rows.append({"Unidade": name, "Dízimos": totals["dizimos"], "Ofertas": totals["ofertas"], "Total Entradas": total_entradas_unidade})
                 total_geral += total_entradas_unidade
-            
             df_agg = pd.DataFrame(rows)
             st.dataframe(df_agg.style.format({"Dízimos": format_currency, "Ofertas": format_currency, "Total Entradas": format_currency}), use_container_width=True)
             st.metric("Total Geral de Entradas (Principal + Subs)", format_currency(total_geral))
         
         else:
-            # Visão detalhada e EDITÁVEL de uma única unidade
+            # Visão detalhada e EDITÁVEL
             base_df = _entrada_summary_df(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id_or_all)
             
             edited_df = st.data_editor(
-                base_df,
-                use_container_width=True,
-                hide_index=True,
-                num_rows="dynamic",
+                base_df, use_container_width=True, hide_index=True, num_rows="dynamic",
                 column_config={
                     "Data do Culto": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
                     "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", format="R$ %.2f"),
@@ -2974,7 +2942,6 @@ def page_relatorio_entrada(user: "User"):
                 key="re_editor_detalhado"
             )
 
-            # Bloco de totais para a tabela editável
             try:
                 total_dizimo, total_oferta, total_geral_unidade = 0.0, 0.0, 0.0
                 if isinstance(edited_df, pd.DataFrame) and not edited_df.empty:
@@ -2992,11 +2959,10 @@ def page_relatorio_entrada(user: "User"):
             col2.metric("Soma Ofertas (tabela)", format_currency(total_oferta))
             col3.metric("Soma Geral (tabela)", format_currency(total_geral_unidade))
 
-            # Botão Salvar para a tabela editável
             def _save_summary():
-                # A função de salvar precisa ser adaptada para passar o sub_cong_id
-                # _apply_entrada_summary_changes(parent_cong_obj.id, start, end, edited_df, sub_cong_id=target_sub_cong_id_or_all)
-                st.toast("💾 Funcionalidade de salvar o editor detalhado em desenvolvimento.", icon="⚠️")
+                _apply_entrada_summary_changes(parent_cong_obj.id, start, end, edited_df, sub_cong_id=target_sub_cong_id_or_all)
+                st.toast("💾 Alterações salvas com sucesso!", icon="✅")
+                st.rerun()
 
             _save_btn(_save_summary, "entrada_sum_detalhado", theme="entrada")
 # ===================== MAIN =====================
