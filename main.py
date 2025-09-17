@@ -1431,6 +1431,7 @@ def _editor_entradas_agg_all(congs_all: List[Congregation], start: date, end: da
                 "unidade_display": f"{c.name} (Principal)",
                 "valor": float(principal_totals["entradas_total_sem_missoes"]),
                 "cong_id": c.id,
+                "cong_name": c.name, # Adicionado para ordenação primária
                 "sub_id": None,
                 "is_sub": False
             })
@@ -1443,16 +1444,18 @@ def _editor_entradas_agg_all(congs_all: List[Congregation], start: date, end: da
                     "unidade_display": f"↳ {sub.name}",
                     "valor": float(sub_totals["entradas_total_sem_missoes"]),
                     "cong_id": c.id,
+                    "cong_name": c.name, # Adicionado para ordenação primária
                     "sub_id": sub.id,
                     "is_sub": True
                 })
 
-        # Ordena a lista: primeiro por congregação, depois colocando a principal no topo, e depois as subs por valor
-        rows_data.sort(key=lambda x: (x["cong_id"], not x["is_sub"], -x["valor"]))
+        # --- LÓGICA DE ORDENAÇÃO CORRIGIDA ---
+        # Ordena por nome da congregação, depois pela flag "is_sub" (False vem antes de True), e por fim pelo valor descendente.
+        rows_data.sort(key=lambda x: (x["cong_name"], x["is_sub"], -x["valor"]))
+        # ------------------------------------
 
         df_full = pd.DataFrame(rows_data)
         
-        # Prepara o DataFrame para exibição (sem as colunas de ID)
         df_view = df_full[["unidade_display", "valor"]].rename(columns={"unidade_display": "Unidade", "valor": "Total (R$)"})
 
     edited = st.data_editor(
@@ -1471,25 +1474,9 @@ def _editor_entradas_agg_all(congs_all: List[Congregation], start: date, end: da
     st.metric("Total Geral de Entradas (todas as unidades)", format_currency(total_geral))
 
     def _save():
-        # Lógica de salvamento reconstruída para a nova estrutura
-        edited_with_ids = df_full.copy()
-        edited_with_ids["valor"] = edited["Total (R$)"].map(_to_float_brl)
-
-        for _, row in edited_with_ids.iterrows():
-            cong_id = row["cong_id"]
-            sub_id = row["sub_id"]
-            
-            # Cria um dataframe de uma linha para a função de salvar
-            orig_row_df = pd.DataFrame([{"Data do Culto": start, "Dízimo": row["valor"], "Oferta": 0.0}])
-            edited_row_df = pd.DataFrame([{"Data do Culto": start, "Dízimo": row["valor"], "Oferta": 0.0}])
-            
-            # Usa a função de ajuste para zerar o dia e colocar o novo valor como ajuste de dízimo
-            # NOTA: Esta é uma simplificação. A função _apply... lida com dízimos e ofertas.
-            # Aqui, para simplificar, estamos ajustando o total no campo "Dízimo".
-            _apply_entrada_summary_changes(orig_row_df, edited_row_df, cong_id, start, end, sub_cong_id=sub_id)
-            
-        st.toast("💾 Alterações salvas com sucesso!", icon="✅")
-        st.rerun()
+        # A lógica de salvamento precisa ser ajustada para o novo formato
+        st.toast("💾 Funcionalidade de salvar esta tabela está em desenvolvimento.", icon="⚠️")
+        # st.rerun() # Desativado temporariamente
 
     _save_btn(_save, "agg_in_all_hierarchical")
 
