@@ -2627,6 +2627,7 @@ def page_cadastro(user: "User"):
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS =====================
+# ===================== PAGE: LANÇAMENTOS =====================
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -2655,13 +2656,21 @@ def page_lancamentos(user: "User"):
 
         if modo == "Formulário único":
             target_cong_obj = parent_cong_obj
-            sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
+            sub_congs = db.scalars(
+                select(SubCongregation)
+                .where(SubCongregation.congregation_id == parent_cong_obj.id)
+                .order_by(SubCongregation.name)
+            ).all()
             
             opcoes = {f"{parent_cong_obj.name} (Principal)": None}
             for sub in sub_congs:
                 opcoes[sub.name] = sub.id
             
-            contexto_selecionado = st.selectbox("Lançar em:", list(opcoes.keys()), key="lan_sub_sel_context")
+            contexto_selecionado = st.selectbox(
+                "Lançar em:", 
+                list(opcoes.keys()), 
+                key="lan_sub_sel_context"
+            )
             target_sub_cong_id = opcoes[contexto_selecionado]
             st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
             st.divider()
@@ -2675,7 +2684,6 @@ def page_lancamentos(user: "User"):
                     ent_desc = st.text_input("Descrição (opcional)", key="ent_desc")
                     ent_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="ent_valor")
                     if st.form_submit_button("Salvar ENTRADA", type="primary"):
-                        # --- CORREÇÃO DE SINTAXE APLICADA AQUI ---
                         cat_obj = next((c for c in cats_in if c.name == ent_cat_name), None)
                         if ent_valor > 0 and cat_obj:
                             db.add(Transaction(date=ent_data, type=TYPE_IN, category_id=cat_obj.id, amount=ent_valor, description=(ent_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
@@ -2705,7 +2713,6 @@ def page_lancamentos(user: "User"):
                     sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
                     sai_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="sai_valor")
                     if st.form_submit_button("Salvar SAÍDA", type="primary"):
-                        # --- CORREÇÃO DE SINTAXE APLICADA AQUI ---
                         cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
                         if sai_valor > 0 and cat_obj:
                             db.add(Transaction(date=sai_data, type=TYPE_OUT, category_id=cat_obj.id, amount=sai_valor, description=(sai_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
