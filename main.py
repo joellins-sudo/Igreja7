@@ -2645,7 +2645,7 @@ def page_cadastro(user: "User"):
                             ids_to_delete_final = [c.id for c in eligible_congs if c.name in names_del]
                             db.query(Congregation).filter(Congregation.id.in_(ids_to_delete_final)).delete(synchronize_session=False)
                             db.commit(); st.success("Congregações excluídas."); st.rerun()
-        
+
         # Aba de Sub-congregações
         with tabs[1]:
             st.subheader("Sub-congregações")
@@ -2768,58 +2768,74 @@ def page_cadastro(user: "User"):
             # ... (seu código de usuários aqui, que deve estar funcionando) ...
             # ... (seu código de usuários aqui) ...
 # ===================== PAGE: LANÇAMENTOS =====================
-# ===================== PAGE: LANÇAMENTOS =====================
-# ===================== PAGE: LANÇAMENTOS =====================
-# ===================== PAGE: LANÇAMENTOS =====================
-# ===================== PAGE: LANÇAMENTOS =====================
-# ===================== PAGE: LANÇAMENTOS =====================
-# ===================== PAGE: LANÇAMENTOS =====================
-# ===================== PAGE: LANÇAMENTOS =====================
-# ===================== PAGE: LANÇAMENTOS =====================
-# ===================== PAGE: LANÇAMENTOS =====================
-# ===================== PAGE: LANÇAMENTOS =====================
+
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
         st.markdown(f"<h1 class='page-title'>Lançamentos</h1>", unsafe_allow_html=True)
 
+        # --- LÓGICA DE SELEÇÃO DE CONTEXTO ---
         parent_cong_obj = None
         if user.role == "SEDE":
             congs_all = order_congs_sede_first(cong_options_for(user, db))
-            cong_sel_name = st.selectbox("Selecione a Congregação Principal:", [c.name for c in congs_all], key="lan_cong_sel_sede")
+            cong_sel_name = st.selectbox(
+                "Selecione a Congregação Principal:", 
+                [c.name for c in congs_all], 
+                key="lan_cong_sel_sede"
+            )
             parent_cong_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
-        else: # TESOUREIRO
+        else:  # TESOUREIRO
             parent_cong_obj = db.get(Congregation, user.congregation_id)
-        
+
         if not parent_cong_obj:
-            st.error("Nenhuma congregação selecionada ou encontrada."); return
+            st.error("Nenhuma congregação selecionada ou encontrada.")
+            return
 
-        st.markdown(f"### CONGREGAÇÃO: {parent_cong_obj.name.upper()}", unsafe_allow_html=True)
+        st.markdown(f"### CONGREGAÇÃO: {parent_cong_obj.name.upper()}")
 
-        modo = st.radio("Modo de lançamento:", ["Formulário único", "Editar direto na tabela"], horizontal=True, key="lan_modo_sel")
+        # --- SELETOR DE MODO ---
+        modo = st.radio(
+            "Modo de lançamento:",
+            ["Formulário único", "Editar direto na tabela"],
+            horizontal=True,
+            key="lan_modo_sel"
+        )
         st.divider()
 
+        # --- MODO 1: FORMULÁRIO ÚNICO (COM SUB-CONGREGAÇÕES) ---
         if modo == "Formulário único":
             target_cong_obj = parent_cong_obj
-            sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
-            opcoes = {parent_cong_obj.name + " (Principal)": None}
+            sub_congs = db.scalars(
+                select(SubCongregation)
+                .where(SubCongregation.congregation_id == parent_cong_obj.id)
+                .order_by(SubCongregation.name)
+            ).all()
+            
+            opcoes = {f"{parent_cong_obj.name} (Principal)": None}
             for sub in sub_congs:
                 opcoes[sub.name] = sub.id
-            contexto_selecionado = st.selectbox("Lançar em:", list(opcoes.keys()), key="lan_sub_sel_context")
+            
+            contexto_selecionado = st.selectbox(
+                "Lançar em:", 
+                list(opcoes.keys()), 
+                key="lan_sub_sel_context"
+            )
             target_sub_cong_id = opcoes[contexto_selecionado]
             st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
             st.divider()
             
+            # Formulários de lançamento
             with st.expander("➕ Lançar ENTRADA", expanded=True):
                 with st.form("form_entrada"):
-                    # ... (código do formulário de entrada) ...
+                    # ... (código do formulário)
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
                 with st.form("form_dizimo"):
-                    # ... (código do formulário de dízimo) ...
+                    # ... (código do formulário)
             with st.expander("➖ Lançar SAÍDA"):
                 with st.form("form_saida"):
-                    # ... (código do formulário de saída) ...
-        
+                    # ... (código do formulário)
+
+        # --- MODO 2: EDITAR DIRETO NA TABELA (RESTAURADO) ---
         elif modo == "Editar direto na tabela":
             st.info(f"Modo de edição rápida para a congregação: **{parent_cong_obj.name} (Principal)**. Lançamentos de sub-congregações não são exibidos aqui.")
             ref_tab = get_month_selector("Mês de referência da tabela")
@@ -2829,11 +2845,16 @@ def page_lancamentos(user: "User"):
             df_entradas = _entrada_summary_df(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=None)
             edited_entradas = st.data_editor(df_entradas, use_container_width=True, hide_index=True, num_rows="dynamic", key="editor_entradas_lancamentos")
             
+            # Totais para a tabela de entradas
             try:
                 total_dizimo, total_oferta, total_geral = 0.0, 0.0, 0.0
                 if isinstance(edited_entradas, pd.DataFrame) and not edited_entradas.empty:
-                    df_calc = edited_entradas.copy(); df_calc["Dízimo"] = df_calc["Dízimo"].map(_to_float_brl); df_calc["Oferta"] = df_calc["Oferta"].map(_to_float_brl)
-                    total_dizimo = df_calc["Dízimo"].sum(); total_oferta = df_calc["Oferta"].sum(); total_geral = total_dizimo + total_oferta
+                    df_calc = edited_entradas.copy()
+                    df_calc["Dízimo"] = df_calc["Dízimo"].map(_to_float_brl)
+                    df_calc["Oferta"] = df_calc["Oferta"].map(_to_float_brl)
+                    total_dizimo = df_calc["Dízimo"].sum()
+                    total_oferta = df_calc["Oferta"].sum()
+                    total_geral = total_dizimo + total_oferta
             except Exception: pass
             
             col1, col2, col3 = st.columns(3)
@@ -2843,28 +2864,15 @@ def page_lancamentos(user: "User"):
             _save_btn(lambda: _apply_entrada_summary_changes(parent_cong_obj.id, start_tab, end_tab, edited_entradas, sub_cong_id=None), f"lan_tab_{parent_cong_obj.id}", "entrada")
 
             st.markdown("---")
-
-            # CORREÇÃO 1: Parênteses ajustados
-            tithes_query = select(Tithe).where(
-                Tithe.congregation_id == parent_cong_obj.id, 
-                Tithe.date >= start_tab, 
-                Tithe.date < end_tab, 
-                Tithe.sub_congregation_id == None
-            )
-            tithes = db.scalars(tithes_query).all()
+            # Tabela de Dizimistas
+            tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id.is_(None))
+            tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
             _editor_dizimos(tithes, "Dizimistas do período (Congregação Principal)", force_cong_id=parent_cong_obj.id)
 
             st.markdown("---")
-
-            # CORREÇÃO 2: Parênteses ajustados e filtro corrigido de Tithe.* para Transaction.*
-            txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(
-                Transaction.congregation_id == parent_cong_obj.id, 
-                Transaction.date >= start_tab, 
-                Transaction.date < end_tab, 
-                Transaction.type == TYPE_OUT, 
-                Transaction.sub_congregation_id == None
-            )
-            txs_out = db.scalars(txs_out_query).all()
+            # Tabela de Saídas
+            txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_OUT, Transaction.sub_congregation_id.is_(None))
+            txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
             _editor_lancamentos(txs_out, "Saídas do período (Congregação Principal)", tx_type_hint=TYPE_OUT, force_cong_id=parent_cong_obj.id)
 
 
