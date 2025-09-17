@@ -2251,7 +2251,6 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
     subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=11, spaceAfter=12)
     heading_style = ParagraphStyle('heading', parent=styles['h2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
     normal_style = styles['Normal']
-    right_align_style = ParagraphStyle('right', parent=styles['Normal'], alignment=2) # 2 = TA_RIGHT
     signature_style = ParagraphStyle('signature', parent=styles['Normal'], alignment=TA_CENTER, spaceBefore=0)
     
     story: List = []
@@ -2294,14 +2293,15 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
                     format_currency(row["Oferta"]),
                     format_currency(row["Total"])
                 ])
-            total_entradas_paragraph = Paragraph(f"<b>{format_currency(unit_total_entradas)}</b>", right_align_style)
-            data_in.append([Paragraph("<b>Total da Unidade:</b>", right_align_style), "", "", total_entradas_paragraph])
+            # --- CORREÇÃO APLICADA AQUI ---
+            total_entradas_paragraph = Paragraph(f"<b>{format_currency(unit_total_entradas)}</b>", normal_style)
+            data_in.append([Paragraph("<b>Total da Unidade:</b>", styles['RightAlign']), "", "", total_entradas_paragraph])
             
             tbl_in = Table(data_in, colWidths=[3.2*cm, 4.0*cm, 4.0*cm, 5.3*cm])
             tbl_in.setStyle(TableStyle([
                 ('GRID', (0,0), (-1,-1), 1, colors.grey), ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-                ('ALIGN', (1,1), (-1,-1), 'RIGHT'), ('SPAN', (0,-1), (2,-1)), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)
+                ('ALIGN', (1,1), (-1,-1), 'RIGHT'), ('SPAN', (0,-1), (2,-1)), ('ALIGN', (0,-1), (0,-1), 'RIGHT'),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)
             ]))
             story.append(tbl_in)
         else:
@@ -2315,14 +2315,15 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
             data_out = [["Data", "Categoria", "Descrição", "Valor"]]
             for t in txs_out:
                 data_out.append([t.date.strftime("%d/%m/%Y"), t.category.name, t.description or "", format_currency(t.amount)])
-            total_saidas_paragraph = Paragraph(f"<b>{format_currency(unit_total_saidas)}</b>", right_align_style)
-            data_out.append([Paragraph("<b>Total da Unidade:</b>", right_align_style), "", "", total_saidas_paragraph])
+            # --- CORREÇÃO APLICADA AQUI ---
+            total_saidas_paragraph = Paragraph(f"<b>{format_currency(unit_total_saidas)}</b>", normal_style)
+            data_out.append([Paragraph("<b>Total da Unidade:</b>", styles['RightAlign']), "", "", total_saidas_paragraph])
             
             tbl_out = Table(data_out, colWidths=[2.5*cm, 4.5*cm, 6.5*cm, 3*cm])
             tbl_out.setStyle(TableStyle([
                 ('GRID', (0,0), (-1,-1), 1, colors.grey), ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-                ('ALIGN', (3,1), (3,-1), 'RIGHT'), ('SPAN', (0,-1), (2,-1)), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)
+                ('ALIGN', (3,1), (3,-1), 'RIGHT'), ('SPAN', (0,-1), (2,-1)), ('ALIGN', (0,-1), (0,-1), 'RIGHT'),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)
             ]))
             story.append(tbl_out)
         else:
@@ -2378,6 +2379,97 @@ def render_stat_card(col, label: str, full_text: str):
         unsafe_allow_html=True,
     )
 
+def build_consolidated_pdf(congs_all: List[Congregation], ref: date, db: Session) -> bytes:
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
+    styles = getSampleStyleSheet()
+    start, end = month_bounds(ref)
+
+    # Estilos
+    title_style = ParagraphStyle('title', parent=styles['h1'], alignment=TA_CENTER, fontSize=16, spaceAfter=8)
+    subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=11, spaceAfter=16)
+    heading_style = ParagraphStyle('heading', parent=styles['h2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
+    normal_style = styles['Normal']
+    
+    story: List = []
+    story.append(Paragraph("Relatório Consolidado Mensal", title_style))
+    story.append(Paragraph(f"Mês de Referência: {ref.strftime('%B de %Y')}", subtitle_style))
+
+    grand_total_entradas = 0.0
+    grand_total_saidas = 0.0
+
+    # --- Tabela 1: Resumo de Entradas Hierárquico ---
+    story.append(Paragraph("1. Resumo de Entradas por Unidade", heading_style))
+    entry_data = [["Unidade", "Valor (R$)"]]
+    for cong in congs_all:
+        sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id)).all()
+        principal_entradas = _collect_month_data(db, cong.id, start, end, sub_cong_id=None)["totals"]["entradas_total_sem_missoes"]
+        if not sub_congs:
+            entry_data.append([Paragraph(cong.name, normal_style), format_currency(principal_entradas)])
+            grand_total_entradas += principal_entradas
+            continue
+        subs_rows = []
+        total_subs = 0.0
+        for sub in sub_congs:
+            sub_entradas = _collect_month_data(db, cong.id, start, end, sub_cong_id=sub.id)["totals"]["entradas_total_sem_missoes"]
+            subs_rows.append([Paragraph(f"↳ {sub.name}", normal_style), sub_entradas])
+            total_subs += sub_entradas
+        subs_rows.sort(key=lambda x: x[1], reverse=True)
+        for row in subs_rows: row[1] = format_currency(row[1])
+        cong_total = principal_entradas + total_subs
+        grand_total_entradas += cong_total
+        entry_data.append([Paragraph(f"<b>{cong.name} (Total)</b>", normal_style), format_currency(cong_total)])
+        entry_data.append([Paragraph(f"↳ {cong.name} (Principal)", normal_style), format_currency(principal_entradas)])
+        entry_data.extend(subs_rows)
+    entry_data.append([Paragraph("<b>Total Geral de Entradas</b>", normal_style), Paragraph(f"<b>{format_currency(grand_total_entradas)}</b>", normal_style)])
+    tbl_in = Table(entry_data, colWidths=[12*cm, 4*cm])
+    tbl_in.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)]))
+    story.append(tbl_in)
+    story.append(Spacer(1, 0.8*cm))
+
+    # --- Tabela 2: Resumo de Saídas Hierárquico ---
+    story.append(Paragraph("2. Resumo de Saídas por Unidade", heading_style))
+    exit_data = [["Unidade", "Valor (R$)"]]
+    for cong in congs_all:
+        sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id)).all()
+        principal_saidas = _collect_month_data(db, cong.id, start, end, sub_cong_id=None)["totals"]["saidas_total"]
+        if not sub_congs:
+            exit_data.append([Paragraph(cong.name, normal_style), format_currency(principal_saidas)])
+            grand_total_saidas += principal_saidas
+            continue
+        subs_rows = []
+        total_subs_saidas = 0.0
+        for sub in sub_congs:
+            sub_saidas = _collect_month_data(db, cong.id, start, end, sub_cong_id=sub.id)["totals"]["saidas_total"]
+            subs_rows.append([Paragraph(f"↳ {sub.name}", normal_style), sub_saidas])
+            total_subs_saidas += sub_saidas
+        subs_rows.sort(key=lambda x: x[1], reverse=True)
+        for row in subs_rows: row[1] = format_currency(row[1])
+        cong_total_saidas = principal_saidas + total_subs_saidas
+        grand_total_saidas += cong_total_saidas
+        exit_data.append([Paragraph(f"<b>{cong.name} (Total)</b>", normal_style), format_currency(cong_total_saidas)])
+        exit_data.append([Paragraph(f"↳ {cong.name} (Principal)", normal_style), format_currency(principal_saidas)])
+        exit_data.extend(subs_rows)
+    exit_data.append([Paragraph("<b>Total Geral de Saídas</b>", normal_style), Paragraph(f"<b>{format_currency(grand_total_saidas)}</b>", normal_style)])
+    tbl_out = Table(exit_data, colWidths=[12*cm, 4*cm])
+    tbl_out.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)]))
+    story.append(tbl_out)
+    story.append(Spacer(1, 0.8*cm))
+
+    # --- Tabela 3: Resumo Financeiro Geral ---
+    story.append(Paragraph("3. Resumo Financeiro Geral", heading_style))
+    saldo_final = grand_total_entradas - grand_total_saidas
+    summary_data = [
+        ["Total Geral de Entradas", format_currency(grand_total_entradas)],
+        ["Total Geral de Saídas", format_currency(grand_total_saidas)],
+        [Paragraph("<b>Saldo do Mês (Entradas - Saídas)</b>", normal_style), Paragraph(f"<b>{format_currency(saldo_final)}</b>", normal_style)]
+    ]
+    tbl_summary = Table(summary_data, colWidths=[8*cm, 8*cm])
+    tbl_summary.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,2), (-1,2), colors.lightcyan)]))
+    story.append(tbl_summary)
+
+    doc.build(story)
+    return buf.getvalue()
 # ===================== PAGE: VISÃO GERAL =====================
 # ===================== PAGE: VISÃO GERAL =====================
 def page_visao_geral(user: "User"):
@@ -2390,27 +2482,20 @@ def page_visao_geral(user: "User"):
         congs = cong_options_for(user, db)
         ordered_congs = order_congs_sede_first(congs)
         
-        # --- LÓGICA DE EXIBIÇÃO PARA O USUÁRIO SEDE ---
         if user.role == "SEDE":
             st.info("Escopo: **Todas as congregações**")
             agg_total = []
             for c in ordered_congs:
-                # Para o resumo da Sede, coletamos o total da congregação principal + todas as suas subs
                 cong_total_entradas = 0.0
                 cong_total_saidas = 0.0
-                
-                # Principal
                 principal_totals = _collect_month_data(db, c.id, start, end, sub_cong_id=None)["totals"]
                 cong_total_entradas += principal_totals["entradas_total_sem_missoes"]
                 cong_total_saidas += principal_totals["saidas_total"]
-                
-                # Subs
                 sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == c.id)).all()
                 for sub in sub_congs:
                     sub_totals = _collect_month_data(db, c.id, start, end, sub_cong_id=sub.id)["totals"]
                     cong_total_entradas += sub_totals["entradas_total_sem_missoes"]
                     cong_total_saidas += sub_totals["saidas_total"]
-
                 agg_total.append((c.name, cong_total_entradas, cong_total_saidas, cong_total_entradas - cong_total_saidas))
 
             df_rank = pd.DataFrame([{"Congregação": n, "Entradas": v, "Saídas": s, "Saldo": sal} for (n, v, s, sal) in agg_total])
@@ -2428,24 +2513,15 @@ def page_visao_geral(user: "User"):
                 c2.metric("Total de Saídas (geral)", format_currency(_tot_out))
                 c3.metric("Saldo (geral)", format_currency(_tot_saldo))
         
-        # --- LÓGICA DE EXIBIÇÃO PARA O TESOUREIRO ---
         elif congs:
             parent_cong_obj = congs[0]
             st.info(f"Escopo: **{parent_cong_obj.name} e suas unidades**")
-            
             sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
             all_units = [(f"{parent_cong_obj.name} (Principal)", None)] + [(s.name, s.id) for s in sub_congs]
-            
             rows = []
             for name, sub_id in all_units:
                 totals = _collect_month_data(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)["totals"]
-                rows.append({
-                    "Unidade": name,
-                    "Entradas": totals["entradas_total_sem_missoes"],
-                    "Saídas": totals["saidas_total"],
-                    "Saldo": totals["saldo"]
-                })
-            
+                rows.append({"Unidade": name, "Entradas": totals["entradas_total_sem_missoes"], "Saídas": totals["saidas_total"], "Saldo": totals["saldo"]})
             df_summary = pd.DataFrame(rows)
             st.dataframe(df_summary.style.format({"Entradas": format_currency, "Saídas": format_currency, "Saldo": format_currency}), use_container_width=True, hide_index=True)
         else:
@@ -2457,13 +2533,7 @@ def page_visao_geral(user: "User"):
         
         if user.role == "SEDE":
             st.markdown("###### Relatório Geral Consolidado")
-            st.download_button(
-                "⬇️ Baixar PDF Geral (Hierárquico)",
-                data=build_consolidated_pdf(ordered_congs, ref, db),
-                file_name=f"relatorio_geral_detalhado_{ref.strftime('%Y-%m')}.pdf",
-                mime="application/pdf",
-                key="dl_pdf_geral"
-            )
+            st.download_button("⬇️ Baixar PDF Geral (Hierárquico)", data=build_consolidated_pdf(ordered_congs, ref, db), file_name=f"relatorio_geral_detalhado_{ref.strftime('%Y-%m')}.pdf", mime="application/pdf", key="dl_pdf_geral")
             
             st.markdown("###### Relatório Individual por Unidade")
             unit_options = {}
@@ -2477,28 +2547,10 @@ def page_visao_geral(user: "User"):
             
             if sel_unit_name:
                 selected_unit_info = unit_options[sel_unit_name]
-                st.download_button(
-                    f"⬇️ Baixar PDF de {sel_unit_name}",
-                    data=build_single_unit_report_pdf(
-                        cong_id=selected_unit_info["cong_id"],
-                        sub_cong_id=selected_unit_info["sub_id"],
-                        unit_name=sel_unit_name,
-                        ref=ref,
-                        db=db
-                    ),
-                    file_name=f"prestacao_{_norm(sel_unit_name)}_{ref.strftime('%Y-%m')}.pdf",
-                    mime="application/pdf",
-                    key=f"dl_pdf_unit_{_norm(sel_unit_name)}"
-                )
+                st.download_button(f"⬇️ Baixar PDF de {sel_unit_name}", data=build_single_unit_report_pdf(cong_id=selected_unit_info["cong_id"], sub_cong_id=selected_unit_info["sub_id"], unit_name=sel_unit_name, ref=ref, db=db), file_name=f"prestacao_{_norm(sel_unit_name)}_{ref.strftime('%Y-%m')}.pdf", mime="application/pdf", key=f"dl_pdf_unit_{_norm(sel_unit_name)}")
         else: # TESOUREIRO
             parent_cong_obj = congs[0]
-            st.download_button(
-                f"⬇️ Baixar PDF de {parent_cong_obj.name} (Detalhado)",
-                data=build_full_statement_pdf(parent_cong_obj.id, ref, db),
-                file_name=f"prestacao_{_norm(parent_cong_obj.name)}_{ref.strftime('%Y-%m')}.pdf",
-                mime="application/pdf",
-                key=f"dl_pdf_prestacao_tesoureiro"
-            )
+            st.download_button(f"⬇️ Baixar PDF de {parent_cong_obj.name} (Detalhado)", data=build_full_statement_pdf(parent_cong_obj.id, ref, db), file_name=f"prestacao_{_norm(parent_cong_obj.name)}_{ref.strftime('%Y-%m')}.pdf", mime="application/pdf", key=f"dl_pdf_prestacao_tesoureiro")
 
 # ===================== COLETA MISSÕES =====================
 def _collect_missions_data(db: Session, start: date, end: date, only_cong_id: Optional[int] = None):
