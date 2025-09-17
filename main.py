@@ -1537,12 +1537,18 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, sub_cong_id: O
         Transaction.congregation_id == cong_id
     )
 
-    # Aplica o filtro da sub-congregação, se fornecido
+    # --- LÓGICA DE FILTRO CORRIGIDA ---
+    # Aplica o filtro da sub-congregação, tratando o caso "Principal" (None) explicitamente
     if sub_cong_id is not None:
-        # Se sub_cong_id for um número, filtra por ele. Se for None, filtra onde não há sub.
+        # Filtra por uma sub-congregação específica
         tx_in_query = tx_in_query.where(Transaction.sub_congregation_id == sub_cong_id)
         tithes_query = tithes_query.where(Tithe.sub_congregation_id == sub_cong_id)
         tx_out_query = tx_out_query.where(Transaction.sub_congregation_id == sub_cong_id)
+    else:
+        # Filtra APENAS para a congregação principal (onde não há sub_congregation_id)
+        tx_in_query = tx_in_query.where(Transaction.sub_congregation_id.is_(None))
+        tithes_query = tithes_query.where(Tithe.sub_congregation_id.is_(None))
+        tx_out_query = tx_out_query.where(Transaction.sub_congregation_id.is_(None))
     
     # Executa as queries
     tx_in = db.scalars(tx_in_query.order_by(Transaction.date)).all()
