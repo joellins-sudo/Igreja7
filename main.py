@@ -2151,53 +2151,42 @@ def build_consolidated_pdf(congs_all: List[Congregation], ref: date, db: Session
             subs_rows.append([Paragraph(f"↳ {sub.name}", normal_style), format_currency(sub_entradas)])
             total_subs += sub_entradas
         
+        subs_rows.sort(key=lambda x: _to_float_brl(x[1]), reverse=True)
         cong_total = principal_entradas + total_subs
         grand_total_entradas += cong_total
 
         entry_data.append([Paragraph(f"↳ {cong.name} (Principal)", normal_style), format_currency(principal_entradas)])
         entry_data.extend(subs_rows)
         entry_data.append([Paragraph(f"<b>{cong.name} (Total)</b>", normal_style), format_currency(cong_total)])
-
+    
+    # Adiciona a linha de total geral para as entradas
+    entry_data.append([Paragraph("<b>Total Geral de Entradas</b>", normal_style), Paragraph(f"<b>{format_currency(grand_total_entradas)}</b>", normal_style)])
+    
     tbl_in = Table(entry_data, colWidths=[12*cm, 4*cm])
-    tbl_in.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
+    tbl_in.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)]))
     story.append(tbl_in)
     story.append(Spacer(1, 0.8*cm))
 
-    # --- Tabela 2: Detalhamento de Saídas por Categoria ---
-    story.append(Paragraph("2. Detalhamento de Saídas por Categoria", heading_style))
+    # --- Tabela 2: Detalhamento de Saídas por Categoria (LÓGICA ALTERADA) ---
+    story.append(Paragraph("2. Total de Saídas por Categoria (Geral)", heading_style))
     
-    exit_data = []
+    exit_data = [["Categoria de Saída", "Valor Total (R$)"]]
+    
+    saidas_por_categoria_q = select(Category.name, func.sum(Transaction.amount)).join(Transaction).where(
+        Transaction.date >= start, Transaction.date < end, Transaction.type == TYPE_OUT
+    ).group_by(Category.name).order_by(func.sum(Transaction.amount).desc())
+    
+    results = db.execute(saidas_por_categoria_q).all()
     grand_total_saidas = 0.0
+    for cat_name, total in results:
+        exit_data.append([cat_name, format_currency(total)])
+        grand_total_saidas += total
     
-    q_saidas = select(Category.name, func.sum(Transaction.amount)).join(Transaction).where(
-        Transaction.date >= start, Transaction.date < end, Transaction.type == TYPE_OUT
-    ).group_by(Category.name).order_by(Category.name)
-    
-    saidas_por_cong = defaultdict(lambda: defaultdict(float))
-    all_cong_ids = [c.id for c in congs_all]
-    
-    # Uma query para pegar todas as saídas de todas as congs e processar em Python
-    full_exit_q = select(Transaction.congregation_id, Category.name, func.sum(Transaction.amount)).join(Category).where(
-        Transaction.congregation_id.in_(all_cong_ids),
-        Transaction.date >= start, Transaction.date < end, Transaction.type == TYPE_OUT
-    ).group_by(Transaction.congregation_id, Category.name)
-    
-    results = db.execute(full_exit_q).all()
-    for cong_id, cat_name, total in results:
-        saidas_por_cong[cong_id][cat_name] = total
+    # Adiciona a linha de total geral para as saídas
+    exit_data.append([Paragraph("<b>Total Geral de Saídas</b>", normal_style), Paragraph(f"<b>{format_currency(grand_total_saidas)}</b>", normal_style)])
 
-    for cong in congs_all:
-        exit_data.append([Paragraph(f"<b>{cong.name}</b>", normal_style), ""])
-        total_cong_saida = 0.0
-        if cong.id in saidas_por_cong:
-            for cat, total in sorted(saidas_por_cong[cong.id].items()):
-                exit_data.append([f"  - {cat}", format_currency(total)])
-                total_cong_saida += total
-        exit_data.append([Paragraph("<i>Subtotal Congregação</i>", normal_style), format_currency(total_cong_saida)])
-        grand_total_saidas += total_cong_saida
-    
     tbl_out = Table(exit_data, colWidths=[12*cm, 4*cm])
-    tbl_out.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
+    tbl_out.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)]))
     story.append(tbl_out)
     story.append(Spacer(1, 0.8*cm))
 
@@ -2210,7 +2199,7 @@ def build_consolidated_pdf(congs_all: List[Congregation], ref: date, db: Session
         [Paragraph("<b>Saldo do Mês (Entradas - Saídas)</b>", normal_style), Paragraph(f"<b>{format_currency(saldo_final)}</b>", normal_style)]
     ]
     tbl_summary = Table(summary_data, colWidths=[8*cm, 8*cm])
-    tbl_summary.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
+    tbl_summary.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightcyan)]))
     story.append(tbl_summary)
 
     doc.build(story)
