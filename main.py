@@ -2655,30 +2655,25 @@ def page_cadastro(user: "User"):
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS =====================
+# ===================== PAGE: LANÇAMENTOS =====================
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
         st.markdown(f"<h1 class='page-title'>Lançamentos</h1>", unsafe_allow_html=True)
 
-        # --- Define a congregação principal com base no usuário
         parent_cong_obj = None
         if user.role == "SEDE":
             congs_all = order_congs_sede_first(cong_options_for(user, db))
-            cong_sel_name = st.selectbox(
-                "Selecione a Congregação Principal:", 
-                [c.name for c in congs_all], 
-                key="lan_cong_sel_sede"
-            )
+            cong_sel_name = st.selectbox("Selecione a Congregação Principal:", [c.name for c in congs_all], key="lan_cong_sel_sede")
             parent_cong_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
-        else:  # TESOUREIRO
+        else: # TESOUREIRO
             parent_cong_obj = db.get(Congregation, user.congregation_id)
-
+        
         if not parent_cong_obj:
             st.error("Nenhuma congregação selecionada ou encontrada."); return
 
         st.markdown(f"### CONGREGAÇÃO: {parent_cong_obj.name.upper()}")
 
-        # --- SELETOR DE MODO (Formulário vs. Tabela) ---
         modo = st.radio(
             "Modo de lançamento:",
             ["Formulário único", "Editar direto na tabela"],
@@ -2687,7 +2682,6 @@ def page_lancamentos(user: "User"):
         )
         st.divider()
 
-        # --- MODO 1: FORMULÁRIO ÚNICO ---
         if modo == "Formulário único":
             target_cong_obj = parent_cong_obj
             sub_congs = db.scalars(
@@ -2700,24 +2694,62 @@ def page_lancamentos(user: "User"):
             for sub in sub_congs:
                 opcoes[sub.name] = sub.id
             
-            contexto_selecionado = st.selectbox("Lançar em:", list(opcoes.keys()), key="lan_sub_sel_context")
+            contexto_selecionado = st.selectbox(
+                "Lançar em:", 
+                list(opcoes.keys()), 
+                key="lan_sub_sel_context"
+            )
             target_sub_cong_id = opcoes[contexto_selecionado]
             st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
             st.divider()
             
             with st.expander("➕ Lançar ENTRADA", expanded=True):
                 with st.form("form_entrada"):
-                    # ... (código dos formulários aqui, já está correto na sua versão)
-            
+                    cats_in = [c for c in categories_for_type(db, TYPE_IN) if "ajuste" not in _norm(c.name)]
+                    c1, c2 = st.columns(2)
+                    with c1: ent_data = st.date_input("Data da Entrada", value=today_bahia(), key="ent_data")
+                    with c2: ent_cat_name = st.selectbox("Categoria", [c.name for c in cats_in] or ["—"], key="ent_cat")
+                    ent_desc = st.text_input("Descrição (opcional)", key="ent_desc")
+                    ent_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="ent_valor")
+                    if st.form_submit_button("Salvar ENTRADA", type="primary"):
+                        if ent_valor > 0:
+                            cat_obj = next((c for c in cats_in if c.name == ent_cat_name), None)
+                            if cat_obj:
+                                db.add(Transaction(date=ent_data, type=TYPE_IN, category_id=cat_obj.id, amount=ent_valor, description=(ent_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
+                                db.commit(); st.success("Entrada registrada!"); st.rerun()
+                        else:
+                            st.warning("O valor da entrada deve ser maior que zero.")
+
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
                 with st.form("form_dizimo"):
-                    # ... (código dos formulários aqui, já está correto na sua versão)
-            
+                    dz_data = st.date_input("Data do Dízimo", value=today_bahia(), key="dz_data")
+                    dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
+                    dz_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="dz_valor")
+                    dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência"], key="dz_pay")
+                    if st.form_submit_button("Salvar DIZIMISTA", type="primary"):
+                        if dz_valor > 0 and dz_nome.strip():
+                            db.add(Tithe(date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor, congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id, payment_method=dz_payment))
+                            db.commit(); st.success("Dízimo registrado!"); st.rerun()
+                        else:
+                            st.warning("O nome e o valor são obrigatórios, e o valor deve ser maior que zero.")
+
             with st.expander("➖ Lançar SAÍDA"):
                 with st.form("form_saida"):
-                    # ... (código dos formulários aqui, já está correto na sua versão)
+                    cats_out = categories_for_type(db, TYPE_OUT)
+                    c1, c2 = st.columns(2)
+                    with c1: sai_data = st.date_input("Data da Saída", value=today_bahia(), key="sai_data")
+                    with c2: sai_cat_name = st.selectbox("Categoria", [c.name for c in cats_out] or ["—"], key="sai_cat")
+                    sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
+                    sai_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="sai_valor")
+                    if st.form_submit_button("Salvar SAÍDA", type="primary"):
+                        if sai_valor > 0:
+                            cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
+                            if cat_obj:
+                                db.add(Transaction(date=sai_data, type=TYPE_OUT, category_id=cat_obj.id, amount=sai_valor, description=(sai_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
+                                db.commit(); st.success("Saída registrada!"); st.rerun()
+                        else:
+                            st.warning("O valor da saída deve ser maior que zero.")
 
-        # --- MODO 2: EDITAR DIRETO NA TABELA (RESTAURADO) ---
         elif modo == "Editar direto na tabela":
             st.info(f"Modo de edição rápida para a congregação: **{parent_cong_obj.name} (Principal)**. Lançamentos de sub-congregações não são exibidos aqui.")
             ref_tab = get_month_selector("Mês de referência da tabela")
@@ -2727,25 +2759,13 @@ def page_lancamentos(user: "User"):
             df_entradas = _entrada_summary_df(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=None)
             if df_entradas.empty:
                 df_entradas = pd.DataFrame([{"Data do Culto": today_bahia(), "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0}])
+            edited_entradas = st.data_editor(df_entradas, use_container_width=True, hide_index=True, num_rows="dynamic", key="editor_entradas_lancamentos")
             
-            edited_entradas = st.data_editor(
-                df_entradas, 
-                use_container_width=True, 
-                hide_index=True, 
-                num_rows="dynamic", 
-                key=f"editor_entradas_lancamentos_{parent_cong_obj.id}"
-            )
-            
-            # Totais para a tabela de entradas
             try:
                 total_dizimo, total_oferta, total_geral = 0.0, 0.0, 0.0
                 if isinstance(edited_entradas, pd.DataFrame) and not edited_entradas.empty:
-                    df_calc = edited_entradas.copy()
-                    df_calc["Dízimo"] = df_calc["Dízimo"].map(_to_float_brl)
-                    df_calc["Oferta"] = df_calc["Oferta"].map(_to_float_brl)
-                    total_dizimo = df_calc["Dízimo"].sum()
-                    total_oferta = df_calc["Oferta"].sum()
-                    total_geral = total_dizimo + total_oferta
+                    df_calc = edited_entradas.copy(); df_calc["Dízimo"] = df_calc["Dízimo"].map(_to_float_brl); df_calc["Oferta"] = df_calc["Oferta"].map(_to_float_brl)
+                    total_dizimo = df_calc["Dízimo"].sum(); total_oferta = df_calc["Oferta"].sum(); total_geral = total_dizimo + total_oferta
             except Exception: pass
             
             col1, col2, col3 = st.columns(3)
@@ -2755,13 +2775,11 @@ def page_lancamentos(user: "User"):
             _save_btn(lambda: _apply_entrada_summary_changes(parent_cong_obj.id, start_tab, end_tab, edited_entradas, sub_cong_id=None), f"lan_tab_{parent_cong_obj.id}", "entrada")
 
             st.markdown("---")
-            # Tabela de Dizimistas
             tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id.is_(None))
             tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
             _editor_dizimos(tithes, "Dizimistas do período (Congregação Principal)", force_cong_id=parent_cong_obj.id)
 
             st.markdown("---")
-            # Tabela de Saídas
             txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_OUT, Transaction.sub_congregation_id.is_(None))
             txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
             _editor_lancamentos(txs_out, "Saídas do período (Congregação Principal)", tx_type_hint=TYPE_OUT, force_cong_id=parent_cong_obj.id)
