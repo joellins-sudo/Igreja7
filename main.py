@@ -2658,21 +2658,13 @@ def page_lancamentos(user: "User"):
 
         if modo == "Formulário único":
             target_cong_obj = parent_cong_obj
-            sub_congs = db.scalars(
-                select(SubCongregation)
-                .where(SubCongregation.congregation_id == parent_cong_obj.id)
-                .order_by(SubCongregation.name)
-            ).all()
+            sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
             
             opcoes = {f"{parent_cong_obj.name} (Principal)": None}
             for sub in sub_congs:
                 opcoes[sub.name] = sub.id
             
-            contexto_selecionado = st.selectbox(
-                "Lançar em:", 
-                list(opcoes.keys()), 
-                key="lan_sub_sel_context"
-            )
+            contexto_selecionado = st.selectbox("Lançar em:", list(opcoes.keys()), key="lan_sub_sel_context")
             target_sub_cong_id = opcoes[contexto_selecionado]
             st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
             st.divider()
@@ -2686,7 +2678,9 @@ def page_lancamentos(user: "User"):
                     ent_desc = st.text_input("Descrição (opcional)", key="ent_desc")
                     ent_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="ent_valor")
                     if st.form_submit_button("Salvar ENTRADA", type="primary"):
-                        if ent_valor > 0 and cat_obj := next((c for c in cats_in if c.name == ent_cat_name), None):
+                        # --- CORREÇÃO DE SINTAXE APLICADA AQUI ---
+                        cat_obj = next((c for c in cats_in if c.name == ent_cat_name), None)
+                        if ent_valor > 0 and cat_obj:
                             db.add(Transaction(date=ent_data, type=TYPE_IN, category_id=cat_obj.id, amount=ent_valor, description=(ent_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
                             db.commit(); st.success("Entrada registrada!"); st.rerun()
                         else:
@@ -2714,7 +2708,9 @@ def page_lancamentos(user: "User"):
                     sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
                     sai_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="sai_valor")
                     if st.form_submit_button("Salvar SAÍDA", type="primary"):
-                        if sai_valor > 0 and (cat_obj := next((c for c in cats_out if c.name == sai_cat_name), None)):
+                        # --- CORREÇÃO DE SINTAXE APLICADA AQUI ---
+                        cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
+                        if sai_valor > 0 and cat_obj:
                             db.add(Transaction(date=sai_data, type=TYPE_OUT, category_id=cat_obj.id, amount=sai_valor, description=(sai_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
                             db.commit(); st.success("Saída registrada!"); st.rerun()
                         else:
@@ -2729,7 +2725,6 @@ def page_lancamentos(user: "User"):
             df_entradas = _entrada_summary_df(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=None)
             if df_entradas.empty:
                 df_entradas = pd.DataFrame([{"Data do Culto": today_bahia(), "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0}])
-            
             edited_entradas = st.data_editor(df_entradas, use_container_width=True, hide_index=True, num_rows="dynamic", key="editor_entradas_lancamentos")
             
             try:
@@ -2743,20 +2738,7 @@ def page_lancamentos(user: "User"):
             col1.metric("Total Dízimos (tabela)", format_currency(total_dizimo))
             col2.metric("Total Ofertas (tabela)", format_currency(total_oferta))
             col3.metric("Total Geral (tabela)", format_currency(total_geral))
-            
-            # CORREÇÃO NA CHAMADA ABAIXO:
-            _save_btn(
-                lambda: _apply_entrada_summary_changes(
-                    orig_df=df_entradas,
-                    edited_df=edited_entradas,
-                    cong_id=parent_cong_obj.id,
-                    start=start_tab,
-                    end=end_tab,
-                    sub_cong_id=None
-                ), 
-                f"lan_tab_{parent_cong_obj.id}", 
-                "entrada"
-            )
+            _save_btn(lambda: _apply_entrada_summary_changes(df_entradas, edited_entradas, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=None), f"lan_tab_{parent_cong_obj.id}", "entrada")
 
             st.markdown("---")
             tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id.is_(None))
