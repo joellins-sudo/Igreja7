@@ -2296,6 +2296,7 @@ def page_visao_geral(user: "User"):
         congs = cong_options_for(user, db)
         ordered_congs = order_congs_sede_first(congs)
         
+        # --- LÓGICA DE EXIBIÇÃO PARA O USUÁRIO SEDE ---
         if user.role == "SEDE":
             st.info("Escopo: **Todas as congregações**")
             agg_total = []
@@ -2327,15 +2328,24 @@ def page_visao_geral(user: "User"):
                 c2.metric("Total de Saídas (geral)", format_currency(_tot_out))
                 c3.metric("Saldo (geral)", format_currency(_tot_saldo))
         
+        # --- LÓGICA DE EXIBIÇÃO PARA O TESOUREIRO ---
         elif congs:
             parent_cong_obj = congs[0]
             st.info(f"Escopo: **{parent_cong_obj.name} e suas unidades**")
+            
             sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
             all_units = [(f"{parent_cong_obj.name} (Principal)", None)] + [(s.name, s.id) for s in sub_congs]
+            
             rows = []
             for name, sub_id in all_units:
                 totals = _collect_month_data(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)["totals"]
-                rows.append({"Unidade": name, "Entradas": totals["entradas_total_sem_missoes"], "Saídas": totals["saidas_total"], "Saldo": totals["saldo"]})
+                rows.append({
+                    "Unidade": name,
+                    "Entradas": totals["entradas_total_sem_missoes"],
+                    "Saídas": totals["saidas_total"],
+                    "Saldo": totals["saldo"]
+                })
+            
             df_summary = pd.DataFrame(rows)
             st.dataframe(df_summary.style.format({"Entradas": format_currency, "Saídas": format_currency, "Saldo": format_currency}), use_container_width=True, hide_index=True)
         else:
@@ -2345,6 +2355,7 @@ def page_visao_geral(user: "User"):
         st.divider()
         st.subheader("Downloads de Relatórios (PDF)")
         
+        # --- LÓGICA DE DOWNLOAD ATUALIZADA ---
         if user.role == "SEDE":
             st.markdown("###### Relatório Geral Consolidado")
             st.download_button(
@@ -2355,31 +2366,27 @@ def page_visao_geral(user: "User"):
                 key="dl_pdf_geral"
             )
             
-            st.markdown("###### Relatório Individual por Unidade")
-            unit_options = {}
-            for cong in ordered_congs:
-                unit_options[f"{cong.name} (Principal)"] = {"cong_id": cong.id, "sub_id": None}
-                sub_congs_pdf = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id).order_by(SubCongregation.name)).all()
-                for sub in sub_congs_pdf:
-                    unit_options[f"{cong.name} → {sub.name}"] = {"cong_id": cong.id, "sub_id": sub.id}
+            st.markdown("###### Relatório Detalhado por Congregação")
+            sel_cong_name = st.selectbox(
+                "Selecione a congregação para gerar o relatório detalhado:",
+                [c.name for c in ordered_congs],
+                key="vg_sel_cong_pdf"
+            )
             
-            sel_unit_name = st.selectbox("Selecione a unidade para gerar o PDF:", list(unit_options.keys()), key="vg_sel_unit_pdf")
-            
-            if sel_unit_name:
-                selected_unit_info = unit_options[sel_unit_name]
-                st.download_button(
-                    f"⬇️ Baixar PDF de {sel_unit_name}",
-                    data=build_single_unit_report_pdf(
-                        cong_id=selected_unit_info["cong_id"],
-                        sub_cong_id=selected_unit_info["sub_id"],
-                        unit_name=sel_unit_name,
-                        ref=ref,
-                        db=db
-                    ),
-                    file_name=f"prestacao_{_norm(sel_unit_name)}_{ref.strftime('%Y-%m')}.pdf",
-                    mime="application/pdf",
-                    key=f"dl_pdf_unit_{_norm(sel_unit_name)}"
-                )
+            if sel_cong_name:
+                selected_cong_obj = next((c for c in ordered_congs if c.name == sel_cong_name), None)
+                if selected_cong_obj:
+                    st.download_button(
+                        f"⬇️ Baixar PDF de {selected_cong_obj.name} (e suas subs)",
+                        data=build_full_statement_pdf(
+                            parent_cong_id=selected_cong_obj.id,
+                            ref=ref,
+                            db=db
+                        ),
+                        file_name=f"prestacao_{_norm(selected_cong_obj.name)}_{ref.strftime('%Y-%m')}.pdf",
+                        mime="application/pdf",
+                        key=f"dl_pdf_cong_{_norm(selected_cong_obj.name)}"
+                    )
         else: # TESOUREIRO
             parent_cong_obj = congs[0]
             st.download_button(
