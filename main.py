@@ -2357,17 +2357,71 @@ def page_visao_geral(user: "User"):
         congs = cong_options_for(user, db)
         ordered_congs = order_congs_sede_first(congs)
         
+        # --- LÓGICA DE EXIBIÇÃO PARA O USUÁRIO SEDE ---
         if user.role == "SEDE":
             st.info("Escopo: **Todas as congregações**")
-            # ... (código para exibir a tabela de ranking e métricas, sem alterações) ...
+            agg_total = []
+            for c in ordered_congs:
+                # Para o resumo da Sede, coletamos o total da congregação principal + todas as suas subs
+                cong_total_entradas = 0.0
+                cong_total_saidas = 0.0
+                
+                # Principal
+                principal_totals = _collect_month_data(db, c.id, start, end, sub_cong_id=None)["totals"]
+                cong_total_entradas += principal_totals["entradas_total_sem_missoes"]
+                cong_total_saidas += principal_totals["saidas_total"]
+                
+                # Subs
+                sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == c.id)).all()
+                for sub in sub_congs:
+                    sub_totals = _collect_month_data(db, c.id, start, end, sub_cong_id=sub.id)["totals"]
+                    cong_total_entradas += sub_totals["entradas_total_sem_missoes"]
+                    cong_total_saidas += sub_totals["saidas_total"]
+
+                agg_total.append((c.name, cong_total_entradas, cong_total_saidas, cong_total_entradas - cong_total_saidas))
+
+            df_rank = pd.DataFrame([{"Congregação": n, "Entradas": v, "Saídas": s, "Saldo": sal} for (n, v, s, sal) in agg_total])
+            if not df_rank.empty:
+                df_sorted = df_rank.sort_values("Entradas", ascending=False).reset_index(drop=True)
+                st.dataframe(df_sorted.style.format({"Entradas": format_currency, "Saídas": format_currency, "Saldo": format_currency}), use_container_width=True)
+                
+                _tot_in  = sum(v for (_, v, _, _) in agg_total)
+                _tot_out = sum(s for (_, _, s, _) in agg_total)
+                _tot_saldo = _tot_in - _tot_out
+
+                st.divider()
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Total de Entradas (geral)", format_currency(_tot_in))
+                c2.metric("Total de Saídas (geral)", format_currency(_tot_out))
+                c3.metric("Saldo (geral)", format_currency(_tot_saldo))
         
+        # --- LÓGICA DE EXIBIÇÃO PARA O TESOUREIRO ---
         elif congs:
-            # ... (código para a visão do Tesoureiro, sem alterações) ...
+            parent_cong_obj = congs[0]
+            st.info(f"Escopo: **{parent_cong_obj.name} e suas unidades**")
+            
+            sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
+            all_units = [(f"{parent_cong_obj.name} (Principal)", None)] + [(s.name, s.id) for s in sub_congs]
+            
+            rows = []
+            for name, sub_id in all_units:
+                totals = _collect_month_data(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)["totals"]
+                rows.append({
+                    "Unidade": name,
+                    "Entradas": totals["entradas_total_sem_missoes"],
+                    "Saídas": totals["saidas_total"],
+                    "Saldo": totals["saldo"]
+                })
+            
+            df_summary = pd.DataFrame(rows)
+            st.dataframe(df_summary.style.format({"Entradas": format_currency, "Saídas": format_currency, "Saldo": format_currency}), use_container_width=True, hide_index=True)
+        else:
+            st.info("Sem congregação vinculada.")
+            return
 
         st.divider()
         st.subheader("Downloads de Relatórios (PDF)")
         
-        # --- LÓGICA DE DOWNLOAD ATUALIZADA ---
         if user.role == "SEDE":
             st.markdown("###### Relatório Geral Consolidado")
             st.download_button(
@@ -2379,15 +2433,11 @@ def page_visao_geral(user: "User"):
             )
             
             st.markdown("###### Relatório Individual por Unidade")
-            
-            # Cria um dicionário com todas as unidades (principais e subs)
             unit_options = {}
             for cong in ordered_congs:
-                # Adiciona a congregação principal
                 unit_options[f"{cong.name} (Principal)"] = {"cong_id": cong.id, "sub_id": None}
-                # Adiciona as subs
-                sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id).order_by(SubCongregation.name)).all()
-                for sub in sub_congs:
+                sub_congs_pdf = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id).order_by(SubCongregation.name)).all()
+                for sub in sub_congs_pdf:
                     unit_options[f"{cong.name} → {sub.name}"] = {"cong_id": cong.id, "sub_id": sub.id}
             
             sel_unit_name = st.selectbox("Selecione a unidade para gerar o PDF:", list(unit_options.keys()), key="vg_sel_unit_pdf")
@@ -2407,11 +2457,10 @@ def page_visao_geral(user: "User"):
                     mime="application/pdf",
                     key=f"dl_pdf_unit_{_norm(sel_unit_name)}"
                 )
-
         else: # TESOUREIRO
             parent_cong_obj = congs[0]
             st.download_button(
-                f"⬇️ Baixar PDF de {parent_cong_obj.name} (e suas unidades)",
+                f"⬇️ Baixar PDF de {parent_cong_obj.name} (Detalhado)",
                 data=build_full_statement_pdf(parent_cong_obj.id, ref, db),
                 file_name=f"prestacao_{_norm(parent_cong_obj.name)}_{ref.strftime('%Y-%m')}.pdf",
                 mime="application/pdf",
@@ -2816,24 +2865,20 @@ def page_lancamentos(user: "User"):
         )
         st.divider()
 
+        sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
+
         if modo == "Formulário único":
             target_cong_obj = parent_cong_obj
-            sub_congs = db.scalars(
-                select(SubCongregation)
-                .where(SubCongregation.congregation_id == parent_cong_obj.id)
-                .order_by(SubCongregation.name)
-            ).all()
+            contexto_selecionado = f"{parent_cong_obj.name} (Principal)"
+            target_sub_cong_id = None
+
+            if sub_congs:
+                opcoes = {f"{parent_cong_obj.name} (Principal)": None}
+                for sub in sub_congs:
+                    opcoes[sub.name] = sub.id
+                contexto_selecionado = st.selectbox("Lançar em:", list(opcoes.keys()), key="lan_sub_sel_context_form")
+                target_sub_cong_id = opcoes[contexto_selecionado]
             
-            opcoes = {f"{parent_cong_obj.name} (Principal)": None}
-            for sub in sub_congs:
-                opcoes[sub.name] = sub.id
-            
-            contexto_selecionado = st.selectbox(
-                "Lançar em:", 
-                list(opcoes.keys()), 
-                key="lan_sub_sel_context"
-            )
-            target_sub_cong_id = opcoes[contexto_selecionado]
             st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
             st.divider()
             
@@ -2850,8 +2895,6 @@ def page_lancamentos(user: "User"):
                         if ent_valor > 0 and cat_obj:
                             db.add(Transaction(date=ent_data, type=TYPE_IN, category_id=cat_obj.id, amount=ent_valor, description=(ent_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
                             db.commit(); st.success("Entrada registrada!"); st.rerun()
-                        else:
-                            st.warning("O valor da entrada deve ser maior que zero e uma categoria deve ser selecionada.")
 
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
                 with st.form("form_dizimo"):
@@ -2863,8 +2906,6 @@ def page_lancamentos(user: "User"):
                         if dz_valor > 0 and dz_nome.strip():
                             db.add(Tithe(date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor, congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id, payment_method=dz_payment))
                             db.commit(); st.success("Dízimo registrado!"); st.rerun()
-                        else:
-                            st.warning("O nome e o valor são obrigatórios, e o valor deve ser maior que zero.")
 
             with st.expander("➖ Lançar SAÍDA"):
                 with st.form("form_saida"):
@@ -2879,19 +2920,26 @@ def page_lancamentos(user: "User"):
                         if sai_valor > 0 and cat_obj:
                             db.add(Transaction(date=sai_data, type=TYPE_OUT, category_id=cat_obj.id, amount=sai_valor, description=(sai_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
                             db.commit(); st.success("Saída registrada!"); st.rerun()
-                        else:
-                            st.warning("O valor da saída deve ser maior que zero e uma categoria deve ser selecionada.")
-
+        
         elif modo == "Editar direto na tabela":
-            st.info(f"Modo de edição rápida para a congregação: **{parent_cong_obj.name} (Principal)**. Lançamentos de sub-congregações não são exibidos aqui.")
+            contexto_tabela = f"{parent_cong_obj.name} (Principal)"
+            target_sub_cong_id = None
+            if sub_congs:
+                opcoes_tabela = {f"{parent_cong_obj.name} (Principal)": None}
+                for sub in sub_congs:
+                    opcoes_tabela[sub.name] = sub.id
+                contexto_tabela = st.selectbox("Selecione a unidade para editar:", list(opcoes_tabela.keys()), key="lan_tabela_contexto")
+                target_sub_cong_id = opcoes_tabela[contexto_tabela]
+            
+            st.info(f"Editando lançamentos de: **{contexto_tabela}**")
             ref_tab = get_month_selector("Mês de referência da tabela")
             start_tab, end_tab = month_bounds(ref_tab)
             
             st.markdown("##### Entradas (Dízimo e Oferta)")
-            df_entradas = _entrada_summary_df(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=None)
+            df_entradas = _entrada_summary_df(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
             if df_entradas.empty:
                 df_entradas = pd.DataFrame([{"Data do Culto": today_bahia(), "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0}])
-            edited_entradas = st.data_editor(df_entradas, use_container_width=True, hide_index=True, num_rows="dynamic", key="editor_entradas_lancamentos")
+            edited_entradas = st.data_editor(df_entradas, use_container_width=True, hide_index=True, num_rows="dynamic", key=f"editor_entradas_{parent_cong_obj.id}_{target_sub_cong_id}")
             
             try:
                 total_dizimo, total_oferta, total_geral = 0.0, 0.0, 0.0
@@ -2904,17 +2952,17 @@ def page_lancamentos(user: "User"):
             col1.metric("Total Dízimos (tabela)", format_currency(total_dizimo))
             col2.metric("Total Ofertas (tabela)", format_currency(total_oferta))
             col3.metric("Total Geral (tabela)", format_currency(total_geral))
-            _save_btn(lambda: _apply_entrada_summary_changes(df_entradas, edited_entradas, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=None), f"lan_tab_{parent_cong_obj.id}", "entrada")
+            _save_btn(lambda: _apply_entrada_summary_changes(df_entradas, edited_entradas, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id), f"lan_tab_{parent_cong_obj.id}_{target_sub_cong_id}", "entrada")
 
             st.markdown("---")
-            tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id.is_(None))
+            tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id == target_sub_cong_id)
             tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
-            _editor_dizimos(tithes, "Dizimistas do período (Congregação Principal)", force_cong_id=parent_cong_obj.id)
+            _editor_dizimos(tithes, f"Dizimistas - {contexto_tabela}", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
 
             st.markdown("---")
-            txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_OUT, Transaction.sub_congregation_id.is_(None))
+            txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_OUT, Transaction.sub_congregation_id == target_sub_cong_id)
             txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
-            _editor_lancamentos(txs_out, "Saídas do período (Congregação Principal)", tx_type_hint=TYPE_OUT, force_cong_id=parent_cong_obj.id)
+            _editor_lancamentos(txs_out, f"Saídas - {contexto_tabela}", tx_type_hint=TYPE_OUT, force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
 
 def display_entry_hierarchy(congs_all: List[Congregation], start: date, end: date, db: Session):
     st.info("Este é um relatório de visualização. A edição é feita na visão detalhada de cada unidade.")
@@ -3029,16 +3077,10 @@ def page_relatorio_entrada(user: "User"):
             rows = []
             for name, sub_id in all_units:
                 totals = _collect_month_data(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)["totals"]
-                rows.append({
-                    "Unidade": name,
-                    "Dízimos": totals["dizimos"],
-                    "Ofertas": totals["ofertas"],
-                    "Total Entradas": totals["entradas_total_sem_missoes"]
-                })
+                rows.append({"Unidade": name, "Dízimos": totals["dizimos"], "Ofertas": totals["ofertas"], "Total Entradas": totals["entradas_total_sem_missoes"]})
             
             df_agg = pd.DataFrame(rows)
             st.dataframe(df_agg.style.format({"Dízimos": format_currency, "Ofertas": format_currency, "Total Entradas": format_currency}), use_container_width=True)
-        
         else:
             base_df = _entrada_summary_df(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id_or_all)
             edited_df = st.data_editor(
