@@ -1818,36 +1818,40 @@ def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, m
 
     df_pdf = df.copy()
     
-    # --- LÓGICA PARA REMOVER A COLUNA CONDICIONALMENTE ---
+    # --- LÓGICA DE AJUSTE DAS COLUNAS ---
+    # Remove a coluna "Primeiro dízimo" que não é necessária
+    if "Primeiro dízimo" in df_pdf.columns:
+        df_pdf = df_pdf.drop(columns=["Primeiro dízimo"])
+        
     is_specific_cong_report = (cong_sel != "Todas")
     
     if is_specific_cong_report and "Congregação" in df_pdf.columns:
         df_pdf = df_pdf.drop(columns=["Congregação"])
-        # Ajusta o template da linha de total e as larguras das colunas
-        col_widths = [4*cm, 2.5*cm, 3*cm, 3*cm, 2.5*cm, 2.5*cm]
-        total_row_template = ["", "", "Total Geral:", 0.0, "", ""]
+        # Ajusta larguras para a tabela sem a coluna Congregação
+        col_widths = [4*cm, 2.5*cm, 4*cm, 3*cm, 3*cm]
     else:
         # Mantém a configuração original se for para "Todas"
-        col_widths = [3.5*cm, 3.5*cm, 2.0*cm, 2.5*cm, 2.5*cm, 2.0*cm, 2.0*cm]
-        total_row_template = ["", "", "", "Total Geral:", 0.0, "", ""]
-    # ----------------------------------------------------
+        col_widths = [3.5*cm, 3.5*cm, 2.5*cm, 4*cm, 3*cm, 3*cm]
+    # ------------------------------------
 
     # Prepara os dados para a tabela
     data_table = [df_pdf.columns.tolist()] + df_pdf.values.tolist()
     total_value = float(df_pdf["Total no ano (R$)"].sum())
     
-    # Encontra o índice correto para inserir o total
-    total_column_index = -1
+    # Cria a linha de total com o número correto de colunas
+    total_row = [""] * len(df_pdf.columns)
     try:
-        total_column_index = df_pdf.columns.tolist().index("Total no ano (R$)" )
-        total_row_template[total_column_index] = total_value
+        total_column_index = df_pdf.columns.tolist().index("Total no ano (R$)")
+        total_row[total_column_index - 1] = "Total Geral:"
+        total_row[total_column_index] = total_value
     except ValueError:
-        pass # Coluna de total não encontrada, não faz nada
+        pass 
     
-    data_table.append(total_row_template)
+    data_table.append(total_row)
     
     # Formata a coluna de valor como moeda
-    if total_column_index != -1:
+    if "Total no ano (R$)" in df_pdf.columns:
+        total_column_index = df_pdf.columns.tolist().index("Total no ano (R$)" )
         for row in data_table[1:]:
             if isinstance(row[total_column_index], (float, int)):
                 row[total_column_index] = format_currency(row[total_column_index])
@@ -1858,6 +1862,7 @@ def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, m
         ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
     ]))
     story.append(tbl)
     story.append(Spacer(1, 0.5*cm))
