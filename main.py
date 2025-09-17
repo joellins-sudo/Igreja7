@@ -2105,8 +2105,9 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
         story.append(Paragraph(f"Detalhes da Unidade: {name}", heading_style))
         
         data = _collect_month_data(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)
-        unit_total_entradas = data["totals"]["entradas_total_sem_missoes"]
-        unit_total_saidas = data["totals"]["saidas_total"]
+        totals = data["totals"]
+        unit_total_entradas = totals["entradas_total_sem_missoes"]
+        unit_total_saidas = totals["saidas_total"]
         grand_total_entradas += unit_total_entradas
         grand_total_saidas += unit_total_saidas
 
@@ -2122,7 +2123,6 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
                     format_currency(row["Oferta"]),
                     format_currency(row["Total"])
                 ])
-            
             total_entradas_paragraph = Paragraph(f"<b>{format_currency(unit_total_entradas)}</b>", right_align_style)
             data_in.append([Paragraph("<b>Total da Unidade:</b>", right_align_style), "", "", total_entradas_paragraph])
             
@@ -2144,7 +2144,6 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
             data_out = [["Data", "Categoria", "Descrição", "Valor"]]
             for t in txs_out:
                 data_out.append([t.date.strftime("%d/%m/%Y"), t.category.name, t.description or "", format_currency(t.amount)])
-            
             total_saidas_paragraph = Paragraph(f"<b>{format_currency(unit_total_saidas)}</b>", right_align_style)
             data_out.append([Paragraph("<b>Total da Unidade:</b>", right_align_style), "", "", total_saidas_paragraph])
             
@@ -2159,6 +2158,7 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
             story.append(Paragraph("Nenhuma saída registrada.", normal_style))
         story.append(Spacer(1, 0.5*cm))
         
+        # Resumo da Unidade (SÓ APARECE SE HOUVER SUBS)
         if sub_congs:
             story.append(Paragraph(f"<b>3. Resumo da Unidade: {name}</b>", normal_style))
             unit_saldo = unit_total_entradas - unit_total_saidas
