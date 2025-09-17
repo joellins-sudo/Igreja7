@@ -2073,51 +2073,62 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
     story.append(Paragraph("Prestação de Contas Mensal Detalhada", title_style))
     story.append(Paragraph(f"Congregação: {parent_cong_obj.name} e suas unidades", subtitle_style))
     story.append(Paragraph(f"Referente a: {ref.strftime('%B de %Y')}", subtitle_style))
-    story.append(Spacer(1, 0.5*cm))
 
-    # Loop para gerar tabelas de cada unidade
+    # Loop para gerar seções para cada unidade
     for name, sub_id in all_units:
+        story.append(Spacer(1, 1*cm))
+        story.append(Paragraph(f"Unidade: {name}", heading_style))
+        
         data = _collect_month_data(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)
         
-        # Tabela de Entradas da Unidade
-        story.append(Paragraph(f"Entradas: {name}", heading_style))
-        tx_in_data = [["Data", "Dízimo/Oferta", "Valor"]]
+        # --- Tabela de Entradas da Unidade ---
+        story.append(Paragraph("<b>1. Entradas</b>", normal_style))
         unit_total_entradas = data["totals"]["entradas_total_sem_missoes"]
         grand_total_entradas += unit_total_entradas
         
-        # Aqui simplificamos para mostrar todas as entradas juntas
-        for t in data["tx_in"]:
-             tx_in_data.append([t.date.strftime("%d/%m/%Y"), t.category.name, format_currency(t.amount)])
-        for t in data["tithes"]:
-             tx_in_data.append([t.date.strftime("%d/%m/%Y"), "Dízimo (Nominal)", format_currency(t.amount)])
-        
-        if len(tx_in_data) > 1:
-            tbl_in = Table(tx_in_data, colWidths=[3*cm, 9*cm, 4.5*cm])
-            # ... estilos da tabela ...
+        df_entradas = _entrada_summary_df(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)
+        if not df_entradas.empty:
+            data_in = [["Data do Culto", "Dízimo", "Oferta", "Total"]]
+            for _, row in df_entradas.iterrows():
+                data_in.append([row["Data do Culto"].strftime("%d/%m/%Y"), format_currency(row["Dízimo"]), format_currency(row["Oferta"]), format_currency(row["Total"])])
+            tbl_in = Table(data_in, colWidths=[3.2*cm, 4.0*cm, 4.0*cm, 5.3*cm])
+            tbl_in.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('BACKGROUND', (0,0), (-1,0), colors.lightgrey), ('ALIGN', (1,1), (-1,-1), 'RIGHT')]))
             story.append(tbl_in)
         else:
             story.append(Paragraph("Nenhuma entrada registrada.", normal_style))
-        story.append(Paragraph(f"<b>Total de Entradas da Unidade: {format_currency(unit_total_entradas)}</b>", normal_style))
         story.append(Spacer(1, 0.5*cm))
 
-        # Tabela de Saídas da Unidade
-        story.append(Paragraph(f"Saídas: {name}", heading_style))
-        tx_out_data = [["Data", "Categoria", "Descrição", "Valor"]]
+        # --- Tabela de Saídas da Unidade ---
+        story.append(Paragraph("<b>2. Saídas</b>", normal_style))
+        txs_out = data["tx_out"]
         unit_total_saidas = data["totals"]["saidas_total"]
         grand_total_saidas += unit_total_saidas
-        for t in data["tx_out"]:
-            tx_out_data.append([t.date.strftime("%d/%m/%Y"), t.category.name, t.description or "", format_currency(t.amount)])
 
-        if len(tx_out_data) > 1:
-            tbl_out = Table(tx_out_data, colWidths=[2.5*cm, 4.5*cm, 6.5*cm, 3*cm])
-            # ... estilos da tabela ...
+        if txs_out:
+            data_out = [["Data", "Categoria", "Descrição", "Valor"]]
+            for t in txs_out:
+                data_out.append([t.date.strftime("%d/%m/%Y"), t.category.name, t.description or "", format_currency(t.amount)])
+            tbl_out = Table(data_out, colWidths=[2.5*cm, 4.5*cm, 6.5*cm, 3*cm])
+            tbl_out.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('BACKGROUND', (0,0), (-1,0), colors.lightgrey), ('ALIGN', (3,1), (3,-1), 'RIGHT')]))
             story.append(tbl_out)
         else:
             story.append(Paragraph("Nenhuma saída registrada.", normal_style))
-        story.append(Paragraph(f"<b>Total de Saídas da Unidade: {format_currency(unit_total_saidas)}</b>", normal_style))
-        story.append(Spacer(1, 1*cm))
+        story.append(Spacer(1, 0.5*cm))
+        
+        # --- NOVA Tabela de Resumo da Unidade ---
+        story.append(Paragraph(f"<b>3. Resumo da Unidade: {name}</b>", normal_style))
+        unit_saldo = unit_total_entradas - unit_total_saidas
+        unit_summary_data = [
+            ["Total de Entradas da Unidade", format_currency(unit_total_entradas)],
+            ["Total de Saídas da Unidade", format_currency(unit_total_saidas)],
+            [Paragraph("<b>Saldo da Unidade</b>", normal_style), Paragraph(f"<b>{format_currency(unit_saldo)}</b>", normal_style)]
+        ]
+        tbl_unit_summary = Table(unit_summary_data, colWidths=[8*cm, 8.5*cm])
+        tbl_unit_summary.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,2), (-1,2), colors.lightyellow)]))
+        story.append(tbl_unit_summary)
 
     # --- Tabela Final: Resumo Financeiro Geral ---
+    story.append(Spacer(1, 1*cm))
     story.append(Paragraph("Resumo Financeiro Geral (Principal + Subs)", heading_style))
     saldo_final = grand_total_entradas - grand_total_saidas
     summary_data = [
@@ -2125,8 +2136,8 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
         ["Total Geral de Saídas", format_currency(grand_total_saidas)],
         [Paragraph("<b>Saldo do Mês (Entradas - Saídas)</b>", normal_style), Paragraph(f"<b>{format_currency(saldo_final)}</b>", normal_style)]
     ]
-    tbl_summary = Table(summary_data, colWidths=[8*cm, 8*cm])
-    tbl_summary.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightcyan)]))
+    tbl_summary = Table(summary_data, colWidths=[8*cm, 8.5*cm])
+    tbl_summary.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,2), (-1,2), colors.lightcyan)]))
     story.append(tbl_summary)
 
     doc.build(story)
