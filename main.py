@@ -2269,7 +2269,7 @@ def build_consolidated_pdf(congs_all: List[Congregation], ref: date, db: Session
     styles = getSampleStyleSheet()
     start, end = month_bounds(ref)
 
-    # Estilos customizados
+    # Estilos
     title_style = ParagraphStyle('title', parent=styles['h1'], alignment=TA_CENTER, fontSize=16, spaceAfter=8)
     subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=11, spaceAfter=16)
     heading_style = ParagraphStyle('heading', parent=styles['h2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
@@ -2279,61 +2279,62 @@ def build_consolidated_pdf(congs_all: List[Congregation], ref: date, db: Session
     story.append(Paragraph("Relatório Consolidado Mensal", title_style))
     story.append(Paragraph(f"Mês de Referência: {ref.strftime('%B de %Y')}", subtitle_style))
 
-    # --- Tabela 1: Resumo de Entradas Hierárquico ---
-    story.append(Paragraph("1. Resumo de Entradas por Unidade", heading_style))
-    
-    entry_data = [["Unidade", "Valor (R$)"]]
     grand_total_entradas = 0.0
+    grand_total_saidas = 0.0
 
+    # --- Tabela 1: Resumo de Entradas Hierárquico ---
+    story.append(Paragraph("1. Resumo de Entradas por Unidade (Exceto Missões)", heading_style))
+    entry_data = [["Unidade", "Valor (R$)"]]
     for cong in congs_all:
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id)).all()
         principal_entradas = _collect_month_data(db, cong.id, start, end, sub_cong_id=None)["totals"]["entradas_total_sem_missoes"]
-        
         if not sub_congs:
             entry_data.append([Paragraph(cong.name, normal_style), format_currency(principal_entradas)])
             grand_total_entradas += principal_entradas
             continue
-
-        total_subs = 0.0
         subs_rows = []
+        total_subs = 0.0
         for sub in sub_congs:
             sub_entradas = _collect_month_data(db, cong.id, start, end, sub_cong_id=sub.id)["totals"]["entradas_total_sem_missoes"]
-            subs_rows.append([Paragraph(f"↳ {sub.name}", normal_style), format_currency(sub_entradas)])
+            subs_rows.append([Paragraph(f"↳ {sub.name}", normal_style), sub_entradas])
             total_subs += sub_entradas
-        
-        subs_rows.sort(key=lambda x: _to_float_brl(x[1]), reverse=True)
+        subs_rows.sort(key=lambda x: x[1], reverse=True)
+        for row in subs_rows: row[1] = format_currency(row[1])
         cong_total = principal_entradas + total_subs
         grand_total_entradas += cong_total
-
+        entry_data.append([Paragraph(f"<b>{cong.name} (Total)</b>", normal_style), format_currency(cong_total)])
         entry_data.append([Paragraph(f"↳ {cong.name} (Principal)", normal_style), format_currency(principal_entradas)])
         entry_data.extend(subs_rows)
-        entry_data.append([Paragraph(f"<b>{cong.name} (Total)</b>", normal_style), format_currency(cong_total)])
-    
-    # Adiciona a linha de total geral para as entradas
     entry_data.append([Paragraph("<b>Total Geral de Entradas</b>", normal_style), Paragraph(f"<b>{format_currency(grand_total_entradas)}</b>", normal_style)])
-    
     tbl_in = Table(entry_data, colWidths=[12*cm, 4*cm])
     tbl_in.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)]))
     story.append(tbl_in)
     story.append(Spacer(1, 0.8*cm))
 
-    # --- Tabela 2: Detalhamento de Saídas por Categoria (LÓGICA ALTERADA) ---
-    story.append(Paragraph("2. Total de Saídas por Categoria (Geral)", heading_style))
-    
+    # --- Tabela 2: Detalhamento de Saídas por Categoria (LÓGICA CORRIGIDA) ---
+    story.append(Paragraph("2. Total de Saídas por Categoria (Geral, Exceto Missões)", heading_style))
     exit_data = [["Categoria de Saída", "Valor Total (R$)"]]
     
-    saidas_por_categoria_q = select(Category.name, func.sum(Transaction.amount)).join(Transaction).where(
-        Transaction.date >= start, Transaction.date < end, Transaction.type == TYPE_OUT
+    # Busca o ID da categoria de missões para excluí-la de forma segura
+    cat_miss_saida = db.scalar(select(Category).where(func.lower(Category.name) == 'missões (saída)'))
+    cat_miss_saida_id = cat_miss_saida.id if cat_miss_saida else -1
+
+    saidas_por_categoria_q = select(
+        Category.name, 
+        func.sum(Transaction.amount)
+    ).join(Transaction).where(
+        Transaction.date >= start, 
+        Transaction.date < end, 
+        Transaction.type == TYPE_OUT,
+        Transaction.category_id != cat_miss_saida_id # Exclui a categoria pelo ID
     ).group_by(Category.name).order_by(func.sum(Transaction.amount).desc())
     
     results = db.execute(saidas_por_categoria_q).all()
-    grand_total_saidas = 0.0
     for cat_name, total in results:
         exit_data.append([cat_name, format_currency(total)])
         grand_total_saidas += total
     
-    # Adiciona a linha de total geral para as saídas
-    exit_data.append([Paragraph("<b>Total Geral de Saídas</b>", normal_style), Paragraph(f"<b>{format_currency(grand_total_saidas)}</b>", normal_style)])
+    exit_data.append([Paragraph("<b>Total Geral de Saídas (Exceto Missões)</b>", normal_style), Paragraph(f"<b>{format_currency(grand_total_saidas)}</b>", normal_style)])
 
     tbl_out = Table(exit_data, colWidths=[12*cm, 4*cm])
     tbl_out.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)]))
@@ -2341,15 +2342,15 @@ def build_consolidated_pdf(congs_all: List[Congregation], ref: date, db: Session
     story.append(Spacer(1, 0.8*cm))
 
     # --- Tabela 3: Resumo Financeiro Geral ---
-    story.append(Paragraph("3. Resumo Financeiro Geral", heading_style))
+    story.append(Paragraph("3. Resumo Financeiro Geral (Caixa Principal)", heading_style))
     saldo_final = grand_total_entradas - grand_total_saidas
     summary_data = [
-        ["Total Geral de Entradas", format_currency(grand_total_entradas)],
-        ["Total Geral de Saídas", format_currency(grand_total_saidas)],
-        [Paragraph("<b>Saldo do Mês (Entradas - Saídas)</b>", normal_style), Paragraph(f"<b>{format_currency(saldo_final)}</b>", normal_style)]
+        ["Total Geral de Entradas (Exceto Missões)", format_currency(grand_total_entradas)],
+        ["Total Geral de Saídas (Exceto Missões)", format_currency(grand_total_saidas)],
+        [Paragraph("<b>Saldo do Mês (Caixa Principal)</b>", normal_style), Paragraph(f"<b>{format_currency(saldo_final)}</b>", normal_style)]
     ]
     tbl_summary = Table(summary_data, colWidths=[8*cm, 8*cm])
-    tbl_summary.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightcyan)]))
+    tbl_summary.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,2), (-1,2), colors.lightcyan)]))
     story.append(tbl_summary)
 
     doc.build(story)
