@@ -20,14 +20,14 @@ if os.path.exists("database.db"):
 
 # O resto do seu código começa aqui...
 # ===== UI extra (menu bonito com fallback) =====
-# ...
+try:
+    import streamlit_antd_components as sac
+except Exception:
+    sac = None
+# ...e assim por diante
 
 # O resto do seu código começa aqui...
-from __future__ import annotations
-# ===== UI extra (menu bonito com fallback) =====
-# ...
-from __future__ import annotations
-# ===== UI extra (menu bonito com fallback) =====
+# ===== UI extra (menu bonito com fallback) ====
 try:
     import streamlit_antd_components as sac  # pip install streamlit-antd-components
 except Exception:
