@@ -11,6 +11,14 @@
 # Obs.: Todo o restante do seu código foi preservado. Itens que você pediu antes
 # (ex.: esconder "ajuste" na ENTRADA, relatórios agregados editáveis da SEDE, etc.) continuam iguais.
 
+import os
+if os.path.exists("database.db"):
+    os.remove("database.db")
+
+# O resto do seu código começa aqui...
+from __future__ import annotations
+# ===== UI extra (menu bonito com fallback) =====
+# ...
 from __future__ import annotations
 # ===== UI extra (menu bonito com fallback) =====
 try:
