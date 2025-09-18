@@ -47,7 +47,7 @@ import locale as _locale
 import pandas as pd
 import streamlit as st
 
-from sqlalchemy import select, func, String, Date, Float, ForeignKey, create_engine, and_, not__
+from sqlalchemy import select, func, String, Date, Float, ForeignKey, create_engine, and_, or_, not_
 from sqlalchemy.orm import relationship, Mapped, mapped_column, sessionmaker, joinedload, Session
 from sqlalchemy.orm import DeclarativeBase
 import unicodedata as ud
