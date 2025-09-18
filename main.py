@@ -407,6 +407,28 @@ def _to_date(obj: Any) -> date:
         return datetime.strptime(s, "%Y-%m-%d").date()
     except Exception:
         return today_bahia()
+    
+def _row_is_empty_or_incomplete(row: dict, required: list[str]) -> bool:
+    """Retorna True se a linha estiver vazia (NaN/None/"" em todos) ou faltar algum campo obrigatório."""
+    # tudo vazio?
+    all_empty = True
+    for v in row.values():
+        if v is None:
+            continue
+        s = str(v).strip()
+        if s not in ("", "NaN", "nan"):
+            all_empty = False
+            break
+    if all_empty:
+        return True
+
+    # falta algum obrigatório?
+    for col in required:
+        v = row.get(col, None)
+        if v is None or str(v).strip() in ("", "NaN", "nan"):
+            return True
+    return False
+    
 
 def _to_float_brl(x: Any) -> float:
     if x is None:
@@ -900,65 +922,134 @@ def _submit_btn(label: str, key_suffix: str, theme: str = "neutral") -> bool:
 def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: str, default_cong_id: Optional[int], default_sub_cong_id: Optional[int] = None):
     def norm_df(df: pd.DataFrame) -> pd.DataFrame:
         d = df.copy()
-        if "Valor" in d.columns: d["Valor"] = d["Valor"].map(_to_float_brl)
-        if "Data" in d.columns: d["Data"] = d["Data"].map(_to_date)
-        for c in ("Categoria", "Descrição", "Congregação"):
-            if c in d.columns: d[c] = d[c].astype(str).fillna("")
+
+        # normaliza nomes de colunas que usamos
+        if "Valor" in d.columns:
+            d["Valor"] = d["Valor"].map(_to_float_brl).fillna(0.0)
+        else:
+            d["Valor"] = 0.0
+
+        if "Data" in d.columns:
+            d["Data"] = d["Data"].map(lambda x: _to_date(x) if pd.notna(x) and str(x).strip() != "" else None)
+        else:
+            d["Data"] = None
+
+        for c in ("Categoria", "Descrição"):
+            if c in d.columns:
+                d[c] = d[c].astype(str).fillna("").map(lambda s: s.strip())
+            else:
+                d[c] = ""
+
+        # congregação oculta
+        if "_cong_id" not in d.columns:
+            d["_cong_id"] = int(default_cong_id or 0)
+
+        # ID pode vir NaN
+        if "ID" not in d.columns:
+            d["ID"] = None
+
         return d
 
     o = norm_df(orig_df)
     n_bruto = norm_df(edited_df)
 
-    # --- LÓGICA DE EXCLUSÃO CORRIGIDA ---
-    # Primeiro, identifica as linhas que são válidas para manter/atualizar.
-    n = n_bruto[
-        (n_bruto["Valor"].abs() > 0.01) & 
-        (n_bruto["Categoria"] != "")
-    ].copy()
+    # 1) remove linhas completamente vazias OU sem campos obrigatórios
+    required = ["Data", "Categoria"]  # para lançamentos, Data e Categoria são obrigatórios; Valor pode ser 0
+    linhas_validas = []
+    for _, r in n_bruto.iterrows():
+        if not _row_is_empty_or_incomplete(r.to_dict(), required):
+            linhas_validas.append(r)
+    n_bruto = pd.DataFrame(linhas_validas) if linhas_validas else pd.DataFrame(columns=n_bruto.columns)
 
-    old_ids = set(int(x) for x in o["ID"].tolist() if pd.notna(x) and x > 0)
-    new_ids = set(int(x) for x in n["ID"].tolist() if pd.notna(x) and x > 0)
+    # 2) Só consideramos linhas válidas com Categoria preenchida (Data já foi filtrada)
+    n = n_bruto[(n_bruto["Categoria"] != "")]
+    #    e com Valor "real" (permite 0? aqui deixo >=0, mas não criaremos novas com 0)
+    #    não filtramos por valor aqui para permitir deletar atualizações ao zerar
+
+    old_ids = set(int(x) for x in o["ID"].tolist() if pd.notna(x) and str(x).strip() not in ("", "NaN", "nan") and int(x) > 0)
+    new_ids = set(int(x) for x in n["ID"].tolist() if pd.notna(x) and str(x).strip() not in ("", "NaN", "nan") and int(x) > 0)
     to_delete = list(old_ids - new_ids)
-    
-    old_map = {int(r["ID"]): r for _, r in o.iterrows() if pd.notna(r["ID"])}
 
     with SessionLocal() as db:
         cats = categories_for_type(db, tx_type)
         cat_by_name = {c.name: c for c in cats}
+
+        # DELETE dos que sumiram da visão (inclusive se user apagou categoria)
         if to_delete:
             db.query(Transaction).filter(Transaction.id.in_(to_delete)).delete(synchronize_session=False)
 
+        # UPDATE
         for rid in sorted(new_ids & old_ids):
             new = n.loc[n["ID"] == rid].iloc[0]
             t = db.get(Transaction, rid)
-            if not t: continue
-            
-            changed = False
-            if t.date != new["Data"]: t.date = new["Data"]; changed = True
-            cat = cat_by_name.get(new["Categoria"])
-            if cat and t.category_id != cat.id: t.category_id = cat.id; changed = True
-            if t.amount != new["Valor"]: t.amount = new["Valor"]; changed = True
-            if (t.description or "") != (new.get("Descrição", "") or ""): t.description = new.get("Descrição"); changed = True
-            if "_cong_id" in n.columns and int(new["_cong_id"]) != t.congregation_id:
-                t.congregation_id = int(new["_cong_id"]); changed = True
-            if changed: db.add(t)
+            if not t:
+                continue
 
+            # segurança: não atualiza para Data/Categoria inválida
+            if new["Data"] is None:
+                continue
+            cat = cat_by_name.get(new["Categoria"])
+            if not cat:
+                continue
+
+            changed = False
+            if t.date != new["Data"]:
+                t.date = new["Data"]; changed = True
+            if t.category_id != cat.id:
+                t.category_id = cat.id; changed = True
+
+            new_val = float(new["Valor"] or 0.0)
+            if t.amount != new_val:
+                t.amount = new_val; changed = True
+
+            new_desc = (new.get("Descrição", "") or "").strip() or None
+            if (t.description or None) != new_desc:
+                t.description = new_desc; changed = True
+
+            # Congregação vinda da coluna oculta (se existir)
+            try:
+                new_cong = int(new.get("_cong_id", 0) or 0)
+            except Exception:
+                new_cong = 0
+            if new_cong and new_cong != (t.congregation_id or 0):
+                t.congregation_id = new_cong; changed = True
+
+            # sub cong (se passado)
+            if default_sub_cong_id is not None and default_sub_cong_id != (t.sub_congregation_id or None):
+                t.sub_congregation_id = default_sub_cong_id; changed = True
+
+            if changed:
+                db.add(t)
+
+        # INSERT (apenas se Data e Categoria válidos; e Valor > 0 evita “lixo”)
         for _, row in n.iterrows():
             rid = row.get("ID", None)
-            if pd.notna(rid) and int(rid) > 0: continue # Já foi tratado como atualização
+            if pd.notna(rid) and str(rid).strip() not in ("", "NaN", "nan") and int(rid) > 0:
+                continue
 
+            if row["Data"] is None:
+                continue
             cat = cat_by_name.get(row["Categoria"])
-            if not cat: continue
+            if not cat:
+                continue
 
-            cong_id = int(row.get("_cong_id", 0) or 0) or default_cong_id
-            if not cong_id: continue
-            
+            cong_id = int(row.get("_cong_id", 0) or 0) or (default_cong_id or 0)
+            if not cong_id:
+                continue
+
+            value = float(row["Valor"] or 0.0)
+            if value <= 0.0:
+                # não cria registro vazio
+                continue
+
             db.add(Transaction(
-                date=row["Data"], type=tx_type, category_id=cat.id, 
-                amount=row["Valor"], description=(row.get("Descrição") or None),
+                date=row["Data"], type=tx_type, category_id=cat.id,
+                amount=value, description=((row.get("Descrição") or "").strip() or None),
                 congregation_id=cong_id, sub_congregation_id=default_sub_cong_id
             ))
+
         db.commit()
+
 
 # ===================== APPLY CHANGES — LANÇAMENTOS / DÍZIMOS =====================
 
@@ -966,27 +1057,37 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
 def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default_cong_id: Optional[int], default_sub_cong_id: Optional[int] = None):
     def norm_df(df: pd.DataFrame) -> pd.DataFrame:
         d = df.copy()
-        if "Valor" in d.columns: d["Valor"] = d["Valor"].map(_to_float_brl)
-        if "Data" in d.columns: d["Data"] = d["Data"].map(_to_date)
-        for c in ("Dizimista", "Forma de Pagamento"):
-            if c in d.columns: d[c] = d[c].astype(str).fillna("")
+        d["Valor"] = d.get("Valor", 0.0)
+        d["Valor"] = d["Valor"].map(_to_float_brl).fillna(0.0)
+
+        d["Data"] = d.get("Data", None)
+        d["Data"] = d["Data"].map(lambda x: _to_date(x) if pd.notna(x) and str(x).strip() != "" else None)
+
+        d["Dizimista"] = d.get("Dizimista", "").astype(str).fillna("").map(lambda s: s.strip())
+        d["Forma de Pagamento"] = d.get("Forma de Pagamento", "").astype(str).fillna("").map(lambda s: s.strip())
+
+        if "_cong_id" not in d.columns:
+            d["_cong_id"] = int(default_cong_id or 0)
+        if "ID" not in d.columns:
+            d["ID"] = None
         return d
 
     o = norm_df(orig_df)
     n_bruto = norm_df(edited_df)
 
-    # --- LÓGICA DE EXCLUSÃO CORRIGIDA ---
-    # Considera válidas apenas as linhas com valor e nome de dizimista preenchidos
-    n = n_bruto[
-        (n_bruto["Valor"].abs() > 0.01) & 
-        (n_bruto["Dizimista"] != "")
-    ].copy()
+    required = ["Data", "Dizimista"]
+    linhas_validas = []
+    for _, r in n_bruto.iterrows():
+        if not _row_is_empty_or_incomplete(r.to_dict(), required):
+            linhas_validas.append(r)
+    n = pd.DataFrame(linhas_validas) if linhas_validas else pd.DataFrame(columns=n_bruto.columns)
 
-    old_ids = set(int(x) for x in o["ID"].tolist() if pd.notna(x) and x > 0)
-    new_ids = set(int(x) for x in n["ID"].tolist() if pd.notna(x) and x > 0)
+    # Regras de negócio: exige nome e valor > 0 para criar
+    n_for_create = n[(n["Dizimista"] != "") & (n["Valor"].abs() > 0.01) & (n["Data"].notna())]
+
+    old_ids = set(int(x) for x in o["ID"].tolist() if pd.notna(x) and str(x).strip() not in ("", "NaN", "nan") and int(x) > 0)
+    new_ids = set(int(x) for x in n["ID"].tolist() if pd.notna(x) and str(x).strip() not in ("", "NaN", "nan") and int(x) > 0)
     to_delete = list(old_ids - new_ids)
-
-    old_map = {int(r["ID"]): r for _, r in o.iterrows() if pd.notna(r["ID"])}
 
     with SessionLocal() as db:
         if to_delete:
@@ -995,26 +1096,33 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
         for rid in sorted(new_ids & old_ids):
             new = n.loc[n["ID"] == rid].iloc[0]
             t = db.get(Tithe, rid)
-            if not t: continue
-            
+            if not t:
+                continue
+            # só atualiza se Data válida
+            if new["Data"] is None:
+                continue
+
             changed = False
             if t.date != new["Data"]: t.date = new["Data"]; changed = True
             if t.tither_name != new["Dizimista"]: t.tither_name = new["Dizimista"]; changed = True
-            if t.amount != new["Valor"]: t.amount = new["Valor"]; changed = True
-            if (t.payment_method or "") != (new["Forma de Pagamento"] or ""): t.payment_method = new["Forma de Pagamento"] or None; changed = True
+            new_val = float(new["Valor"] or 0.0)
+            if t.amount != new_val: t.amount = new_val; changed = True
+            new_pm = (new["Forma de Pagamento"] or None)
+            if (t.payment_method or None) != new_pm: t.payment_method = new_pm; changed = True
+            if default_sub_cong_id is not None and default_sub_cong_id != (t.sub_congregation_id or None):
+                t.sub_congregation_id = default_sub_cong_id; changed = True
             if changed: db.add(t)
 
-        for _, row in n.iterrows():
-            rid = row.get("ID", None)
-            if pd.notna(rid) and int(rid) > 0: continue
-
-            if default_cong_id is None: continue
+        for _, row in n_for_create.iterrows():
+            if default_cong_id is None:
+                continue
             db.add(Tithe(
-                date=row["Data"], tither_name=row["Dizimista"], amount=row["Valor"],
+                date=row["Data"], tither_name=row["Dizimista"], amount=float(row["Valor"] or 0.0),
                 congregation_id=int(default_cong_id), sub_congregation_id=default_sub_cong_id,
                 payment_method=(row.get("Forma de Pagamento") or None)
             ))
         db.commit()
+
         # ================================================================
 
 # ===================== RELATÓRIO DE ENTRADA — TABELA ÚNICA (EDIT SUMÁRIO) =====================
@@ -1185,9 +1293,13 @@ def _editor_lancamentos(
     st.metric(_label_total, format_currency(_total_val))
 
     def _save():
-        _apply_tx_changes(df_full, edited_view, tx_type, force_cong_id, force_sub_cong_id)
-        st.toast("💾 Alterações salvas.", icon="✅")
-        st.rerun()
+    # drop linhas 100% vazias do edited_view, evita barulho
+     ev = edited_view.copy()
+     ev = ev.dropna(how="all")
+    _apply_tx_changes(df_full, ev, tx_type, force_cong_id, force_sub_cong_id)
+    st.toast("💾 Alterações salvas.", icon="✅")
+    st.rerun()
+
 
     _save_btn(_save, f"tx_{titulo.replace(' ', '_')}_{force_cong_id}_{force_sub_cong_id}", theme=("saida" if tx_type == TYPE_OUT else "entrada"))
 
@@ -1227,9 +1339,12 @@ def _editor_dizimos(tithes: List["Tithe"], titulo: str, force_cong_id: Optional[
     st.metric("Total de DÍZIMOS (tabela)", format_currency(_total_val))
 
     def _save():
-        _apply_tithe_changes(df_full, edited_view, force_cong_id, force_sub_cong_id)
-        st.toast("💾 Alterações salvas.", icon="✅")
-        st.rerun()
+      ev = edited_view.copy()
+      ev = ev.dropna(how="all")
+    _apply_tithe_changes(df_full, ev, force_cong_id, force_sub_cong_id)
+    st.toast("💾 Alterações salvas.", icon="✅")
+    st.rerun()
+
 
     _save_btn(_save, f"tithe_{titulo.replace(' ', '_')}_{force_cong_id}_{force_sub_cong_id}", theme="dizimista")
 
