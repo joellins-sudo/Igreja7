@@ -1789,16 +1789,15 @@ def page_lancamentos(user: "User"):
 
         st.markdown(f"### CONGREGAÇÃO: {parent_cong_obj.name.upper()}")
 
-        # --- SELETOR DE MODO REINTRODUZIDO ---
+        # --- SELETOR DE MODO SIMPLIFICADO ---
         modo = st.radio(
             "Modo de lançamento:",
-            ["Formulário Detalhado", "Tabelas de Entradas", "Tabela de Saídas"],
+            ["Formulário Detalhado", "Editar Tabelas do Mês"],
             horizontal=True,
             key="lan_modo_sel"
         )
         st.divider()
 
-        # --- Seletores de Contexto Unificados para toda a página ---
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
         
         contexto_selecionado = f"{parent_cong_obj.name} (Principal)"
@@ -1808,14 +1807,12 @@ def page_lancamentos(user: "User"):
             for sub in sub_congs:
                 opcoes_tabela[sub.name] = sub.id
             contexto_selecionado = st.selectbox("Selecione a unidade para os lançamentos:", list(opcoes_tabela.keys()), key="lan_tabela_contexto")
-            target_sub_cong_id = opcoes_tabela[contexto_selecionado]
+            target_sub_cong_id = opcoes_tabela[contexto_tabela]
         
-        st.info(f"Exibindo dados de: **{contexto_selecionado}**")
-        
-        # --- LÓGICA CONDICIONAL PARA EXIBIR APENAS A SEÇÃO ESCOLHIDA ---
         if modo == "Formulário Detalhado":
+            st.info(f"Lançamento rápido para: **{contexto_selecionado}**")
             st.subheader("Lançamento Rápido (Formulário)")
-            with st.expander("➕ Lançar ENTRADA", expanded=True):
+            with st.expander("➕ Lançar ENTRADA", expanded=False):
                  with st.form("form_entrada"):
                     cats_in = [c for c in categories_for_type(db, TYPE_IN) if "ajuste" not in _norm(c.name)]
                     c1, c2, c3 = st.columns(3)
@@ -1873,23 +1870,25 @@ def page_lancamentos(user: "User"):
                             ))
                             db.commit(); st.success("Saída registrada!"); st.rerun()
 
-        elif modo == "Tabelas de Entradas":
+        elif modo == "Editar Tabelas do Mês":
+            st.info(f"Editando tabelas de: **{contexto_selecionado}**")
             ref_tab = get_month_selector("Mês de referência")
             start_tab, end_tab = month_bounds(ref_tab)
-            st.subheader("Edição de Entradas do Mês")
+            st.subheader("Edição em Tabela (Mês Completo)")
 
             datas_divergentes = _verificar_divergencia_dizimos(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
             if datas_divergentes:
                 datas_str = ", ".join([d.strftime('%d/%m') for d in datas_divergentes])
                 st.warning(f"**Atenção:** Valores de dízimo estão divergindo nos dias: **{datas_str}**. Verifique os lançamentos.")
             
+            # --- Tabela 1: Entradas por Culto ---
             st.markdown("##### Entradas por Culto/Evento")
             st.caption("Adicione ou edite linhas para cada culto (ex: 'Manhã', 'Noite').")
 
-            base_df = _gerar_df_cultos(db, parent_cong_obj.id, start_tab, end_tab, target_sub_cong_id)
+            base_df_cultos = _gerar_df_cultos(db, parent_cong_obj.id, start_tab, end_tab, target_sub_cong_id)
             
-            edited_df = st.data_editor(
-                base_df,
+            edited_df_cultos = st.data_editor(
+                base_df_cultos,
                 use_container_width=True, hide_index=True, num_rows="dynamic",
                 key=f"editor_cultos_{parent_cong_obj.id}_{target_sub_cong_id}",
                 column_config={
@@ -1902,22 +1901,20 @@ def page_lancamentos(user: "User"):
             )
 
             def _save_cultos():
-                _aplicar_mudancas_cultos(base_df, edited_df, parent_cong_obj.id, target_sub_cong_id)
+                _aplicar_mudancas_cultos(base_df_cultos, edited_df_cultos, parent_cong_obj.id, target_sub_cong_id)
                 st.toast("✅ Entradas por culto salvas com sucesso!", icon="✅")
                 st.rerun()
 
             _save_btn(_save_cultos, f"save_cultos_{parent_cong_obj.id}_{target_sub_cong_id}", "entrada")
             
+            # --- Tabela 2: Dizimistas ---
             st.markdown("---")
             tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id == target_sub_cong_id)
             tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
             _editor_dizimos(tithes, f"Lançamento de Dizimistas (Nominal)", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
 
-        elif modo == "Tabela de Saídas":
-            ref_tab = get_month_selector("Mês de referência")
-            start_tab, end_tab = month_bounds(ref_tab)
-            st.subheader("Edição de Saídas do Mês")
-
+            # --- Tabela 3: Saídas ---
+            st.markdown("---")
             txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_OUT, Transaction.sub_congregation_id == target_sub_cong_id)
             txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
             _editor_lancamentos(txs_out, f"Lançamento de Saídas", tx_type_hint=TYPE_OUT, force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
