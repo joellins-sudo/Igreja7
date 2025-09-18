@@ -779,7 +779,7 @@ ADJ_CULTOS_DIZIMO_DESC = "[Ajuste de Dízimo via Tabela de Cultos]"
 ADJ_CULTOS_OFERTA_DESC = "[Ajuste de Oferta via Tabela de Cultos]"
 
 def _gerar_df_cultos(db: Session, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
-    """Gera um DataFrame consolidado por culto/evento, somando dízimos e ofertas."""
+    """Gera um DataFrame consolidado por culto/evento, com os nomes de coluna corretos e o total."""
     cultos = defaultdict(lambda: {"dizimo": 0.0, "oferta": 0.0})
 
     sub_filter_tithe = Tithe.sub_congregation_id.is_(None) if sub_cong_id is None else Tithe.sub_congregation_id == sub_cong_id
@@ -810,21 +810,35 @@ def _gerar_df_cultos(db: Session, cong_id: int, start: date, end: date, sub_cong
         for d, tag, total in db.execute(q_ofe_tx):
             cultos[(d, tag or "")]["oferta"] += float(total or 0.0)
 
+    # Nomes de coluna e cálculo do total ajustados aqui
     if not cultos:
-        return pd.DataFrame(columns=["Data", "Culto/Evento", "Dízimo (R$)", "Oferta (R$)"])
+        return pd.DataFrame(columns=["Data do Culto", "Culto/Evento", "Dízimos", "Oferta", "Total"])
 
-    rows = [{"Data": d, "Culto/Evento": tag, "Dízimo (R$)": v["dizimo"], "Oferta (R$)": v["oferta"]} for (d, tag), v in cultos.items()]
-    return pd.DataFrame(rows).sort_values(by=["Data", "Culto/Evento"], ascending=True)
+    rows = []
+    for (d, tag), v in cultos.items():
+        dizimo = v["dizimo"]
+        oferta = v["oferta"]
+        rows.append({
+            "Data do Culto": d, 
+            "Culto/Evento": tag, 
+            "Dízimos": dizimo, 
+            "Oferta": oferta,
+            "Total": dizimo + oferta
+        })
+    
+    df = pd.DataFrame(rows).sort_values(by=["Data do Culto", "Culto/Evento"], ascending=True)
+    return df
 
 def _aplicar_mudancas_cultos(orig_df: pd.DataFrame, edited_df: pd.DataFrame, cong_id: int, sub_cong_id: Optional[int]):
-    """Salva as alterações da tabela de cultos, criando transações de ajuste para as diferenças."""
-    edited_df['Data'] = pd.to_datetime(edited_df['Data'], errors='coerce').dt.date
-    edited_df.dropna(subset=['Data'], inplace=True)
+    """Salva as alterações da tabela de cultos, usando os novos nomes de coluna."""
+    # Nomes de coluna atualizados
+    edited_df['Data do Culto'] = pd.to_datetime(edited_df['Data do Culto'], errors='coerce').dt.date
+    edited_df.dropna(subset=['Data do Culto'], inplace=True)
     
-    orig_df['key'] = orig_df['Data'].astype(str) + '||' + orig_df['Culto/Evento'].astype(str).str.strip()
-    edited_df['key'] = edited_df['Data'].astype(str) + '||' + edited_df['Culto/Evento'].astype(str).str.strip()
+    orig_df['key'] = orig_df['Data do Culto'].astype(str) + '||' + orig_df['Culto/Evento'].astype(str).str.strip()
+    edited_df['key'] = edited_df['Data do Culto'].astype(str) + '||' + edited_df['Culto/Evento'].astype(str).str.strip()
     
-    for col in ["Dízimo (R$)", "Oferta (R$)"]:
+    for col in ["Dízimos", "Oferta"]:
         edited_df[col] = pd.to_numeric(edited_df[col].apply(_to_float_brl), errors='coerce').fillna(0)
 
     with SessionLocal() as db:
@@ -837,13 +851,13 @@ def _aplicar_mudancas_cultos(orig_df: pd.DataFrame, edited_df: pd.DataFrame, con
             key = row['key']
             orig_row = orig_df[orig_df['key'] == key]
             
-            new_dizimo, new_oferta = row['Dízimo (R$)'], row['Oferta (R$)']
-            orig_dizimo = orig_row['Dízimo (R$)'].iloc[0] if not orig_row.empty else 0.0
-            orig_oferta = orig_row['Oferta (R$)'].iloc[0] if not orig_row.empty else 0.0
+            new_dizimo, new_oferta = row['Dízimos'], row['Oferta']
+            orig_dizimo = orig_row['Dízimos'].iloc[0] if not orig_row.empty else 0.0
+            orig_oferta = orig_row['Oferta'].iloc[0] if not orig_row.empty else 0.0
 
             delta_dizimo = new_dizimo - orig_dizimo
             delta_oferta = new_oferta - orig_oferta
-            data = row['Data']
+            data = row['Data do Culto']
             tag = row['Culto/Evento'].strip() or None
 
             if abs(delta_dizimo) > 0.01:
@@ -1809,10 +1823,11 @@ def page_lancamentos(user: "User"):
                 use_container_width=True, hide_index=True, num_rows="dynamic",
                 key=f"editor_cultos_{parent_cong_obj.id}_{target_sub_cong_id}",
                 column_config={
-                    "Data": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
+                    "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
                     "Culto/Evento": st.column_config.TextColumn("Culto/Evento", help="Ex: Manhã, Noite. Deixe em branco para lançamentos gerais do dia."),
-                    "Dízimo (R$)": st.column_config.NumberColumn("Total Dízimos (R$)", format="R$ %.2f"),
-                    "Oferta (R$)": st.column_config.NumberColumn("Total Ofertas (R$)", format="R$ %.2f")
+                    "Dízimos": st.column_config.NumberColumn("Dízimos (R$)", format="R$ %.2f"),
+                    "Oferta": st.column_config.NumberColumn("Oferta (R$)", format="R$ %.2f"),
+                    "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f")
                 }
             )
 
