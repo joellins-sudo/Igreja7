@@ -78,6 +78,12 @@ ADJ_OUT_AGG_DESC   = "[Ajuste total de saídas (mês, sede)]"
 ADJ_HIER_ENTRY_DESC = "[Ajuste via Relatório Hierárquico (Entrada)]"
 ADJ_HIER_OUT_DESC = "[Ajuste via Relatório Hierárquico (Saída)]"
 
+ADJ_ENTRY_DESC_SPLIT_PREFIX = "[Ajuste via relatório de entrada | Tipo: "  # ex.: "[... | Tipo: Domingo (Manhã)]"
+def _split_desc(tipo: str) -> str:
+    t = (tipo or "").strip()
+    return f"{ADJ_ENTRY_DESC_SPLIT_PREFIX}{t}]"
+
+
 TIPOS_DE_CULTO = [
     "", # Opção para deixar em branco
     "Domingo (Manhã)",
@@ -1100,105 +1106,109 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
         # ================================================================
 
 # ===================== RELATÓRIO DE ENTRADA — TABELA ÚNICA (EDIT SUMÁRIO) =====================
-def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
-    # Base queries
-    tithes_q = select(Tithe.date, func.sum(Tithe.amount)).where(
-        Tithe.congregation_id == cong_id, Tithe.date >= start, Tithe.date < end
-    )
-    diz_trans_q = select(Transaction.date, func.sum(Transaction.amount)).join(Category).where(
-        Transaction.congregation_id == cong_id, Transaction.date >= start, Transaction.date < end,
-        Transaction.type.in_((TYPE_IN, "RECEITA")), func.lower(Category.name).in_(("dízimo","dizimo"))
-    )
-    oferta_trans_q = select(Transaction.date, func.sum(Transaction.amount)).join(Category).where(
-        Transaction.congregation_id == cong_id, Transaction.date >= start, Transaction.date < end,
-        Transaction.type.in_((TYPE_IN, "RECEITA")), func.lower(Category.name) == "oferta"
-    )
+def _entrada_summary_split_df(db: Session, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
+    """
+    Monta a tabela de edição separando por 'Tipo do Culto' com base nos AJUSTES 'por tipo'
+    já salvos (descrição iniciada por ADJ_ENTRY_DESC_SPLIT_PREFIX). Se não houver nenhum,
+    retorna uma tabela vazia (o usuário pode adicionar linhas).
+    """
+    def _unit_filter(col):
+        return col.is_(None) if (sub_cong_id is None) else (col == sub_cong_id)
 
-    # --- LÓGICA DE FILTRO CORRIGIDA ---
-    if sub_cong_id is not None:
-        # Filtra por uma sub-congregação específica
-        tithes_q = tithes_q.where(Tithe.sub_congregation_id == sub_cong_id)
-        diz_trans_q = diz_trans_q.where(Transaction.sub_congregation_id == sub_cong_id)
-        oferta_trans_q = oferta_trans_q.where(Transaction.sub_congregation_id == sub_cong_id)
-    else:
-        # Filtra APENAS para a congregação principal (onde não há sub_congregation_id)
-        tithes_q = tithes_q.where(Tithe.sub_congregation_id.is_(None))
-        diz_trans_q = diz_trans_q.where(Transaction.sub_congregation_id.is_(None))
-        oferta_trans_q = oferta_trans_q.where(Transaction.sub_congregation_id.is_(None))
+    # Ajustes de Dízimo por tipo
+    cat_diz = db.scalar(select(Category).where(func.lower(Category.name).in_(("dizimo","dízimo"))))
+    # Ajustes de Oferta por tipo
+    cat_ofe = db.scalar(select(Category).where(func.lower(Category.name) == "oferta"))
 
-    # Executa queries
-    tithes = db.execute(tithes_q.group_by(Tithe.date)).all()
-    diz_trans = db.execute(diz_trans_q.group_by(Transaction.date)).all()
-    oferta_trans = db.execute(oferta_trans_q.group_by(Transaction.date)).all()
+    rows_by_key: Dict[Tuple[date, str], Dict[str, float]] = {}
 
-    by_date_diz_tit = defaultdict(float)
-    for d, s in tithes: by_date_diz_tit[d] += float(s or 0.0)
-    by_date_diz_tx = defaultdict(float)
-    for d, s in diz_trans: by_date_diz_tx[d] += float(s or 0.0)
-    by_date_ofe = defaultdict(float)
-    for d, s in oferta_trans: by_date_ofe[d] += float(s or 0.0)
+    def _feed(cat_id: int, field: str):
+        if not cat_id: return
+        q = select(Transaction.date, Transaction.description, func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+            Transaction.congregation_id == cong_id,
+            Transaction.date >= start, Transaction.date < end,
+            Transaction.category_id == cat_id,
+            _unit_filter(Transaction.sub_congregation_id),
+            func.substr(func.coalesce(Transaction.description, ""), 1, len(ADJ_ENTRY_DESC_SPLIT_PREFIX)) == ADJ_ENTRY_DESC_SPLIT_PREFIX
+        ).group_by(Transaction.date, Transaction.description)
+        for d, desc, total in db.execute(q):
+            # extrai o tipo
+            tipo = (desc or "")
+            if tipo.startswith(ADJ_ENTRY_DESC_SPLIT_PREFIX) and tipo.endswith("]"):
+                tipo = tipo[len(ADJ_ENTRY_DESC_SPLIT_PREFIX):-1].strip()
+            else:
+                tipo = "—"
+            key = (d, tipo)
+            if key not in rows_by_key:
+                rows_by_key[key] = {"Dízimo": 0.0, "Oferta": 0.0}
+            rows_by_key[key][field] += float(total or 0.0)
 
-    all_dates = sorted(set(list(by_date_diz_tit.keys()) + list(by_date_diz_tx.keys()) + list(by_date_ofe.keys())))
+    _feed(cat_diz.id if cat_diz else None, "Dízimo")
+    _feed(cat_ofe.id if cat_ofe else None, "Oferta")
+
     rows = []
-    for d in all_dates:
-        dz = max(float(by_date_diz_tit.get(d, 0.0)), float(by_date_diz_tx.get(d, 0.0)))
-        ofe = float(by_date_ofe.get(d, 0.0))
-        rows.append({"Data do Culto": d, "Dízimo": dz, "Oferta": ofe, "Total": dz + ofe})
-    
+    for (d, tipo), vals in sorted(rows_by_key.items(), key=lambda x: (x[0][0], x[0][1])):
+        dz = float(vals.get("Dízimo", 0.0))
+        ofe = float(vals.get("Oferta", 0.0))
+        rows.append({"Data do Culto": d, "Tipo do Culto": tipo, "Dízimo": dz, "Oferta": ofe, "Total": dz + ofe})
+
     return pd.DataFrame(rows)
 
-def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None):
+
+def _apply_entrada_summary_changes_split(
+    edited_df: pd.DataFrame,
+    cong_id: int, start: date, end: date,
+    sub_cong_id: Optional[int] = None
+):
+    """
+    Recebe várias linhas por data (cada uma com 'Tipo do Culto') e grava AJUSTES separados
+    por tipo. O ajuste total do dia (por categoria) é distribuído proporcionalmente aos
+    valores informados em cada tipo para aquela data.
+    """
     with SessionLocal() as db:
-        # --- categorias obrigatórias
+        # categorias obrigatórias
         cats_in = categories_for_type(db, TYPE_IN)
         cat_diz = next((c for c in cats_in if _norm(c.name) in ("dizimo","dízimo")), None)
         cat_ofe = next((c for c in cats_in if _norm(c.name) == "oferta"), None)
         if not (cat_diz and cat_ofe):
-            st.error("Categorias 'Dízimo' e/ou 'Oferta' não encontradas."); 
+            st.error("Categorias 'Dízimo' e/ou 'Oferta' não encontradas.")
             return
 
-        # --- NORMALIZAÇÃO DE COLUNAS (aceita os dois jeitos de exibir)
-        df = edited_df.copy() if isinstance(edited_df, pd.DataFrame) else pd.DataFrame()
+        if edited_df is None or edited_df.empty:
+            # se o usuário apagar tudo, removemos os ajustes 'por tipo'
+            def _unit_filter(col):
+                return col.is_(None) if (sub_cong_id is None) else (col == sub_cong_id)
+            db.query(Transaction).where(
+                Transaction.congregation_id == cong_id,
+                Transaction.date >= start, Transaction.date < end,
+                _unit_filter(Transaction.sub_congregation_id),
+                func.substr(func.coalesce(Transaction.description, ""), 1, len(ADJ_ENTRY_DESC_SPLIT_PREFIX)) == ADJ_ENTRY_DESC_SPLIT_PREFIX
+            ).delete(synchronize_session=False)
+            db.commit()
+            st.toast("💾 Ajustes por tipo removidos.", icon="✅")
+            return
 
-        # nomes possíveis
+        # normalização
+        df = edited_df.copy()
         date_col = _pick_col(df, "Data do Culto", "Data")
+        type_col = _pick_col(df, "Tipo do Culto", "Tipo")
         diz_col  = _pick_col(df, "Dízimo", "Total Dízimos (R$)", "Total Dizimos (R$)")
         ofe_col  = _pick_col(df, "Oferta", "Total Ofertas (R$)")
 
-        # se não houver nada, cria colunas vazias
-        if date_col is None:
-            df["__DATE__"] = None
-            date_col = "__DATE__"
-        if diz_col is None:
-            df["__DIZ__"] = 0.0
-            diz_col = "__DIZ__"
-        if ofe_col is None:
-            df["__OFE__"] = 0.0
-            ofe_col = "__OFE__"
+        for col in (diz_col, ofe_col):
+            if col and col in df.columns:
+                df[col] = df[col].map(_to_float_brl).fillna(0.0)
+        if date_col in df.columns:
+            df[date_col] = df[date_col].map(_to_date)
 
-        # coerções
-        df[diz_col] = df[diz_col].map(_to_float_brl).fillna(0.0)
-        df[ofe_col] = df[ofe_col].map(_to_float_brl).fillna(0.0)
-        df[date_col] = df[date_col].map(lambda x: _to_date(x) if pd.notna(x) and str(x).strip() != "" else None)
-
-        # remove a “linha fantasma”
+        # limpa linhas vazias
         EPS = 1e-3
-        df = df[~(df[date_col].isna() & (df[diz_col].abs() < EPS) & (df[ofe_col].abs() < EPS))].copy()
-        df.dropna(subset=[date_col], inplace=True)
+        df = df.dropna(subset=[date_col])
+        df = df[~((df[diz_col].abs() < EPS) & (df[ofe_col].abs() < EPS))]
+        if type_col not in df.columns:
+            df[type_col] = "—"
 
-        # mapa desejado
-        wanted = {r[date_col]: (float(r[diz_col] or 0.0), float(r[ofe_col] or 0.0)) for _, r in df.iterrows()}
-
-        # datas originais + editadas
-        if isinstance(orig_df, pd.DataFrame) and not orig_df.empty:
-            odc = _pick_col(orig_df, "Data do Culto", "Data") or "Data do Culto"
-            orig_dates = set(pd.to_datetime(orig_df[odc]).dt.date)
-        else:
-            orig_dates = set()
-        edited_dates = set(wanted.keys())
-        all_dates = sorted(list(orig_dates.union(edited_dates)))
-
-        # ------------ DAQUI PRA BAIXO MANTÉM A SUA LÓGICA DE AJUSTES ------------
+        # Agrupa por data para calcular o ajuste total necessário por categoria
         def _unit_filter(col):
             return col.is_(None) if (sub_cong_id is None) else (col == sub_cong_id)
 
@@ -1209,62 +1219,79 @@ def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFram
             return float(db.scalar(q) or 0.0)
 
         def sum_tx_no_adj_dia(d: date, cat_id: int) -> float:
+            # Exclui qualquer ajuste (tanto o genérico quanto os "por tipo")
             q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
                 Transaction.congregation_id == cong_id, Transaction.date == d,
                 Transaction.category_id == cat_id, _unit_filter(Transaction.sub_congregation_id),
-                func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
+                ~func.startswith(func.coalesce(Transaction.description, ""), ADJ_ENTRY_DESC)  # exclui "[Ajuste via relatório de entrada"
             )
             return float(db.scalar(q) or 0.0)
 
-        def get_ajuste(d: date, cat_id: int) -> Optional[Transaction]:
-            q = select(Transaction).where(
-                Transaction.congregation_id == cong_id, Transaction.date == d,
-                Transaction.category_id == cat_id, _unit_filter(Transaction.sub_congregation_id),
-                func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC
-            ).limit(1)
-            return db.scalar(q)
+        # 1) calculamos, por data, o total desejado (soma das linhas por tipo)
+        wanted_by_date = {}
+        for d, g in df.groupby(df[date_col]):
+            dz = float(g[diz_col].sum())
+            ofe = float(g[ofe_col].sum())
+            wanted_by_date[d] = (dz, ofe)
 
-        try:
-            for d in all_dates:
-                want_dz, want_of = wanted.get(d, (0.0, 0.0))
-                base_dz = max(sum_tithes_dia(d), sum_tx_no_adj_dia(d, cat_diz.id))
-                base_of = sum_tx_no_adj_dia(d, cat_ofe.id)
-                adj_dz_new = float(want_dz) - float(base_dz)
-                adj_of_new = float(want_of) - float(base_of)
+        # 2) removemos os ajustes 'por tipo' existentes nessas datas (para regravar limpo)
+        dates_list = list(wanted_by_date.keys())
+        if dates_list:
+            db.query(Transaction).where(
+                Transaction.congregation_id == cong_id,
+                Transaction.date.in_(dates_list),
+                _unit_filter(Transaction.sub_congregation_id),
+                func.substr(func.coalesce(Transaction.description, ""), 1, len(ADJ_ENTRY_DESC_SPLIT_PREFIX)) == ADJ_ENTRY_DESC_SPLIT_PREFIX
+            ).delete(synchronize_session=False)
 
-                # dízimo
-                adj_dz = get_ajuste(d, cat_diz.id)
-                if abs(adj_dz_new) < EPS:
-                    if adj_dz: db.delete(adj_dz)
-                else:
-                    if adj_dz:
-                        adj_dz.amount = float(adj_dz_new); db.add(adj_dz)
-                    else:
-                        db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id,
-                                           amount=float(adj_dz_new), description=ADJ_ENTRY_DESC,
-                                           congregation_id=cong_id, sub_congregation_id=sub_cong_id))
-                # oferta
-                adj_of = get_ajuste(d, cat_ofe.id)
-                if abs(adj_of_new) < EPS:
-                    if adj_of: db.delete(adj_of)
-                else:
-                    if adj_of:
-                        adj_of.amount = float(adj_of_new); db.add(adj_of)
-                    else:
-                        db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id,
-                                           amount=float(adj_of_new), description=ADJ_ENTRY_DESC,
-                                           congregation_id=cong_id, sub_congregation_id=sub_cong_id))
+        # 3) para cada data, calculamos o ajuste total e o distribuímos proporcionalmente
+        for d, group in df.groupby(df[date_col]):
+            dz_want, ofe_want = wanted_by_date.get(d, (0.0, 0.0))
+            base_dz = max(sum_tithes_dia(d), sum_tx_no_adj_dia(d, cat_diz.id))
+            base_of = sum_tx_no_adj_dia(d, cat_ofe.id)
 
-            db.flush()
-            db.commit()
-            st.toast("💾 Ajustes aplicados com sucesso.", icon="✅")
+            adj_dz_total = dz_want - base_dz
+            adj_of_total = ofe_want - base_of
 
-        except IntegrityError as ie:
-            db.rollback()
-            st.error(f"Erro de integridade ao salvar o resumo: {getattr(ie, 'orig', ie)}")
-        except Exception as e:
-            db.rollback()
-            st.error(f"Falha ao salvar o resumo: {getattr(e, 'orig', e)}")
+            # proporções por linha
+            dz_parts = group[diz_col].astype(float).values
+            of_parts = group[ofe_col].astype(float).values
+            tipos = group[type_col].astype(str).tolist()
+
+            def _distribute(total_adj: float, parts: List[float]) -> List[float]:
+                S = float(sum(parts))
+                if abs(S) < EPS:
+                    # distribui igualmente
+                    return [float(total_adj) / len(parts)] * len(parts)
+                return [float(total_adj) * (p / S) for p in parts]
+
+            dz_adj_parts = _distribute(adj_dz_total, dz_parts) if len(dz_parts) else []
+            of_adj_parts = _distribute(adj_of_total, of_parts) if len(of_parts) else []
+
+            # cria ajustes por linha (tipo)
+            for i in range(len(tipos)):
+                tipo_i = tipos[i].strip() or "—"
+                desc_i = _split_desc(tipo_i)
+
+                # Dízimo (se necessário)
+                if abs(dz_adj_parts[i]) >= EPS:
+                    db.add(Transaction(
+                        date=d, type=TYPE_IN, category_id=cat_diz.id,
+                        amount=float(dz_adj_parts[i]), description=desc_i,
+                        congregation_id=cong_id, sub_congregation_id=sub_cong_id
+                    ))
+                # Oferta (se necessário)
+                if abs(of_adj_parts[i]) >= EPS:
+                    db.add(Transaction(
+                        date=d, type=TYPE_IN, category_id=cat_ofe.id,
+                        amount=float(of_adj_parts[i]), description=desc_i,
+                        congregation_id=cong_id, sub_congregation_id=sub_cong_id
+                    ))
+
+        db.flush()
+        db.commit()
+        st.toast("💾 Ajustes por tipo aplicados com sucesso.", icon="✅")
+
 
 
 # ===================== EDITORES INLINE REUTILIZÁVEIS (com botão Salvar) =====================
@@ -1676,19 +1703,26 @@ def page_lancamentos(user: "User"):
     with SessionLocal() as db:
         st.markdown(f"<h1 class='page-title'>Lançamentos</h1>", unsafe_allow_html=True)
 
+        # ====== Seleção da Congregação Principal conforme o perfil ======
         parent_cong_obj = None
         if user.role == "SEDE":
             congs_all = order_congs_sede_first(cong_options_for(user, db))
-            cong_sel_name = st.selectbox("Selecione a Congregação Principal:", [c.name for c in congs_all], key="lan_cong_sel_sede")
+            cong_sel_name = st.selectbox(
+                "Selecione a Congregação Principal:",
+                [c.name for c in congs_all],
+                key="lan_cong_sel_sede"
+            )
             parent_cong_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
-        else: # TESOUREIRO
+        else:  # TESOUREIRO
             parent_cong_obj = db.get(Congregation, user.congregation_id)
-        
+
         if not parent_cong_obj:
-            st.error("Nenhuma congregação selecionada ou encontrada."); return
+            st.error("Nenhuma congregação selecionada ou encontrada.")
+            return
 
         st.markdown(f"### CONGREGAÇÃO: {parent_cong_obj.name.upper()}")
 
+        # ====== Modo de operação ======
         modo = st.radio(
             "Modo de lançamento:",
             ["Formulário único", "Editar direto na tabela"],
@@ -1697,8 +1731,12 @@ def page_lancamentos(user: "User"):
         )
         st.divider()
 
-        sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
-        
+        # ====== Sub-congregações (unidades) ======
+        sub_congs = db.scalars(
+            select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)
+        ).all()
+
+        # ------------- MODO: FORMULÁRIO ÚNICO -------------
         if modo == "Formulário único":
             contexto_selecionado = f"{parent_cong_obj.name} (Principal)"
             target_sub_cong_id = None
@@ -1706,54 +1744,83 @@ def page_lancamentos(user: "User"):
                 opcoes = {f"{parent_cong_obj.name} (Principal)": None}
                 for sub in sub_congs:
                     opcoes[sub.name] = sub.id
-                contexto_selecionado = st.selectbox("Lançar em:", list(opcoes.keys()), key="lan_sub_sel_context_form")
+                contexto_selecionado = st.selectbox(
+                    "Lançar em:", list(opcoes.keys()),
+                    key="lan_sub_sel_context_form"
+                )
                 target_sub_cong_id = opcoes[contexto_selecionado]
-            
+
             st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
             st.divider()
-            
+
+            # ---------- ENTRADA ----------
             with st.expander("➕ Lançar ENTRADA", expanded=True):
-                 with st.form("form_entrada"):
+                with st.form("form_entrada"):
                     cats_in = [c for c in categories_for_type(db, TYPE_IN) if "ajuste" not in _norm(c.name)]
                     c1, c2 = st.columns(2)
-                    with c1: ent_data = st.date_input("Data da Entrada", value=today_bahia(), key="ent_data")
-                    with c2: ent_cat_name = st.selectbox("Categoria", [c.name for c in cats_in] or ["—"], key="ent_cat")
+                    with c1:
+                        ent_data = st.date_input("Data da Entrada", value=today_bahia(), key="ent_data")
+                    with c2:
+                        ent_cat_name = st.selectbox("Categoria", [c.name for c in cats_in] or ["—"], key="ent_cat")
                     ent_desc = st.text_input("Descrição (opcional)", key="ent_desc")
                     ent_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="ent_valor")
-                    
+
                     if _submit_btn("Salvar ENTRADA", "form_entrada_btn", theme="entrada"):
                         cat_obj = next((c for c in cats_in if c.name == ent_cat_name), None)
                         if ent_valor > 0 and cat_obj:
-                            db.add(Transaction(date=ent_data, type=TYPE_IN, category_id=cat_obj.id, amount=ent_valor, description=(ent_desc or None), congregation_id=parent_cong_obj.id, sub_congregation_id=target_sub_cong_id))
-                            db.commit(); st.success("Entrada registrada!"); st.rerun()
+                            db.add(Transaction(
+                                date=ent_data, type=TYPE_IN, category_id=cat_obj.id,
+                                amount=ent_valor, description=(ent_desc or None),
+                                congregation_id=parent_cong_obj.id, sub_congregation_id=target_sub_cong_id
+                            ))
+                            db.commit()
+                            st.success("Entrada registrada!")
+                            st.rerun()
 
+            # ---------- DÍZIMO NOMINAL ----------
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
                 with st.form("form_dizimo"):
                     dz_data = st.date_input("Data do Dízimo", value=today_bahia(), key="dz_data")
                     dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
                     dz_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="dz_valor")
                     dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência"], key="dz_pay")
-                    
+
                     if _submit_btn("Salvar DIZIMISTA", "form_dizimo_btn", theme="dizimista"):
                         if dz_valor > 0 and dz_nome.strip():
-                            db.add(Tithe(date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor, congregation_id=parent_cong_obj.id, sub_congregation_id=target_sub_cong_id, payment_method=dz_payment))
-                            db.commit(); st.success("Dízimo registrado!"); st.rerun()
+                            db.add(Tithe(
+                                date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor,
+                                congregation_id=parent_cong_obj.id, sub_congregation_id=target_sub_cong_id,
+                                payment_method=dz_payment
+                            ))
+                            db.commit()
+                            st.success("Dízimo registrado!")
+                            st.rerun()
 
+            # ---------- SAÍDA ----------
             with st.expander("➖ Lançar SAÍDA"):
                 with st.form("form_saida"):
                     cats_out = categories_for_type(db, TYPE_OUT)
                     c1, c2 = st.columns(2)
-                    with c1: sai_data = st.date_input("Data da Saída", value=today_bahia(), key="sai_data")
-                    with c2: sai_cat_name = st.selectbox("Categoria", [c.name for c in cats_out] or ["—"], key="sai_cat")
+                    with c1:
+                        sai_data = st.date_input("Data da Saída", value=today_bahia(), key="sai_data")
+                    with c2:
+                        sai_cat_name = st.selectbox("Categoria", [c.name for c in cats_out] or ["—"], key="sai_cat")
                     sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
                     sai_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="sai_valor")
 
                     if _submit_btn("Salvar SAÍDA", "form_saida_btn", theme="saida"):
                         cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
                         if sai_valor > 0 and cat_obj:
-                            db.add(Transaction(date=sai_data, type=TYPE_OUT, category_id=cat_obj.id, amount=sai_valor, description=(sai_desc or None), congregation_id=parent_cong_obj.id, sub_congregation_id=target_sub_cong_id))
-                            db.commit(); st.success("Saída registrada!"); st.rerun()
-        
+                            db.add(Transaction(
+                                date=sai_data, type=TYPE_OUT, category_id=cat_obj.id,
+                                amount=sai_valor, description=(sai_desc or None),
+                                congregation_id=parent_cong_obj.id, sub_congregation_id=target_sub_cong_id
+                            ))
+                            db.commit()
+                            st.success("Saída registrada!")
+                            st.rerun()
+
+        # ------------- MODO: EDITAR DIRETO NA TABELA -------------
         elif modo == "Editar direto na tabela":
             contexto_tabela = f"{parent_cong_obj.name} (Principal)"
             target_sub_cong_id = None
@@ -1761,50 +1828,119 @@ def page_lancamentos(user: "User"):
                 opcoes_tabela = {f"{parent_cong_obj.name} (Principal)": None}
                 for sub in sub_congs:
                     opcoes_tabela[sub.name] = sub.id
-                contexto_tabela = st.selectbox("Selecione a unidade para editar:", list(opcoes_tabela.keys()), key="lan_tabela_contexto_edit")
+                contexto_tabela = st.selectbox(
+                    "Selecione a unidade para editar:",
+                    list(opcoes_tabela.keys()),
+                    key="lan_tabela_contexto_edit"
+                )
                 target_sub_cong_id = opcoes_tabela[contexto_tabela]
 
             st.info(f"Editando lançamentos de: **{contexto_tabela}**")
+
+            # mês de referência
             ref_tab = get_month_selector("Mês de referência da tabela")
             start_tab, end_tab = month_bounds(ref_tab)
-            
-            st.markdown("##### Entradas (Resumo Diário)")
-            st.caption("Esta tabela mostra o total por dia. Para lançar múltiplos dízimos ou ofertas no mesmo dia, use o 'Formulário único'.")
-            
-            base_df = _entrada_summary_df(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
-            edited_df = st.data_editor(
-                base_df,
+
+            # ====== NOVO: ENTRADAS por Culto (Manhã / Noite) ======
+            st.markdown("##### Entradas por Culto (Manhã / Noite)")
+            st.caption("Adicione múltiplas linhas com a mesma data e selecione 'Tipo do Culto'. O sistema distribui os ajustes por tipo mantendo o total do dia correto.")
+
+            base_df_split = _entrada_summary_split_df(
+                db, parent_cong_obj.id, start_tab, end_tab,
+                sub_cong_id=target_sub_cong_id
+            )
+
+            tipos_opcoes = [t for t in TIPOS_DE_CULTO if t]  # remove opção vazia
+
+            edited_df_split = st.data_editor(
+                base_df_split if not base_df_split.empty else pd.DataFrame(columns=["Data do Culto","Tipo do Culto","Dízimo","Oferta","Total"]),
                 use_container_width=True, hide_index=True, num_rows="dynamic",
-                key=f"lancamentos_entrada_summary_editor_{parent_cong_obj.id}_{target_sub_cong_id}",
                 column_config={
                     "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
-                    "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", format="R$ %.2f"),
-                    "Oferta": st.column_config.NumberColumn("Oferta (R$)", format="R$ %.2f"),
+                    "Tipo do Culto": st.column_config.SelectboxColumn("Tipo do Culto", options=tipos_opcoes, required=True, help="Ex.: Domingo (Manhã) / Domingo (Noite)"),
+                    "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", format="R$ %.2f", min_value=0.0, step=1.0),
+                    "Oferta": st.column_config.NumberColumn("Oferta (R$)", format="R$ %.2f", min_value=0.0, step=1.0),
                     "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
-                }
+                },
+                key=f"lancamentos_entrada_split_editor_{parent_cong_obj.id}_{target_sub_cong_id}",
             )
-            def _save_summary():
-                _apply_entrada_summary_changes(orig_df=base_df, edited_df=edited_df, cong_id=parent_cong_obj.id, start=start_tab, end=end_tab, sub_cong_id=target_sub_cong_id)
-            _save_btn(_save_summary, f"save_entrada_summary_{parent_cong_obj.id}_{target_sub_cong_id}", "entrada")
+
+            # Atualiza "Total" na visualização (não persiste aqui)
+            try:
+                if isinstance(edited_df_split, pd.DataFrame) and not edited_df_split.empty:
+                    _tmp = edited_df_split.copy()
+                    _tmp["Total"] = _tmp["Dízimo"].map(_to_float_brl) + _tmp["Oferta"].map(_to_float_brl)
+                    st.dataframe(_tmp, use_container_width=True, hide_index=True)
+            except Exception:
+                pass
+
+            def _save_summary_split():
+                _apply_entrada_summary_changes_split(
+                    edited_df=edited_df_split,
+                    cong_id=parent_cong_obj.id,
+                    start=start_tab, end=end_tab,
+                    sub_cong_id=target_sub_cong_id
+                )
+
+            _save_btn(
+                _save_summary_split,
+                f"save_entrada_summary_split_{parent_cong_obj.id}_{target_sub_cong_id}",
+                "entrada"
+            )
 
             st.markdown("---")
+
+            # ====== DÍZIMOS NOMINAIS (tabela editável) ======
             st.markdown("##### Lançamento de Dizimistas (Nominal)")
-            tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id == target_sub_cong_id)
+            # filtro correto para sub_congregação (None -> is_(None); id -> == id)
+            if target_sub_cong_id is None:
+                tithes_query = select(Tithe).where(
+                    Tithe.congregation_id == parent_cong_obj.id,
+                    Tithe.date >= start_tab, Tithe.date < end_tab,
+                    Tithe.sub_congregation_id.is_(None)
+                )
+            else:
+                tithes_query = select(Tithe).where(
+                    Tithe.congregation_id == parent_cong_obj.id,
+                    Tithe.date >= start_tab, Tithe.date < end_tab,
+                    Tithe.sub_congregation_id == target_sub_cong_id
+                )
             tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
-            _editor_dizimos(tithes, "", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
+            _editor_dizimos(
+                tithes, "",
+                force_cong_id=parent_cong_obj.id,
+                force_sub_cong_id=target_sub_cong_id
+            )
 
             st.markdown("---")
-            st.markdown("##### Lançamento de Saídas")
-            txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_OUT, Transaction.sub_congregation_id == target_sub_cong_id)
-            txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
-            _editor_lancamentos(txs_out, "", tx_type_hint=TYPE_OUT, force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
-            
-            # (O restante do código para exibir as 3 tabelas editáveis vai aqui,
-            # usando _entrada_summary_df, _editor_dizimos, e _editor_lancamentos
-            # como na versão estável original)
-# ===== PÁGINA: LANÇAMENTOS (com modo Tabela + 3 editores) =====
-# ===== PÁGINA: LANÇAMENTOS (modo Tabela mostra total abaixo de cada uma) =====
 
+            # ====== SAÍDAS (tabela editável) ======
+            st.markdown("##### Lançamento de Saídas")
+            if target_sub_cong_id is None:
+                txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(
+                    Transaction.congregation_id == parent_cong_obj.id,
+                    Transaction.date >= start_tab, Transaction.date < end_tab,
+                    Transaction.type == TYPE_OUT,
+                    Transaction.sub_congregation_id.is_(None)
+                )
+            else:
+                txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(
+                    Transaction.congregation_id == parent_cong_obj.id,
+                    Transaction.date >= start_tab, Transaction.date < end_tab,
+                    Transaction.type == TYPE_OUT,
+                    Transaction.sub_congregation_id == target_sub_cong_id
+                )
+            txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
+
+            _editor_lancamentos(
+                txs_out, "",
+                tx_type_hint=TYPE_OUT,
+                force_cong_id=parent_cong_obj.id,
+                force_sub_cong_id=target_sub_cong_id
+            )
+
+            
+    
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 # ===================== PAGE: RELATÓRIO DE DIZIMISTAS =====================
 def page_relatorio_dizimistas(user: "User"):
