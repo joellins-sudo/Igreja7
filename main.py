@@ -1155,142 +1155,93 @@ def _entrada_summary_split_df(db: Session, cong_id: int, start: date, end: date,
     return pd.DataFrame(rows)
 
 
-def _apply_entrada_summary_changes_split(
-    edited_df: pd.DataFrame,
-    cong_id: int, start: date, end: date,
-    sub_cong_id: Optional[int] = None
-):
-    """
-    Recebe várias linhas por data (cada uma com 'Tipo do Culto') e grava AJUSTES separados
-    por tipo. O ajuste total do dia (por categoria) é distribuído proporcionalmente aos
-    valores informados em cada tipo para aquela data.
-    """
+def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None):
+    # Filtra linhas vazias que o editor possa ter adicionado
+    if not edited_df.empty:
+        df_clean = edited_df.dropna(subset=['Data do Culto'])
+        df_clean = df_clean[~(
+            (df_clean['Dízimo'].fillna(0).eq(0)) & 
+            (df_clean['Oferta'].fillna(0).eq(0))
+        )]
+    else:
+        df_clean = edited_df
+
     with SessionLocal() as db:
-        # categorias obrigatórias
         cats_in = categories_for_type(db, TYPE_IN)
-        cat_diz = next((c for c in cats_in if _norm(c.name) in ("dizimo","dízimo")), None)
+        cat_diz = next((c for c in cats_in if _norm(c.name) in ("dizimo", "dízimo")), None)
         cat_ofe = next((c for c in cats_in if _norm(c.name) == "oferta"), None)
         if not (cat_diz and cat_ofe):
-            st.error("Categorias 'Dízimo' e/ou 'Oferta' não encontradas.")
-            return
+            st.error("Categorias 'Dízimo' e/ou 'Oferta' não encontradas."); return
 
-        if edited_df is None or edited_df.empty:
-            # se o usuário apagar tudo, removemos os ajustes 'por tipo'
-            def _unit_filter(col):
-                return col.is_(None) if (sub_cong_id is None) else (col == sub_cong_id)
-            db.query(Transaction).where(
-                Transaction.congregation_id == cong_id,
-                Transaction.date >= start, Transaction.date < end,
-                _unit_filter(Transaction.sub_congregation_id),
-                func.substr(func.coalesce(Transaction.description, ""), 1, len(ADJ_ENTRY_DESC_SPLIT_PREFIX)) == ADJ_ENTRY_DESC_SPLIT_PREFIX
-            ).delete(synchronize_session=False)
-            db.commit()
-            st.toast("💾 Ajustes por tipo removidos.", icon="✅")
-            return
+        edited = df_clean.copy()
+        for col in ["Dízimo", "Oferta"]:
+            edited[col] = edited[col].map(_to_float_brl)
+        edited["Data do Culto"] = edited["Data do Culto"].map(_to_date)
+        edited.dropna(subset=["Data do Culto"], inplace=True)
+        
+        wanted = {r["Data do Culto"]: (float(r["Dízimo"]), float(r["Oferta"])) for _, r in edited.iterrows()}
+        
+        orig_dates = set(pd.to_datetime(orig_df["Data do Culto"]).dt.date) if not orig_df.empty else set()
+        edited_dates = set(wanted.keys())
+        all_dates = sorted(list(orig_dates.union(edited_dates)))
+        
+        for d in all_dates:
+            if d is None: continue
+            
+            want_dz, want_of = wanted.get(d, (0.0, 0.0))
 
-        # normalização
-        df = edited_df.copy()
-        date_col = _pick_col(df, "Data do Culto", "Data")
-        type_col = _pick_col(df, "Tipo do Culto", "Tipo")
-        diz_col  = _pick_col(df, "Dízimo", "Total Dízimos (R$)", "Total Dizimos (R$)")
-        ofe_col  = _pick_col(df, "Oferta", "Total Ofertas (R$)")
+            # Filtros corretos para sub-congregação
+            tithe_sub_filter = Tithe.sub_congregation_id.is_(None) if sub_cong_id is None else Tithe.sub_congregation_id == sub_cong_id
+            tx_sub_filter = Transaction.sub_congregation_id.is_(None) if sub_cong_id is None else Transaction.sub_congregation_id == sub_cong_id
 
-        for col in (diz_col, ofe_col):
-            if col and col in df.columns:
-                df[col] = df[col].map(_to_float_brl).fillna(0.0)
-        if date_col in df.columns:
-            df[date_col] = df[date_col].map(_to_date)
+            # Deletar dízimos se o valor for zerado no resumo
+            if d in orig_dates and abs(want_dz) < 0.01:
+                db.query(Tithe).filter(Tithe.congregation_id == cong_id, Tithe.date == d, tithe_sub_filter).delete(synchronize_session=False)
+                if cat_diz:
+                    db.query(Transaction).filter(Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_diz.id, tx_sub_filter).delete(synchronize_session=False)
+                want_of = 0.0
 
-        # limpa linhas vazias
-        EPS = 1e-3
-        df = df.dropna(subset=[date_col])
-        df = df[~((df[diz_col].abs() < EPS) & (df[ofe_col].abs() < EPS))]
-        if type_col not in df.columns:
-            df[type_col] = "—"
-
-        # Agrupa por data para calcular o ajuste total necessário por categoria
-        def _unit_filter(col):
-            return col.is_(None) if (sub_cong_id is None) else (col == sub_cong_id)
-
-        def sum_tithes_dia(d: date) -> float:
-            q = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
-                Tithe.congregation_id == cong_id, Tithe.date == d, _unit_filter(Tithe.sub_congregation_id)
+            # Lógica de cálculo de ajuste
+            sum_dz_tithes_q = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(Tithe.congregation_id == cong_id, Tithe.date == d, tithe_sub_filter)
+            sum_dz_tithes = float(db.scalar(sum_dz_tithes_q) or 0.0)
+            
+            sum_dz_tx_no_adj_q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+                Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_diz.id,
+                tx_sub_filter, func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
             )
-            return float(db.scalar(q) or 0.0)
-
-        def sum_tx_no_adj_dia(d: date, cat_id: int) -> float:
-            # Exclui qualquer ajuste (tanto o genérico quanto os "por tipo")
-            q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
-                Transaction.congregation_id == cong_id, Transaction.date == d,
-                Transaction.category_id == cat_id, _unit_filter(Transaction.sub_congregation_id),
-                ~func.startswith(func.coalesce(Transaction.description, ""), ADJ_ENTRY_DESC)  # exclui "[Ajuste via relatório de entrada"
+            sum_dz_tx_no_adj = float(db.scalar(sum_dz_tx_no_adj_q) or 0.0)
+            sum_dz_others = max(sum_dz_tithes, sum_dz_tx_no_adj)
+            
+            sum_of_others_q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+                Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_ofe.id,
+                tx_sub_filter, func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
             )
-            return float(db.scalar(q) or 0.0)
+            sum_of_others = float(db.scalar(sum_of_others_q) or 0.0)
 
-        # 1) calculamos, por data, o total desejado (soma das linhas por tipo)
-        wanted_by_date = {}
-        for d, g in df.groupby(df[date_col]):
-            dz = float(g[diz_col].sum())
-            ofe = float(g[ofe_col].sum())
-            wanted_by_date[d] = (dz, ofe)
+            adj_dz_new = want_dz - sum_dz_others
+            adj_of_new = want_of - sum_of_others
 
-        # 2) removemos os ajustes 'por tipo' existentes nessas datas (para regravar limpo)
-        dates_list = list(wanted_by_date.keys())
-        if dates_list:
-            db.query(Transaction).where(
-                Transaction.congregation_id == cong_id,
-                Transaction.date.in_(dates_list),
-                _unit_filter(Transaction.sub_congregation_id),
-                func.substr(func.coalesce(Transaction.description, ""), 1, len(ADJ_ENTRY_DESC_SPLIT_PREFIX)) == ADJ_ENTRY_DESC_SPLIT_PREFIX
-            ).delete(synchronize_session=False)
+            # Aplicação do ajuste de Dízimo
+            adj_dz = db.scalar(select(Transaction).where(Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_diz.id, tx_sub_filter, Transaction.description == ADJ_ENTRY_DESC))
+            if abs(adj_dz_new) < 0.01:
+                if adj_dz: db.delete(adj_dz)
+            else:
+                if adj_dz: 
+                    adj_dz.amount = float(adj_dz_new)
+                else: 
+                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id, amount=float(adj_dz_new), description=ADJ_ENTRY_DESC, congregation_id=cong_id, sub_congregation_id=sub_cong_id))
 
-        # 3) para cada data, calculamos o ajuste total e o distribuímos proporcionalmente
-        for d, group in df.groupby(df[date_col]):
-            dz_want, ofe_want = wanted_by_date.get(d, (0.0, 0.0))
-            base_dz = max(sum_tithes_dia(d), sum_tx_no_adj_dia(d, cat_diz.id))
-            base_of = sum_tx_no_adj_dia(d, cat_ofe.id)
-
-            adj_dz_total = dz_want - base_dz
-            adj_of_total = ofe_want - base_of
-
-            # proporções por linha
-            dz_parts = group[diz_col].astype(float).values
-            of_parts = group[ofe_col].astype(float).values
-            tipos = group[type_col].astype(str).tolist()
-
-            def _distribute(total_adj: float, parts: List[float]) -> List[float]:
-                S = float(sum(parts))
-                if abs(S) < EPS:
-                    # distribui igualmente
-                    return [float(total_adj) / len(parts)] * len(parts)
-                return [float(total_adj) * (p / S) for p in parts]
-
-            dz_adj_parts = _distribute(adj_dz_total, dz_parts) if len(dz_parts) else []
-            of_adj_parts = _distribute(adj_of_total, of_parts) if len(of_parts) else []
-
-            # cria ajustes por linha (tipo)
-            for i in range(len(tipos)):
-                tipo_i = tipos[i].strip() or "—"
-                desc_i = _split_desc(tipo_i)
-
-                # Dízimo (se necessário)
-                if abs(dz_adj_parts[i]) >= EPS:
-                    db.add(Transaction(
-                        date=d, type=TYPE_IN, category_id=cat_diz.id,
-                        amount=float(dz_adj_parts[i]), description=desc_i,
-                        congregation_id=cong_id, sub_congregation_id=sub_cong_id
-                    ))
-                # Oferta (se necessário)
-                if abs(of_adj_parts[i]) >= EPS:
-                    db.add(Transaction(
-                        date=d, type=TYPE_IN, category_id=cat_ofe.id,
-                        amount=float(of_adj_parts[i]), description=desc_i,
-                        congregation_id=cong_id, sub_congregation_id=sub_cong_id
-                    ))
-
-        db.flush()
+            # Aplicação do ajuste de Oferta
+            adj_of = db.scalar(select(Transaction).where(Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_ofe.id, tx_sub_filter, Transaction.description == ADJ_ENTRY_DESC))
+            if abs(adj_of_new) < 0.01:
+                if adj_of: db.delete(adj_of)
+            else:
+                if adj_of: 
+                    adj_of.amount = float(adj_of_new)
+                else: 
+                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=float(adj_of_new), description=ADJ_ENTRY_DESC, congregation_id=cong_id, sub_congregation_id=sub_cong_id))
+        
         db.commit()
-        st.toast("💾 Ajustes por tipo aplicados com sucesso.", icon="✅")
 
 
 
