@@ -1443,6 +1443,7 @@ def _editor_missions_entries_agg(congs_all: List[Congregation], start: date, end
 
 # ====== EDITORES AGREGADOS (TODAS AS CONGREGAÇÕES) — ENTRADAS / SAÍDAS ======
 # ====== EDITORES AGREGADOS (TODAS AS CONGREGAÇÕES) — ENTRADAS / SAÍDAS ======
+# ====== EDITORES AGREGADOS (TODAS AS CONGREGAÇÕES) — ENTRADAS / SAÍDAS ======
 def _editor_entradas_agg_all(congs_all: List[Congregation], start: date, end: date):
     with SessionLocal() as db:
         rows_data = []
@@ -1472,38 +1473,25 @@ def _editor_entradas_agg_all(congs_all: List[Congregation], start: date, end: da
                     "is_sub": True
                 })
 
-        # --- LÓGICA DE ORDENAÇÃO CORRIGIDA ---
-        # Ordena por nome da congregação, depois pela flag "is_sub" (False vem antes de True), e por fim pelo valor descendente.
         rows_data.sort(key=lambda x: (x["cong_name"], x["is_sub"], -x["valor"]))
-        # ------------------------------------
-
-        df_full = pd.DataFrame(rows_data)
         
+        df_full = pd.DataFrame(rows_data)
         df_view = df_full[["unidade_display", "valor"]].rename(columns={"unidade_display": "Unidade", "valor": "Total (R$)"})
 
-    edited = st.data_editor(
-        df_view,
-        use_container_width=True, hide_index=True,
-        column_config={
-            "Unidade": st.column_config.TextColumn("Unidade", disabled=True),
-            "Total (R$)": st.column_config.NumberColumn("Total (R$)", min_value=0.0, format="R$ %.2f"),
-        },
-        key="agg_in_all_editor_hierarchical",
-    )
+        # ALTERADO: st.data_editor virou st.dataframe
+        st.dataframe(
+            df_view.style.format({"Total (R$)": format_currency}), 
+            use_container_width=True, 
+            hide_index=True
+        )
 
-    total_geral = 0.0
-    if isinstance(edited, pd.DataFrame) and not edited.empty:
-        total_geral = edited["Total (R$)"].map(_to_float_brl).sum()
-    st.metric("Total Geral de Entradas (todas as unidades)", format_currency(total_geral))
+        total_geral = 0.0
+        if not df_view.empty:
+            total_geral = df_view["Total (R$)"].map(_to_float_brl).sum()
+        st.metric("Total Geral de Entradas (todas as unidades)", format_currency(total_geral))
+        # REMOVIDO: Botão de salvar e sua lógica
 
-    def _save():
-        # A lógica de salvamento precisa ser ajustada para o novo formato
-        st.toast("💾 Funcionalidade de salvar esta tabela está em desenvolvimento.", icon="⚠️")
-        # st.rerun() # Desativado temporariamente
-
-    _save_btn(_save, "agg_in_all_hierarchical")
-
-def _editor_saidas_agg_all(congs_all: List["Congregation"], start: date, end: date):
+def _editor_saidas_agg_all(congs_all: List[Congregation], start: date, end: date):
     with SessionLocal() as db:
         rows = []
         for c in congs_all:
@@ -1511,71 +1499,13 @@ def _editor_saidas_agg_all(congs_all: List["Congregation"], start: date, end: da
             rows.append({"Congregação": c.name, "Total Saídas (R$)": float(totals["saidas_total"])})
         df_view = pd.DataFrame(rows).sort_values("Total Saídas (R$)", ascending=False).reset_index(drop=True)
 
-    edited = st.data_editor(
-        df_view, use_container_width=True, hide_index=True, num_rows="dynamic",
-        column_config={
-            "Congregação": st.column_config.SelectboxColumn("Congregação", options=[c.name for c in order_congs_sede_first(congs_all)], required=True),
-            "Total Saídas (R$)": st.column_config.NumberColumn("Total Saídas (R$)", min_value=-999999999.0, step=1.0, format="R$ %.2f"),
-        },
-        key="agg_out_all_editor",
+    # ALTERADO: st.data_editor virou st.dataframe
+    st.dataframe(
+        df_view.style.format({"Total Saídas (R$)": format_currency}),
+        use_container_width=True, 
+        hide_index=True
     )
-
-    def _save():
-        with SessionLocal() as db:
-            by_name = {c.name: c.id for c in congs_all}
-            cats_out = categories_for_type(db, TYPE_OUT)
-            if not cats_out:
-                st.error("Não há categorias de saída cadastradas."); return
-            cat_out_id = cats_out[0].id
-
-            def base_others_total(cid: int) -> float:
-                return float(db.scalar(
-                    select(func.coalesce(func.sum(Transaction.amount), 0.0))
-                    .where(
-                        Transaction.congregation_id == cid,
-                        Transaction.date >= start, Transaction.date < end,
-                        Transaction.type.in_((TYPE_OUT, "DESPESA")),
-                        func.coalesce(Transaction.description, "") != ADJ_OUT_AGG_DESC
-                    )
-                ) or 0.0)
-
-            existing_adj = {(t.congregation_id): t for t in db.scalars(
-                select(Transaction).where(
-                    Transaction.date == start,
-                    Transaction.type.in_((TYPE_OUT, "DESPESA")),
-                    Transaction.category_id == cat_out_id,
-                    func.coalesce(Transaction.description, "") == ADJ_OUT_AGG_DESC
-                )
-            ).all()}
-
-            desired = {}
-            for _, r in edited.iterrows():
-                name = str(r.get("Congregação","")).strip()
-                if not name: continue
-                cid = by_name.get(name); 
-                if cid is None: continue
-                desired[cid] = float(_to_float_brl(r.get("Total Saídas (R$)", 0.0)))
-
-            for cid, want in desired.items():
-                others = base_others_total(cid)
-                new_adj = want - others
-                adj = existing_adj.get(cid)
-                if abs(new_adj) < 0.0001:
-                    if adj: db.delete(adj)
-                else:
-                    if adj:
-                        adj.amount = float(new_adj); db.add(adj)
-                    else:
-                        db.add(Transaction(
-                            date=start, type=TYPE_OUT, category_id=cat_out_id,
-                            amount=float(new_adj), description=ADJ_OUT_AGG_DESC,
-                            congregation_id=int(cid)
-                        ))
-            db.commit()
-        st.toast("💾 Alterações salvas.", icon="✅")
-        st.rerun()
-
-    _save_btn(_save, "agg_out_all")
+    # REMOVIDO: Botão de salvar e toda sua lógica
 
 # ===================== CORE COLETA =====================
 # ===================== CORE COLETA =====================
@@ -1786,7 +1716,7 @@ def page_relatorio_dizimistas(user: "User"):
             esc_opt = ["Todas as congregações"] + [c.name for c in ordered]
             esc = st.selectbox("Escopo", esc_opt, key="rd_escopo")
             is_all = (esc == "Todas as congregações")
-            cong_obj = None if is_all else next(c for c in ordered if c.name == esc)
+            cong_obj = None if is_all else next((c for c in ordered if c.name == esc), None)
         else:
             cong_obj = congs[0] if congs else None; is_all = False
 
@@ -1796,15 +1726,15 @@ def page_relatorio_dizimistas(user: "User"):
             st.info(f"Escopo: **{cong_obj.name}**")
 
         if is_all:
-            all_tz = db.scalars(select(Tithe).where(Tithe.date >= start, Tithe.date < end)).all()
+            all_tz = db.scalars(select(Tithe).where(Tithe.date >= start, Tithe.date < end).options(joinedload(Tithe.congregation))).all()
             by_cong = defaultdict(lambda: {"qtd":0, "valor":0.0})
             for t in all_tz:
-                k = t.congregation.name
+                k = t.congregation.name if t.congregation else "N/A"
                 by_cong[k]["qtd"] += 1
                 by_cong[k]["valor"] += float(t.amount)
-            df = pd.DataFrame([{"Congregação": k, "Qtde de dizimistas": v["qtd"], "Total (R$)": format_currency(v["valor"])} for k,v in sorted(by_cong.items())])
-            st.dataframe(df, use_container_width=True, hide_index=True, height=200)
-            st.info("Selecione uma congregação específica para ver a lista nominal e editar.")
+            df = pd.DataFrame([{"Congregação": k, "Qtde de dizimistas": v["qtd"], "Total (R$)": v["valor"]} for k,v in sorted(by_cong.items())])
+            st.dataframe(df.style.format({"Total (R$)": format_currency}), use_container_width=True, hide_index=True)
+            st.info("Selecione uma congregação específica para ver a lista nominal.")
         else:
             tithes = db.scalars(select(Tithe).where(
                 Tithe.date >= start, Tithe.date < end, Tithe.congregation_id == cong_obj.id
@@ -1815,17 +1745,34 @@ def page_relatorio_dizimistas(user: "User"):
                 method = (tithe.payment_method or "Não Informado").upper()
                 tithes_by_payment[method]["count"] += 1
                 tithes_by_payment[method]["total"] += float(tithe.amount)
-
+            
             st.subheader("Resumo de Pagamentos de Dízimos")
-            cols_metrics = st.columns(max(1, len(tithes_by_payment)))
-            for i, (method, datax) in enumerate(tithes_by_payment.items()):
-                cols_metrics[i].metric(f"Total ({method})", format_currency(datax["total"]), f"{datax['count']} dízimos")
+            if tithes_by_payment:
+                cols_metrics = st.columns(len(tithes_by_payment))
+                for i, (method, datax) in enumerate(tithes_by_payment.items()):
+                    cols_metrics[i].metric(f"Total ({method})", format_currency(datax["total"]), f"{datax['count']} dízimos")
 
             st.divider()
-            _editor_dizimos(tithes, "Dizimistas do período (editar na tabela)")
+            
+            # ALTERADO: Chamada para _editor_dizimos foi substituída por um st.dataframe
+            st.markdown("##### Dizimistas do período")
+            if tithes:
+                rows = [{"Data": t.date, "Dizimista": t.tither_name, "Valor": float(t.amount), "Forma de Pagamento": t.payment_method or ""} for t in tithes]
+                df_dizimos = pd.DataFrame(rows)
+                st.dataframe(
+                    df_dizimos.style.format({"Data": "{:%d/%m/%Y}", "Valor": format_currency}),
+                    use_container_width=True,
+                    hide_index=True
+                )
+                total_dizimos_mes = df_dizimos["Valor"].sum()
+                st.metric("Total de Dízimos (nominal)", format_currency(total_dizimos_mes))
+            else:
+                st.caption("Nenhum dízimo nominal registrado neste período.")
 
         st.divider()
+        # A funcionalidade de pesquisa continua igual
         st.subheader("Pesquisa de Dizimistas (por Ano)")
+        # ... (todo o resto da função permanece inalterado) ...
         c1, c2, c3, c4, c5 = st.columns([1.2, 1.8, 1.4, 2.2, 1.6])
         with c1:
             ano_pesq = st.number_input("Ano", value=today_bahia().year, step=1, format="%d", key="srch_year")
@@ -1834,7 +1781,7 @@ def page_relatorio_dizimistas(user: "User"):
                 cong_opts = ["Todas"] + [c.name for c in order_congs_sede_first(congs)]
                 cong_sel = st.selectbox("Congregação", cong_opts, key="srch_cong")
             else:
-                cong_sel = cong_obj.name
+                cong_sel = cong_obj.name if cong_obj else "N/A"
                 st.text_input("Congregação", cong_sel, disabled=True, key="srch_cong_disabled")
         with c3:
             mes_opt = ["Todos"] + MONTHS
@@ -1852,7 +1799,7 @@ def page_relatorio_dizimistas(user: "User"):
             if cong_sel != "Todas":
                 cong_id_sel = next(c.id for c in congs if c.name == cong_sel)
                 q = q.where(Tithe.congregation_id == cong_id_sel)
-        else:
+        elif cong_obj:
             q = q.where(Tithe.congregation_id == cong_obj.id)
 
         with SessionLocal() as db2:
@@ -1928,14 +1875,14 @@ def page_relatorio_saida(user: "User"):
         
         if user.role == "SEDE":
             congs_all = order_congs_sede_first(cong_options_for(user, db))
-            escopo_opts = ["-- Relatório Hierárquico (Visualização) --", "-- Visão Agregada (Editável) --"] + [c.name for c in congs_all]
+            escopo_opts = ["-- Relatório Hierárquico (Visualização) --", "-- Visão Agregada (Visualização) --"] + [c.name for c in congs_all]
             escopo_selecionado = st.selectbox("Selecione o escopo do relatório:", escopo_opts, key="rs_sede_escopo")
             
             if escopo_selecionado == "-- Relatório Hierárquico (Visualização) --":
                 display_exit_hierarchy(congs_all, start, end, db)
                 return
-            elif escopo_selecionado == "-- Visão Agregada (Editável) --":
-                st.info("Modo de edição do total de saídas por congregação principal.")
+            elif escopo_selecionado == "-- Visão Agregada (Visualização) --": # Alterado o label
+                st.info("Visualização do total de saídas por congregação principal.")
                 _editor_saidas_agg_all(congs_all, start, end)
                 return
             else:
@@ -1949,7 +1896,6 @@ def page_relatorio_saida(user: "User"):
         st.divider()
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
         
-        # --- LÓGICA CONDICIONAL PARA O SELETOR ---
         target_sub_cong_id_or_all = None
         contexto_selecionado = parent_cong_obj.name
 
@@ -1959,7 +1905,6 @@ def page_relatorio_saida(user: "User"):
                 opcoes[sub.name] = sub.id
             contexto_selecionado = st.selectbox("Filtrar por unidade:", list(opcoes.keys()), key="rs_sub_sel")
             target_sub_cong_id_or_all = opcoes[contexto_selecionado]
-        # ----------------------------------------
         
         st.info(f"Exibindo dados para: **{contexto_selecionado}**")
 
@@ -1971,7 +1916,7 @@ def page_relatorio_saida(user: "User"):
                 rows.append({"Unidade": name, "Total Saídas": totals["saidas_total"]})
             
             df_agg = pd.DataFrame(rows)
-            st.dataframe(df_agg.style.format({"Total Saídas": format_currency}), use_container_width=True)
+            st.dataframe(df_agg.style.format({"Total Saídas": format_currency}), use_container_width=True, hide_index=True)
         
         else:
             txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(
@@ -1981,13 +1926,26 @@ def page_relatorio_saida(user: "User"):
                 Transaction.sub_congregation_id == target_sub_cong_id_or_all
             )
             txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
-            _editor_lancamentos(
-                txs_out, 
-                f"Saídas - {contexto_selecionado}", 
-                tx_type_hint=TYPE_OUT, 
-                force_cong_id=parent_cong_obj.id, 
-                force_sub_cong_id=target_sub_cong_id_or_all
-            )
+            
+            # ALTERADO: Chamada para _editor_lancamentos substituída por st.dataframe
+            st.markdown(f"##### Saídas - {contexto_selecionado}")
+            if txs_out:
+                rows_out = [{
+                    "Data": t.date,
+                    "Categoria": t.category.name if t.category else "",
+                    "Valor": t.amount,
+                    "Descrição": t.description or ""
+                } for t in txs_out]
+                df_saidas = pd.DataFrame(rows_out)
+                st.dataframe(
+                    df_saidas.style.format({"Data":"{:%d/%m/%Y}", "Valor": format_currency}),
+                    use_container_width=True,
+                    hide_index=True
+                )
+                total_saidas_mes = df_saidas["Valor"].sum()
+                st.metric("Total de Saídas (visualização)", format_currency(total_saidas_mes))
+            else:
+                st.caption("Nenhuma saída registrada neste período.")
 
 # ===================== PAGE: RELATÓRIO DE DIZIMISTAS =====================
 def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, mes_sel: str, nome_q: str) -> bytes:
@@ -3088,7 +3046,7 @@ def page_relatorio_entrada(user: "User"):
             congs_all = order_congs_sede_first(cong_options_for(user, db))
             escopo_opts = [
                 "-- Relatório Hierárquico (Visualização) --", 
-                "-- Visão Agregada (Editável) --"
+                "-- Visão Agregada (Visualização) --"
             ] + [c.name for c in congs_all]
             
             escopo_selecionado = st.selectbox("Selecione o escopo do relatório:", escopo_opts, key="re_sede_escopo")
@@ -3096,8 +3054,8 @@ def page_relatorio_entrada(user: "User"):
             if escopo_selecionado == "-- Relatório Hierárquico (Visualização) --":
                 display_entry_hierarchy(congs_all, start, end, db)
                 return
-            elif escopo_selecionado == "-- Visão Agregada (Editável) --":
-                st.info("Modo de edição do total de entradas por congregação principal.")
+            elif escopo_selecionado == "-- Visão Agregada (Visualização) --": # Alterado o label
+                st.info("Visualização do total de entradas por unidade.")
                 _editor_entradas_agg_all(congs_all, start, end)
                 return
             else:
@@ -3111,7 +3069,6 @@ def page_relatorio_entrada(user: "User"):
         st.divider()
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
         
-        # --- LÓGICA CONDICIONAL PARA O SELETOR ---
         target_sub_cong_id_or_all = None
         contexto_selecionado = parent_cong_obj.name
         
@@ -3121,7 +3078,6 @@ def page_relatorio_entrada(user: "User"):
                 opcoes[sub.name] = sub.id
             contexto_selecionado = st.selectbox("Filtrar por unidade:", list(opcoes.keys()), key="re_sub_sel")
             target_sub_cong_id_or_all = opcoes[contexto_selecionado]
-        # ----------------------------------------
         
         st.info(f"Exibindo dados para: **{contexto_selecionado}**")
 
@@ -3138,39 +3094,38 @@ def page_relatorio_entrada(user: "User"):
                 })
             
             df_agg = pd.DataFrame(rows)
-            st.dataframe(df_agg.style.format({"Dízimos": format_currency, "Ofertas": format_currency, "Total Entradas": format_currency}), use_container_width=True)
+            st.dataframe(df_agg.style.format({"Dízimos": format_currency, "Ofertas": format_currency, "Total Entradas": format_currency}), use_container_width=True, hide_index=True)
         else:
             base_df = _entrada_summary_df(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id_or_all)
-            edited_df = st.data_editor(
-                base_df, use_container_width=True, hide_index=True, num_rows="dynamic",
-                column_config={
-                    "Data do Culto": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
-                    "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", format="R$ %.2f"),
-                    "Oferta": st.column_config.NumberColumn("Oferta (R$)", format="R$ %.2f"),
-                    "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
-                },
-                key="re_editor_detalhado"
+            
+            # ALTERADO: st.data_editor virou st.dataframe
+            st.dataframe(
+                base_df.style.format({
+                    "Data do Culto": "{:%d/%m/%Y}",
+                    "Dízimo": format_currency,
+                    "Oferta": format_currency,
+                    "Total": format_currency
+                }),
+                use_container_width=True,
+                hide_index=True
             )
+
+            # Lógica de totais agora usa o 'base_df' (dataframe original)
             try:
                 total_dizimo, total_oferta, total_geral_unidade = 0.0, 0.0, 0.0
-                if isinstance(edited_df, pd.DataFrame) and not edited_df.empty:
-                    df_calc = edited_df.copy()
-                    df_calc["Dízimo"] = df_calc["Dízimo"].map(_to_float_brl)
-                    df_calc["Oferta"] = df_calc["Oferta"].map(_to_float_brl)
-                    total_dizimo = df_calc["Dízimo"].sum()
-                    total_oferta = df_calc["Oferta"].sum()
+                if not base_df.empty:
+                    total_dizimo = base_df["Dízimo"].sum()
+                    total_oferta = base_df["Oferta"].sum()
                     total_geral_unidade = total_dizimo + total_oferta
             except Exception: pass
+            
             st.divider()
             col1, col2, col3 = st.columns(3)
-            col1.metric("Soma Dízimos (tabela)", format_currency(total_dizimo))
-            col2.metric("Soma Ofertas (tabela)", format_currency(total_oferta))
-            col3.metric("Soma Geral (tabela)", format_currency(total_geral_unidade))
-            def _save_summary():
-                _apply_entrada_summary_changes(orig_df=base_df, edited_df=edited_df, cong_id=parent_cong_obj.id, start=start, end=end, sub_cong_id=target_sub_cong_id_or_all)
-                st.toast("💾 Alterações salvas com sucesso!", icon="✅")
-                st.rerun()
-            _save_btn(_save_summary, "entrada_sum_detalhado", theme="entrada")
+            col1.metric("Soma Dízimos (visualização)", format_currency(total_dizimo))
+            col2.metric("Soma Ofertas (visualização)", format_currency(total_oferta))
+            col3.metric("Soma Geral (visualização)", format_currency(total_geral_unidade))
+            
+            # REMOVIDO: Botão de salvar e toda a sua lógica
 # ===================== MAIN =====================
 def main():
     try:
