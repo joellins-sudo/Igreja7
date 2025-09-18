@@ -2150,101 +2150,32 @@ def page_relatorio_dizimistas(user: "User"):
             for i, (method, datax) in enumerate(tithes_by_payment.items()):
                 cols_metrics[i].metric(f"Total ({method})", format_currency(datax["total"]), f"{datax['count']} dízimos")
 
-            st.divider()
-            _editor_dizimos(tithes, "Dizimistas do período (editar na tabela)")
-
-        st.divider()
-        st.subheader("Pesquisa de Dizimistas (por Ano)")
-        c1, c2, c3, c4, c5 = st.columns([1.2, 1.8, 1.4, 2.2, 1.6])
-        with c1:
-            ano_pesq = st.number_input("Ano", value=today_bahia().year, step=1, format="%d", key="srch_year")
-        with c2:
-            if user.role == "SEDE":
-                cong_opts = ["Todas"] + [c.name for c in order_congs_sede_first(congs)]
-                cong_sel = st.selectbox("Congregação", cong_opts, key="srch_cong")
-            else:
-                cong_sel = cong_obj.name
-                st.text_input("Congregação", cong_sel, disabled=True, key="srch_cong_disabled")
-        with c3:
-            mes_opt = ["Todos"] + MONTHS
-            mes_sel = st.selectbox("Mês", mes_opt, index=0, key="srch_month")
-        with c4:
-            nome_q = st.text_input("Nome do dizimista (contém)", key="srch_name")
-        with c5:
-            only_pix = st.checkbox("Somente PIX", value=False, key="srch_only_pix")
-
-        year_start = date(int(ano_pesq), 1, 1)
-        year_end = date(int(ano_pesq)+1, 1, 1)
-        q = select(Tithe).options(joinedload(Tithe.congregation)).where(Tithe.date >= year_start, Tithe.date < year_end)
-
-        if user.role == "SEDE":
-            if cong_sel != "Todas":
-                cong_id_sel = next(c.id for c in congs if c.name == cong_sel)
-                q = q.where(Tithe.congregation_id == cong_id_sel)
-        else:
-            q = q.where(Tithe.congregation_id == cong_obj.id)
-
-        with SessionLocal() as db2:
-            t_list = db2.scalars(q.order_by(Tithe.tither_name, Tithe.date)).all()
-
-        if (nome_q or "").strip():
-            nneedle = _norm(nome_q)
-            t_list = [t for t in t_list if nneedle in _norm(t.tither_name)]
-
-        if only_pix:
-            t_list = [t for t in t_list if (t.payment_method or "").strip().upper() == "PIX"]
-
-        agg = {}
-        for t in t_list:
-            key = (_norm(t.tither_name), t.congregation_id)
-            if key not in agg:
-                agg[key] = {"nome_display": t.tither_name, "congregacao": t.congregation.name if t.congregation else "—",
-                            "total_ano": 0.0, "meses": set(), "primeiro": t.date, "ultimo": t.date}
-            agg[key]["total_ano"] += float(t.amount)
-            agg[key]["meses"].add(t.date.month)
-            if t.date < agg[key]["primeiro"]: agg[key]["primeiro"] = t.date
-            if t.date > agg[key]["ultimo"]: agg[key]["ultimo"] = t.date
-
-        rows = []
-        for info in agg.values():
-            meses_sorted = sorted(list(info["meses"]))
-            rows.append({
-                "Dizimista": info["nome_display"],
-                "Congregação": info["congregacao"],
-                "Qtde de meses no ano": len(meses_sorted),
-                "Meses": ", ".join(MONTHS_SHORT[m-1] for m in meses_sorted) if meses_sorted else "—",
-                "Total no ano (R$)": info["total_ano"],
-                "Primeiro dízimo": format_date(info["primeiro"]) if info["primeiro"] else "—",
-                "Último dízimo": format_date(info["ultimo"]) if info["ultimo"] else "—",
-            })
-
-        df_pesq = pd.DataFrame(rows)
-        if not df_pesq.empty:
-            df_show = df_pesq.sort_values(["Qtde de meses no ano","Dizimista"], ascending=[False, True]).reset_index(drop=True)
-            st.dataframe(
-                df_show.assign(**{"Total no ano (R$)": df_show["Total no ano (R$)"].map(lambda x: format_currency(float(x)))}),
-                use_container_width=True, hide_index=True, height=320
-            )
-            tot_reg = len(df_show)
-            tot_val = float(df_show["Total no ano (R$)"].sum())
-            cA, cB, cC = st.columns(3)
-            cA.metric("Dizimistas encontrados", f"{tot_reg}")
-            cB.metric("Total geral da pesquisa", format_currency(tot_val))
-
-            pix_names = sorted({t.tither_name for t in t_list if (t.payment_method or "").strip().upper() == "PIX"})
-            cC.metric("Dizimaram por PIX (únicos)", f"{len(pix_names)}")
-            if pix_names:
-                st.caption("Nomes que dizimaram por PIX (neste filtro):")
-                st.write(", ".join(pix_names))
-
-            csv = df_show.to_csv(index=False).encode("utf-8-sig")
-            st.download_button("⬇️ Baixar CSV da pesquisa", data=csv, file_name=f"pesquisa_dizimistas_{ano_pesq}.csv", mime="text/csv")
-
-            # CORREÇÃO: Passando o DataFrame com dados numéricos, não o formatado
-            pdf_data = build_dizimista_search_pdf(df_show, ano_pesq, cong_sel, mes_sel, nome_q)
-            st.download_button("⬇️ Baixar PDF da pesquisa", data=pdf_data, file_name=f"pesquisa_dizimistas_{ano_pesq}.pdf", mime="application/pdf")
-        else:
-            st.caption("Nenhum resultado para os filtros informados.")
+            # NOVO BLOCO PARA COLAR NO LUGAR
+st.divider()
+st.markdown("##### Dizimistas do Período (Visualização)")
+if tithes:
+    rows = [
+        {
+            "Data": t.date, 
+            "Dizimista": t.tither_name, 
+            "Valor": float(t.amount), 
+            "Forma de Pagamento": t.payment_method or "—"
+        } 
+        for t in tithes
+    ]
+    df_tithes = pd.DataFrame(rows)
+    st.dataframe(
+        df_tithes.style.format({
+            "Data": "{:%d/%m/%Y}",
+            "Valor": format_currency
+        }),
+        use_container_width=True,
+        hide_index=True
+    )
+    total_mes = df_tithes["Valor"].sum()
+    st.metric("Total de Dízimos (nominal) no período", format_currency(total_mes))
+else:
+    st.caption("Nenhum dízimo nominal registrado para este período.")
 
 # ===================== PDFs =====================
 def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> bytes:
