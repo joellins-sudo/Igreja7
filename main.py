@@ -885,7 +885,7 @@ def _submit_btn(label: str, key_suffix: str, theme: str = "neutral") -> bool:
               #mark-{key_suffix} ~ div[data-testid="stFormSubmitButton"] > button,
               #mark-{key_suffix} ~ div[data-testid="stButton"] > button {{
                 background: {color} !important;
-                border-color: {color} !important;
+                border-color: {color} !important
               }}
               #mark-{key_suffix} ~ div[data-testid="stFormSubmitButton"] > button:hover,
               #mark-{key_suffix} ~ div[data-testid="stButton"] > button:hover {{
@@ -1890,11 +1890,7 @@ def page_relatorio_saida(user: "User"):
         
         if user.role == "SEDE":
             congs_all = order_congs_sede_first(cong_options_for(user, db))
-            escopo_opts = [
-                "-- Relatório Hierárquico (Visualização) --", 
-                "-- Visão Agregada (Editável) --"
-            ] + [c.name for c in congs_all]
-            
+            escopo_opts = ["-- Relatório Hierárquico (Visualização) --", "-- Visão Agregada (Editável) --"] + [c.name for c in congs_all]
             escopo_selecionado = st.selectbox("Selecione o escopo do relatório:", escopo_opts, key="rs_sede_escopo")
             
             if escopo_selecionado == "-- Relatório Hierárquico (Visualização) --":
@@ -1915,32 +1911,31 @@ def page_relatorio_saida(user: "User"):
         st.divider()
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
         
-        opcoes = {"-- Todas (Principal + Subs) --": "ALL"}
-        opcoes[parent_cong_obj.name + " (Principal)"] = None
-        for sub in sub_congs:
-            opcoes[sub.name] = sub.id
+        # --- LÓGICA CONDICIONAL PARA O SELETOR ---
+        target_sub_cong_id_or_all = None
+        contexto_selecionado = parent_cong_obj.name
 
-        contexto_selecionado = st.selectbox("Filtrar por unidade:", list(opcoes.keys()), key="rs_sub_sel")
-        target_sub_cong_id_or_all = opcoes[contexto_selecionado]
+        if sub_congs:
+            opcoes = {"-- Todas (Principal + Subs) --": "ALL", f"{parent_cong_obj.name} (Principal)": None}
+            for sub in sub_congs:
+                opcoes[sub.name] = sub.id
+            contexto_selecionado = st.selectbox("Filtrar por unidade:", list(opcoes.keys()), key="rs_sub_sel")
+            target_sub_cong_id_or_all = opcoes[contexto_selecionado]
+        # ----------------------------------------
         
         st.info(f"Exibindo dados para: **{contexto_selecionado}**")
 
         if target_sub_cong_id_or_all == "ALL":
-            # Visão de resumo com todas as unidades (não editável)
-            all_units = [(parent_cong_obj.name + " (Principal)", None)] + [(s.name, s.id) for s in sub_congs]
-            rows, total_geral = [], 0.0
+            all_units = [(f"{parent_cong_obj.name} (Principal)", None)] + [(s.name, s.id) for s in sub_congs]
+            rows = []
             for name, sub_id in all_units:
                 totals = _collect_month_data(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)["totals"]
-                total_saidas_unidade = totals["saidas_total"]
-                rows.append({"Unidade": name, "Total Saídas": total_saidas_unidade})
-                total_geral += total_saidas_unidade
+                rows.append({"Unidade": name, "Total Saídas": totals["saidas_total"]})
             
             df_agg = pd.DataFrame(rows)
             st.dataframe(df_agg.style.format({"Total Saídas": format_currency}), use_container_width=True)
-            st.metric("Total Geral de Saídas (Principal + Subs)", format_currency(total_geral))
         
         else:
-            # Visão detalhada e EDITÁVEL de uma única unidade
             txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(
                 Transaction.congregation_id == parent_cong_obj.id, 
                 Transaction.date >= start, Transaction.date < end, 
@@ -3078,36 +3073,36 @@ def page_relatorio_entrada(user: "User"):
         st.divider()
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
         
-        opcoes = {"-- Todas (Principal + Subs) --": "ALL", parent_cong_obj.name + " (Principal)": None}
-        for sub in sub_congs:
-            opcoes[sub.name] = sub.id
-
-        contexto_selecionado = st.selectbox("Filtrar por unidade:", list(opcoes.keys()), key="re_sub_sel")
-        target_sub_cong_id_or_all = opcoes[contexto_selecionado]
+        # --- LÓGICA CONDICIONAL PARA O SELETOR ---
+        target_sub_cong_id_or_all = None
+        contexto_selecionado = parent_cong_obj.name
+        
+        if sub_congs:
+            opcoes = {"-- Todas (Principal + Subs) --": "ALL", f"{parent_cong_obj.name} (Principal)": None}
+            for sub in sub_congs:
+                opcoes[sub.name] = sub.id
+            contexto_selecionado = st.selectbox("Filtrar por unidade:", list(opcoes.keys()), key="re_sub_sel")
+            target_sub_cong_id_or_all = opcoes[contexto_selecionado]
+        # ----------------------------------------
         
         st.info(f"Exibindo dados para: **{contexto_selecionado}**")
 
         if target_sub_cong_id_or_all == "ALL":
-            all_units = [(parent_cong_obj.name + " (Principal)", None)] + [(s.name, s.id) for s in sub_congs]
-            rows, total_geral = [], 0.0
+            all_units = [(f"{parent_cong_obj.name} (Principal)", None)] + [(s.name, s.id) for s in sub_congs]
+            rows = []
             for name, sub_id in all_units:
                 totals = _collect_month_data(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)["totals"]
-                total_entradas_unidade = totals["entradas_total_sem_missoes"]
                 rows.append({
                     "Unidade": name,
                     "Dízimos": totals["dizimos"],
                     "Ofertas": totals["ofertas"],
-                    "Total Entradas": total_entradas_unidade
+                    "Total Entradas": totals["entradas_total_sem_missoes"]
                 })
-                total_geral += total_entradas_unidade
             
             df_agg = pd.DataFrame(rows)
             st.dataframe(df_agg.style.format({"Dízimos": format_currency, "Ofertas": format_currency, "Total Entradas": format_currency}), use_container_width=True)
-            st.metric("Total Geral de Entradas (Principal + Subs)", format_currency(total_geral))
-        
         else:
             base_df = _entrada_summary_df(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id_or_all)
-            
             edited_df = st.data_editor(
                 base_df, use_container_width=True, hide_index=True, num_rows="dynamic",
                 column_config={
@@ -3118,7 +3113,6 @@ def page_relatorio_entrada(user: "User"):
                 },
                 key="re_editor_detalhado"
             )
-
             try:
                 total_dizimo, total_oferta, total_geral_unidade = 0.0, 0.0, 0.0
                 if isinstance(edited_df, pd.DataFrame) and not edited_df.empty:
@@ -3129,24 +3123,15 @@ def page_relatorio_entrada(user: "User"):
                     total_oferta = df_calc["Oferta"].sum()
                     total_geral_unidade = total_dizimo + total_oferta
             except Exception: pass
-            
             st.divider()
             col1, col2, col3 = st.columns(3)
             col1.metric("Soma Dízimos (tabela)", format_currency(total_dizimo))
             col2.metric("Soma Ofertas (tabela)", format_currency(total_oferta))
             col3.metric("Soma Geral (tabela)", format_currency(total_geral_unidade))
-
             def _save_summary():
-                _apply_entrada_summary_changes(
-                    orig_df=base_df, 
-                    edited_df=edited_df, 
-                    cong_id=parent_cong_obj.id, 
-                    start=start, end=end, 
-                    sub_cong_id=target_sub_cong_id_or_all
-                )
+                _apply_entrada_summary_changes(orig_df=base_df, edited_df=edited_df, cong_id=parent_cong_obj.id, start=start, end=end, sub_cong_id=target_sub_cong_id_or_all)
                 st.toast("💾 Alterações salvas com sucesso!", icon="✅")
                 st.rerun()
-
             _save_btn(_save_summary, "entrada_sum_detalhado", theme="entrada")
 # ===================== MAIN =====================
 def main():
