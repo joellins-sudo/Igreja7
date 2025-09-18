@@ -1703,6 +1703,7 @@ def page_lancamentos(user: "User"):
 # ===== PÁGINA: LANÇAMENTOS (modo Tabela mostra total abaixo de cada uma) =====
 
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
+# ===================== PAGE: RELATÓRIO DE DIZIMISTAS =====================
 def page_relatorio_dizimistas(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1726,7 +1727,8 @@ def page_relatorio_dizimistas(user: "User"):
             st.info(f"Escopo: **{cong_obj.name}**")
 
         if is_all:
-            all_tz = db.scalars(select(Tithe).where(Tithe.date >= start, Tithe.date < end).options(joinedload(Tithe.congregation))).all()
+            all_tz_q = select(Tithe).where(Tithe.date >= start, Tithe.date < end).options(joinedload(Tithe.congregation))
+            all_tz = db.scalars(all_tz_q).all()
             by_cong = defaultdict(lambda: {"qtd":0, "valor":0.0})
             for t in all_tz:
                 k = t.congregation.name if t.congregation else "N/A"
@@ -1745,7 +1747,7 @@ def page_relatorio_dizimistas(user: "User"):
                 method = (tithe.payment_method or "Não Informado").upper()
                 tithes_by_payment[method]["count"] += 1
                 tithes_by_payment[method]["total"] += float(tithe.amount)
-            
+
             st.subheader("Resumo de Pagamentos de Dízimos")
             if tithes_by_payment:
                 cols_metrics = st.columns(len(tithes_by_payment))
@@ -1754,25 +1756,37 @@ def page_relatorio_dizimistas(user: "User"):
 
             st.divider()
             
-            # ALTERADO: Chamada para _editor_dizimos foi substituída por um st.dataframe
-            st.markdown("##### Dizimistas do período")
+            # --- ALTERAÇÃO PRINCIPAL AQUI ---
+            # A chamada para _editor_dizimos foi trocada por um st.dataframe para ser apenas visualização.
+            st.markdown("##### Dizimistas do Período (Visualização)")
             if tithes:
-                rows = [{"Data": t.date, "Dizimista": t.tither_name, "Valor": float(t.amount), "Forma de Pagamento": t.payment_method or ""} for t in tithes]
-                df_dizimos = pd.DataFrame(rows)
+                rows = [
+                    {
+                        "Data": t.date, 
+                        "Dizimista": t.tither_name, 
+                        "Valor": float(t.amount), 
+                        "Forma de Pagamento": t.payment_method or "—"
+                    } 
+                    for t in tithes
+                ]
+                df_tithes = pd.DataFrame(rows)
                 st.dataframe(
-                    df_dizimos.style.format({"Data": "{:%d/%m/%Y}", "Valor": format_currency}),
+                    df_tithes.style.format({
+                        "Data": "{:%d/%m/%Y}",
+                        "Valor": format_currency
+                    }),
                     use_container_width=True,
                     hide_index=True
                 )
-                total_dizimos_mes = df_dizimos["Valor"].sum()
-                st.metric("Total de Dízimos (nominal)", format_currency(total_dizimos_mes))
+                total_mes = df_tithes["Valor"].sum()
+                st.metric("Total de Dízimos (nominal) no período", format_currency(total_mes))
             else:
-                st.caption("Nenhum dízimo nominal registrado neste período.")
+                st.caption("Nenhum dízimo nominal registrado para este período.")
+            # --- FIM DA ALTERAÇÃO ---
 
         st.divider()
-        # A funcionalidade de pesquisa continua igual
+        # A funcionalidade de pesquisa abaixo permanece inalterada
         st.subheader("Pesquisa de Dizimistas (por Ano)")
-        # ... (todo o resto da função permanece inalterado) ...
         c1, c2, c3, c4, c5 = st.columns([1.2, 1.8, 1.4, 2.2, 1.6])
         with c1:
             ano_pesq = st.number_input("Ano", value=today_bahia().year, step=1, format="%d", key="srch_year")
@@ -1797,8 +1811,9 @@ def page_relatorio_dizimistas(user: "User"):
 
         if user.role == "SEDE":
             if cong_sel != "Todas":
-                cong_id_sel = next(c.id for c in congs if c.name == cong_sel)
-                q = q.where(Tithe.congregation_id == cong_id_sel)
+                cong_id_sel = next((c.id for c in congs if c.name == cong_sel), None)
+                if cong_id_sel:
+                    q = q.where(Tithe.congregation_id == cong_id_sel)
         elif cong_obj:
             q = q.where(Tithe.congregation_id == cong_obj.id)
 
@@ -1839,10 +1854,13 @@ def page_relatorio_dizimistas(user: "User"):
         df_pesq = pd.DataFrame(rows)
         if not df_pesq.empty:
             df_show = df_pesq.sort_values(["Qtde de meses no ano","Dizimista"], ascending=[False, True]).reset_index(drop=True)
-            st.dataframe(
-                df_show.assign(**{"Total no ano (R$)": df_show["Total no ano (R$)"].map(lambda x: format_currency(float(x)))}),
-                use_container_width=True, hide_index=True, height=320
-            )
+            
+            # Criando uma cópia para exibição com o valor formatado
+            df_display = df_show.copy()
+            df_display["Total no ano (R$)"] = df_display["Total no ano (R$)"].map(format_currency)
+
+            st.dataframe(df_display, use_container_width=True, hide_index=True, height=320)
+            
             tot_reg = len(df_show)
             tot_val = float(df_show["Total no ano (R$)"].sum())
             cA, cB, cC = st.columns(3)
