@@ -3270,7 +3270,7 @@ def page_relatorio_entrada(user: "User"):
             congs_all = order_congs_sede_first(cong_options_for(user, db))
             escopo_opts = [
                 "-- Relatório Hierárquico --", 
-                "-- Visão Agregada (Editável) --"
+                "-- Visão Agregada --"  # Removido "(Editável)" para refletir o estado restaurado
             ] + [c.name for c in congs_all]
             
             escopo_selecionado = st.selectbox("Selecione o escopo do relatório:", escopo_opts, key="re_sede_escopo")
@@ -3278,9 +3278,11 @@ def page_relatorio_entrada(user: "User"):
             if escopo_selecionado == "-- Relatório Hierárquico --":
                 display_entry_hierarchy(user, congs_all, start, end, db)
                 return
-            elif escopo_selecionado == "-- Visão Agregada (Editável) --":
-                st.info("Modo de edição do total de entradas por unidade.")
-                _editor_entradas_agg_all(user, congs_all, start, end)
+            elif escopo_selecionado == "-- Visão Agregada --":
+                st.info("Visualização do total de entradas por unidade.")
+                # --- CORREÇÃO APLICADA AQUI ---
+                # O argumento "user" foi removido da chamada da função
+                _editor_entradas_agg_all(congs_all, start, end)
                 return
             else:
                 parent_cong_obj = next((c for c in congs_all if c.name == escopo_selecionado), None)
@@ -3320,7 +3322,6 @@ def page_relatorio_entrada(user: "User"):
             df_agg = pd.DataFrame(rows)
             st.dataframe(df_agg.style.format({"Dízimos": format_currency, "Ofertas": format_currency, "Total Entradas": format_currency}), use_container_width=True, hide_index=True)
         else:
-            # --- Bloco de Verificação de Divergência ---
             datas_divergentes = _verificar_divergencia_dizimos(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id_or_all)
             if datas_divergentes:
                 datas_str = ", ".join([d.strftime('%d/%m') for d in datas_divergentes])
