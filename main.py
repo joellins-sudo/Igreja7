@@ -1226,7 +1226,8 @@ def _editor_lancamentos(
     with SessionLocal() as db:
         cats = categories_for_type(db, tx_type)
         if tx_type == TYPE_IN:
-            cats = [c for c in cats if "ajuste" not in _norm(c.name)]
+            # Não mostrar "Dízimo" aqui, pois ele tem uma tabela própria
+            cats = [c for c in cats if "ajuste" not in _norm(c.name) and "dizimo" not in _norm(c.name)]
         cat_names = [c.name for c in cats] or ["—"]
 
     rows = []
@@ -1265,7 +1266,7 @@ def _editor_lancamentos(
             _total_val = float(_ev["Valor"].sum())
     except Exception:
         _total_val = 0.0
-    _label_total = "Total de Saídas (tabela)" if tx_type == TYPE_OUT else "Total de Entradas (tabela)"
+    _label_total = "Total de Saídas (tabela)" if tx_type == TYPE_OUT else "Total de Outras Entradas (tabela)"
     st.metric(_label_total, format_currency(_total_val))
 
     def _save():
@@ -1647,6 +1648,7 @@ def page_lancamentos(user: "User"):
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
 
         if modo == "Formulário único":
+            # Lógica do formulário único permanece a mesma
             target_cong_obj = parent_cong_obj
             contexto_selecionado = f"{parent_cong_obj.name} (Principal)"
             target_sub_cong_id = None
@@ -1662,7 +1664,7 @@ def page_lancamentos(user: "User"):
             st.divider()
             
             with st.expander("➕ Lançar ENTRADA", expanded=True):
-                with st.form("form_entrada"):
+                 with st.form("form_entrada"):
                     cats_in = [c for c in categories_for_type(db, TYPE_IN) if "ajuste" not in _norm(c.name)]
                     c1, c2 = st.columns(2)
                     with c1: ent_data = st.date_input("Data da Entrada", value=today_bahia(), key="ent_data")
@@ -1717,40 +1719,35 @@ def page_lancamentos(user: "User"):
             ref_tab = get_month_selector("Mês de referência da tabela")
             start_tab, end_tab = month_bounds(ref_tab)
             
-            # --- Bloco de Verificação de Divergência ---
             datas_divergentes = _verificar_divergencia_dizimos(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
             if datas_divergentes:
                 datas_str = ", ".join([d.strftime('%d/%m') for d in datas_divergentes])
-                st.warning(f"**Atenção:** Valores de entrada de dízimo total por culto e valores de entrada de dízimo por dizimista estão divergindo nos dias: **{datas_str}**. Favor, verifique.")
+                st.warning(f"**Atenção:** Valores de dízimo estão divergindo nos dias: **{datas_str}**. Verifique os lançamentos.")
             
-            st.markdown("##### Entradas (Dízimo e Oferta)")
-            df_entradas = _entrada_summary_df(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
-            if df_entradas.empty:
-                df_entradas = pd.DataFrame([{"Data do Culto": today_bahia(), "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0}])
-            edited_entradas = st.data_editor(df_entradas, use_container_width=True, hide_index=True, num_rows="dynamic", key=f"editor_entradas_{parent_cong_obj.id}_{target_sub_cong_id}")
+            # --- NOVA ESTRUTURA DE TABELAS ---
             
-            try:
-                total_dizimo, total_oferta, total_geral = 0.0, 0.0, 0.0
-                if isinstance(edited_entradas, pd.DataFrame) and not edited_entradas.empty:
-                    df_calc = edited_entradas.copy(); df_calc["Dízimo"] = df_calc["Dízimo"].map(_to_float_brl); df_calc["Oferta"] = df_calc["Oferta"].map(_to_float_brl)
-                    total_dizimo = df_calc["Dízimo"].sum(); total_oferta = df_calc["Oferta"].sum(); total_geral = total_dizimo + total_oferta
-            except Exception: pass
-            
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total Dízimos (tabela)", format_currency(total_dizimo))
-            col2.metric("Total Ofertas (tabela)", format_currency(total_oferta))
-            col3.metric("Total Geral (tabela)", format_currency(total_geral))
-            _save_btn(lambda: _apply_entrada_summary_changes(df_entradas, edited_entradas, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id), f"lan_tab_{parent_cong_obj.id}_{target_sub_cong_id}", "entrada")
-
             st.markdown("---")
+            # 1. Tabela de Dizimistas (editável)
             tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id == target_sub_cong_id)
             tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
-            _editor_dizimos(tithes, f"Dizimistas - {contexto_tabela}", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
+            _editor_dizimos(tithes, f"Lançamento de Dizimistas - {contexto_tabela}", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
 
             st.markdown("---")
+            # 2. Tabela de Outras Entradas (editável)
+            txs_in_query = select(Transaction).options(joinedload(Transaction.category)).where(
+                Transaction.congregation_id == parent_cong_obj.id, 
+                Transaction.date >= start_tab, Transaction.date < end_tab, 
+                Transaction.type == TYPE_IN, 
+                Transaction.sub_congregation_id == target_sub_cong_id
+            )
+            txs_in = db.scalars(txs_in_query.order_by(Transaction.date)).all()
+            _editor_lancamentos(txs_in, f"Lançamento de Outras Entradas (Ofertas, Votos, etc.) - {contexto_tabela}", tx_type_hint=TYPE_IN, force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
+
+            st.markdown("---")
+            # 3. Tabela de Saídas (editável)
             txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_OUT, Transaction.sub_congregation_id == target_sub_cong_id)
             txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
-            _editor_lancamentos(txs_out, f"Saídas - {contexto_tabela}", tx_type_hint=TYPE_OUT, force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
+            _editor_lancamentos(txs_out, f"Lançamento de Saídas - {contexto_tabela}", tx_type_hint=TYPE_OUT, force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
 # ===== PÁGINA: LANÇAMENTOS (com modo Tabela + 3 editores) =====
 # ===== PÁGINA: LANÇAMENTOS (modo Tabela mostra total abaixo de cada uma) =====
 
@@ -3297,7 +3294,6 @@ def page_relatorio_entrada(user: "User"):
             df_agg = pd.DataFrame(rows)
             st.dataframe(df_agg.style.format({"Dízimos": format_currency, "Ofertas": format_currency, "Total Entradas": format_currency}), use_container_width=True, hide_index=True)
         else:
-            # --- Bloco de Verificação de Divergência ---
             datas_divergentes = _verificar_divergencia_dizimos(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id_or_all)
             if datas_divergentes:
                 datas_str = ", ".join([d.strftime('%d/%m') for d in datas_divergentes])
