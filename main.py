@@ -1897,7 +1897,7 @@ def page_relatorio_saida(user: "User"):
             escopo_selecionado = st.selectbox("Selecione o escopo do relatório:", escopo_opts, key="rs_sede_escopo")
             
             if escopo_selecionado == "-- Relatório Hierárquico (Visualização) --":
-                display_exit_hierarchy(congs_all, start, end, db)
+                display_exit_hierarchy(user, congs_all, start, end, db)
                 return
             elif escopo_selecionado == "-- Visão Agregada (Visualização) --": # Alterado o label
                 st.info("Visualização do total de saídas por congregação principal.")
@@ -3203,7 +3203,7 @@ def page_relatorio_entrada(user: "User"):
             escopo_selecionado = st.selectbox("Selecione o escopo do relatório:", escopo_opts, key="re_sede_escopo")
             
             if escopo_selecionado == "-- Relatório Hierárquico (Visualização) --":
-                display_entry_hierarchy(congs_all, start, end, db)
+                display_entry_hierarchy(user, congs_all, start, end, db)
                 return
             elif escopo_selecionado == "-- Visão Agregada (Visualização) --": # Alterado o label
                 st.info("Visualização do total de entradas por unidade.")
