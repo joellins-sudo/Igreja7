@@ -397,18 +397,27 @@ def get_month_selector(label: str = "Mês de referência") -> date:
 def _confirm_ok(val: str) -> bool:
     return str(val or "").strip().upper() == "EXCLUIR"
 
-def _to_date(obj: Any) -> date:
+def _to_date(obj: Any) -> Optional[date]:
+    """Converte um objeto para data, retornando None se for inválido ou vazio."""
     if isinstance(obj, date):
         return obj
+    if isinstance(obj, datetime):
+        return obj.date()
+    
     s = str(obj or "").strip()
-    if not s:
-        return today_bahia()
+    # Retorna None para qualquer valor vazio, nulo ou 'NaT' (Not a Time) do pandas
+    if not s or s == "NaT":
+        return None
+        
     try:
         if "/" in s:
             return datetime.strptime(s, "%d/%m/%Y").date()
+        # Adicionado para suportar timestamp do pandas que pode vir do data_editor
+        if ' ' in s:
+            s = s.split(' ')[0]
         return datetime.strptime(s, "%Y-%m-%d").date()
     except Exception:
-        return today_bahia()
+        return None # Retorna None se o formato for inválido
     
 
 def _to_float_brl(x: Any) -> float:
@@ -948,7 +957,9 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
     def norm_df(df: pd.DataFrame) -> pd.DataFrame:
         d = df.copy()
         if "Valor" in d.columns: d["Valor"] = d["Valor"].map(_to_float_brl)
-        if "Data" in d.columns: d["Data"] = d["Data"].map(_to_date)
+        if "Data" in d.columns:
+            d["Data"] = d["Data"].map(_to_date)
+            d.dropna(subset=["Data"], inplace=True) # Garante que linhas sem data válida sejam removidas
         for c in ("Categoria", "Descrição", "Congregação"):
             if c in d.columns: d[c] = d[c].astype(str).fillna("")
         return d
@@ -956,8 +967,6 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
     o = norm_df(orig_df)
     n_bruto = norm_df(edited_df)
 
-    # --- LÓGICA DE EXCLUSÃO CORRIGIDA ---
-    # Primeiro, identifica as linhas que são válidas para manter/atualizar.
     n = n_bruto[
         (n_bruto["Valor"].abs() > 0.01) & 
         (n_bruto["Categoria"] != "")
@@ -967,8 +976,6 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
     new_ids = set(int(x) for x in n["ID"].tolist() if pd.notna(x) and x > 0)
     to_delete = list(old_ids - new_ids)
     
-    old_map = {int(r["ID"]): r for _, r in o.iterrows() if pd.notna(r["ID"])}
-
     with SessionLocal() as db:
         cats = categories_for_type(db, tx_type)
         cat_by_name = {c.name: c for c in cats}
@@ -992,7 +999,7 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
 
         for _, row in n.iterrows():
             rid = row.get("ID", None)
-            if pd.notna(rid) and int(rid) > 0: continue # Já foi tratado como atualização
+            if pd.notna(rid) and int(rid) > 0: continue
 
             cat = cat_by_name.get(row["Categoria"])
             if not cat: continue
@@ -1014,7 +1021,9 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
     def norm_df(df: pd.DataFrame) -> pd.DataFrame:
         d = df.copy()
         if "Valor" in d.columns: d["Valor"] = d["Valor"].map(_to_float_brl)
-        if "Data" in d.columns: d["Data"] = d["Data"].map(_to_date)
+        if "Data" in d.columns:
+            d["Data"] = d["Data"].map(_to_date)
+            d.dropna(subset=["Data"], inplace=True) # Garante que linhas sem data válida sejam removidas
         for c in ("Dizimista", "Forma de Pagamento"):
             if c in d.columns: d[c] = d[c].astype(str).fillna("")
         return d
@@ -1022,8 +1031,6 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
     o = norm_df(orig_df)
     n_bruto = norm_df(edited_df)
 
-    # --- LÓGICA DE EXCLUSÃO CORRIGIDA ---
-    # Considera válidas apenas as linhas com valor e nome de dizimista preenchidos
     n = n_bruto[
         (n_bruto["Valor"].abs() > 0.01) & 
         (n_bruto["Dizimista"] != "")
@@ -1032,8 +1039,6 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
     old_ids = set(int(x) for x in o["ID"].tolist() if pd.notna(x) and x > 0)
     new_ids = set(int(x) for x in n["ID"].tolist() if pd.notna(x) and x > 0)
     to_delete = list(old_ids - new_ids)
-
-    old_map = {int(r["ID"]): r for _, r in o.iterrows() if pd.notna(r["ID"])}
 
     with SessionLocal() as db:
         if to_delete:
