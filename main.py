@@ -1077,7 +1077,6 @@ def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFram
 
         edited = edited_df.copy()
         
-        # Limpa e prepara o dataframe editado
         for col in ["Dízimo", "Oferta"]:
             edited[col] = edited[col].map(_to_float_brl)
         edited["Data do Culto"] = edited["Data do Culto"].map(lambda x: _to_date(x) if pd.notna(x) else None)
@@ -1085,7 +1084,6 @@ def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFram
         
         wanted = {r["Data do Culto"]: (float(r["Dízimo"]), float(r["Oferta"])) for _, r in edited.iterrows()}
         
-        # LÓGICA CORRIGIDA: Compara as datas originais com as editadas
         orig_dates = set(pd.to_datetime(orig_df["Data do Culto"]).dt.date)
         edited_dates = set(wanted.keys())
         all_dates = sorted(list(orig_dates.union(edited_dates)))
@@ -1093,38 +1091,77 @@ def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFram
         for d in all_dates:
             if d is None: continue
             
-            # Se a data foi removida na edição, o valor desejado é zero.
             want_dz, want_of = wanted.get(d, (0.0, 0.0))
 
-            # Busca lançamentos originais (sem ajustes) para o dia 'd'
-            sum_dz_tithes_q = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(and_(Tithe.congregation_id == cong_id, Tithe.date == d, Tithe.sub_congregation_id == sub_cong_id))
+            tithe_sub_filter = Tithe.sub_congregation_id.is_(None) if sub_cong_id is None else Tithe.sub_congregation_id == sub_cong_id
+            tx_sub_filter = Transaction.sub_congregation_id.is_(None) if sub_cong_id is None else Transaction.sub_congregation_id == sub_cong_id
+
+            # [NOVO] Lógica para apagar dízimos nominais se o total do dia for zerado no resumo
+            if d in orig_dates and abs(want_dz) < 0.01:
+                # 1. Deletar todos os Dízimos Nominais (Tithe) para este dia/unidade
+                db.query(Tithe).filter(
+                    Tithe.congregation_id == cong_id,
+                    Tithe.date == d,
+                    tithe_sub_filter
+                ).delete(synchronize_session=False)
+
+                # 2. Deletar todas as Transações de Dízimo (Transaction) para este dia/unidade
+                db.query(Transaction).filter(
+                    Transaction.congregation_id == cong_id,
+                    Transaction.date == d,
+                    Transaction.category_id == cat_diz.id,
+                    tx_sub_filter
+                ).delete(synchronize_session=False)
+                
+                # Zera o valor de oferta também, pois a linha inteira foi removida
+                want_of = 0.0
+            # [FIM DO NOVO BLOCO]
+
+            sum_dz_tithes_q = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
+                Tithe.congregation_id == cong_id, Tithe.date == d, tithe_sub_filter
+            )
             sum_dz_tithes = float(db.scalar(sum_dz_tithes_q) or 0.0)
             
-            sum_dz_tx_no_adj_q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).join(Category).where(and_(Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_diz.id, Transaction.sub_congregation_id == sub_cong_id, func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC))
+            sum_dz_tx_no_adj_q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).join(Category).where(
+                Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_diz.id,
+                tx_sub_filter, func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
+            )
             sum_dz_tx_no_adj = float(db.scalar(sum_dz_tx_no_adj_q) or 0.0)
             sum_dz_others = max(sum_dz_tithes, sum_dz_tx_no_adj)
             
-            sum_of_others_q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(and_(Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_ofe.id, Transaction.sub_congregation_id == sub_cong_id, func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC))
+            sum_of_others_q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+                Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_ofe.id,
+                tx_sub_filter, func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
+            )
             sum_of_others = float(db.scalar(sum_of_others_q) or 0.0)
 
             adj_dz_new = want_dz - sum_dz_others
             adj_of_new = want_of - sum_of_others
 
-            # Busca e atualiza/cria/deleta os ajustes no banco
-            adj_dz = db.scalar(select(Transaction).where(Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_diz.id, Transaction.sub_congregation_id == sub_cong_id, func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC))
-            adj_of = db.scalar(select(Transaction).where(Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_ofe.id, Transaction.sub_congregation_id == sub_cong_id, func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC))
+            adj_dz = db.scalar(select(Transaction).where(
+                Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_diz.id,
+                tx_sub_filter, func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC
+            ))
+            adj_of = db.scalar(select(Transaction).where(
+                Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_ofe.id,
+                tx_sub_filter, func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC
+            ))
 
             if abs(adj_dz_new) < 0.001:
                 if adj_dz: db.delete(adj_dz)
             else:
-                if adj_dz: adj_dz.amount = float(adj_dz_new)
-                else: db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id, amount=float(adj_dz_new), description=ADJ_ENTRY_DESC, congregation_id=cong_id, sub_congregation_id=sub_cong_id))
+                if adj_dz: 
+                    adj_dz.amount = float(adj_dz_new)
+                else: 
+                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id, amount=float(adj_dz_new), description=ADJ_ENTRY_DESC, congregation_id=cong_id, sub_congregation_id=sub_cong_id))
 
             if abs(adj_of_new) < 0.001:
                 if adj_of: db.delete(adj_of)
             else:
-                if adj_of: adj_of.amount = float(adj_of_new)
-                else: db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=float(adj_of_new), description=ADJ_ENTRY_DESC, congregation_id=cong_id, sub_congregation_id=sub_cong_id))
+                if adj_of: 
+                    adj_of.amount = float(adj_of_new)
+                else: 
+                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=float(adj_of_new), description=ADJ_ENTRY_DESC, congregation_id=cong_id, sub_congregation_id=sub_cong_id))
         
         db.commit()
 
