@@ -910,7 +910,7 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
     n_bruto = norm_df(edited_df)
 
     # --- LÓGICA DE EXCLUSÃO CORRIGIDA ---
-    # Considera válidas apenas as linhas com valor e categoria preenchidos
+    # Primeiro, identifica as linhas que são válidas para manter/atualizar.
     n = n_bruto[
         (n_bruto["Valor"].abs() > 0.01) & 
         (n_bruto["Categoria"] != "")
