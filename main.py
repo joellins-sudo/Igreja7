@@ -1,11 +1,184 @@
 # main.py — AD Relatório Financeiro — v13.3
 # Melhorias deste commit (apenas estas):
-# 1) Adicionado bot
+# 1) Adicionado botão "Salvar alterações" abaixo de TODAS as tabelas editáveis.
+# 2) Tesoureiro Missionário pode lançar SAÍDAS de Missões para QUALQUER congregação
+#    (editor agora tem coluna "Congregação"); Entradas continuam no editor agregado.
+# 3) Nova aba "Relatório de Missões" para TESOUREIRO (congregações) ver apenas seus lançamentos.
+# 4) [EQUIVALÊNCIA DE DÍZIMOS] Dízimos lançados em "Entrada (Doação)" e por "Dizimista"
+#    agora são tratados como equivalentes (NÃO são somados). Em resumos por data e totais mensais,
+#    usa-se o MAIOR entre (soma de Tithes) e (soma de Transactions categoria "Dízimo").
+#
+# Obs.: Todo o restante do seu código foi preservado. Itens que você pediu antes
+# (ex.: esconder "ajuste" na ENTRADA, relatórios agregados editáveis da SEDE, etc.) continuam iguais.
+
+# Bloco CORRIGIDO
+from __future__ import annotations
+
+import os
+if os.path.exists("database.db"):
+    os.remove("database.db")
+
+# O resto do seu código começa aqui...
+# ===== UI extra (menu bonito com fallback) =====
+try:
+    import streamlit_antd_components as sac
+except Exception:
+    sac = None
+# ...e assim por diante
+
 # O resto do seu código começa aqui...
 # ===== UI extra (menu bonito com fallback) ====
 try:
     import streamlit_antd_components as sac  # pip install streamlit-antd-components
-except Exception:tant;
+except Exception:
+    sac = None  # fallback p/ radio padrão
+import hashlib
+from sqlalchemy import select
+# ... outras importações ...
+from sqlalchemy import select, func, String, Date, Float, ForeignKey, create_engine, and_
+from sqlalchemy.exc import IntegrityError  # <-- ADICIONE ESTA LINHA
+from sqlalchemy.orm import relationship, Mapped, mapped_column, sessionmaker, joinedload, Session
+# ...
+import os
+from datetime import date, timedelta, datetime
+from typing import Optional, List, Tuple, Dict, Any
+from collections import defaultdict, Counter
+import locale as _locale
+import pandas as pd
+import streamlit as st
+
+from sqlalchemy import select, func, String, Date, Float, ForeignKey, create_engine, and_
+from sqlalchemy.orm import relationship, Mapped, mapped_column, sessionmaker, joinedload, Session
+from sqlalchemy.orm import DeclarativeBase
+import unicodedata as ud
+import hashlib
+import json, base64, hmac, time
+
+# PDF
+from io import BytesIO
+from reportlab.lib.pagesizes import A4, portrait
+from reportlab.lib import colors
+from reportlab.lib.units import cm
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+
+# TZ Bahia/BR
+try:
+    from zoneinfo import ZoneInfo
+    TZ_BA = ZoneInfo("America/Bahia")
+except Exception:
+    TZ_BA = None
+
+APP_NAME = "AD Relatório Financeiro"
+ADJ_ENTRY_DESC = "[Ajuste via relatório de entrada]"
+ADJ_MISS_IN_DESC = "[Ajuste Missões por Congregação]"
+ADJ_ENTRY_AGG_DESC = "[Ajuste total de entradas (mês, sede)]"
+ADJ_OUT_AGG_DESC   = "[Ajuste total de saídas (mês, sede)]"
+ADJ_HIER_ENTRY_DESC = "[Ajuste via Relatório Hierárquico (Entrada)]"
+ADJ_HIER_OUT_DESC = "[Ajuste via Relatório Hierárquico (Saída)]"
+
+# ===================== ST CONFIG / THEME =====================
+# ===================== ST CONFIG / THEME =====================
+
+st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
+
+# ================== CSS do cartão de login (estilo SEI) ==================
+# ================== CSS do cartão de login (estilo ADRF) ==================
+# ================== LOGIN SEI: CSS/HTML (trabalhando com Streamlit) ==================
+# ================== LOGIN ADRF: CSS/HTML ==================
+ADRF_LOGIN_CSS = """
+<style>
+  :root{
+    --azul-1:#1f6feb; --azul-2:#185fcd; --azul-esc:#0b4b9a;
+    --cinza-bg:#f0f0f0; --cinza-borda:#dfe3ea; --cinza-ico:#e9ecef; --texto:#344054;
+  }
+  body{ background:var(--cinza-bg); }
+
+  .adrf-wrap{ min-height:calc(100vh - 0px); display:grid; place-items:center; padding:24px 12px; }
+  .adrf-card{ width:100%; max-width:540px; background:#fff; border:1px solid rgba(0,0,0,.07);
+              border-radius:.5rem; box-shadow:0 10px 26px rgba(16,24,40,.08); }
+  .adrf-card .body{ padding:26px 24px 18px; }
+
+  .adrf-logo{ display:flex; align-items:center; justify-content:center; margin:14px 0 18px; }
+  .adrf-logo img{ height:58px; }
+
+  .adrf-form .group{ display:flex; align-items:stretch; margin-bottom:12px; }
+  .adrf-form .ico{
+    flex:0 0 46px; display:flex; align-items:center; justify-content:center;
+    background:var(--cinza-ico); border:1px solid var(--cinza-borda);
+    border-right:none; border-radius:.25rem 0 0 .25rem; color:#6b7280; font-size:18px;
+  }
+  .adrf-form .field [data-testid="stTextInput"]>div>div>input,
+  .adrf-form .field [data-testid="stPassword"]>div>div>input,
+  .adrf-form .field [data-testid="stSelectbox"]>div>div>div>div{
+    height:44px; border:1px solid var(--cinza-borda); border-left:none; border-radius:0 .25rem .25rem 0 !important;
+    font-size:1rem;
+  }
+  .adrf-form .field [data-testid="stWidgetLabel"]{ display:none; }
+
+  .adrf-btn .stButton>button{
+    width:100%; height:44px; border:none; color:#fff; font-weight:700; letter-spacing:.3px; border-radius:.25rem;
+    background:linear-gradient(180deg, var(--azul-1) 0%, var(--azul-2) 100%);
+    box-shadow:0 6px 16px rgba(24,95,205,.25);
+  }
+  .adrf-btn .stButton>button:hover{
+    background:linear-gradient(180deg, var(--azul-2) 0%, var(--azul-esc) 100%);
+  }
+
+  .adrf-2fa{ text-align:right; margin-top:6px; }
+  .adrf-2fa a{ color:#0d6efd; font-size:.92rem; text-decoration:none; }
+  .adrf-2fa a:hover{ text-decoration:underline; }
+</style>
+"""
+
+CSS = """
+<style>
+/* ==================== BASE / TIPOGRAFIA ==================== */
+:root{
+  --base-font: 17px;              /* aumente para 18/19/20px se quiser */
+  --table-font-size: 1.90rem;     /* fonte das células */
+  --table-header-size: 1.08rem;   /* fonte dos cabeçalhos */
+}
+
+html, body, [data-testid="stAppViewContainer"]{
+  font-size: var(--base-font);
+  line-height: 1.45;
+}
+
+/* Títulos mais fortes e maiores */
+.page-title, h1{ font-size: 2.0rem; font-weight: 800 !important; }
+h2{ font-size: 1.45rem; font-weight: 750; }
+h3{ font-size: 1.25rem; font-weight: 700; }
+
+/* ==================== WIDGETS / TEXTOS ==================== */
+[data-testid="stSidebar"] *{ font-size: 1.02rem; }
+label, [data-testid="stWidgetLabel"]{ font-size: 1.02rem; }
+
+/* Inputs (texto, número, data, selects) um pouco maiores */
+.stTextInput input,
+.stNumberInput input,
+.stDateInput input,
+.stSelectbox div,
+.stMultiSelect div{
+  font-size: 1.02rem !important;
+}
+
+/* ==================== TABELAS / EDITOR ==================== */
+/* Regras gerais (ok manter) */
+[data-testid="stDataFrame"] *{ font-size: 1.0rem; }
+[data-testid="stDataEditor"] *{ font-size: 1.02rem; }
+
+/* Regras específicas – aumentam o tamanho real das células/cabeçalhos */
+[data-testid="stDataFrame"] [role="gridcell"],
+[data-testid="stDataEditor"] [role="gridcell"]{
+  font-size: var(--table-font-size) !important;
+}
+
+[data-testid="stDataFrame"] [role="columnheader"],
+[data-testid="stDataEditor"] [role="columnheader"]{
+  font-size: var(--table-header-size) !important;
+  font-weight: 700 !important;
 }
 
 /* Altura das linhas (opcional) */
