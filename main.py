@@ -1698,7 +1698,7 @@ def page_lancamentos(user: "User"):
         st.divider()
 
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
-
+        
         if modo == "Formulário único":
             contexto_selecionado = f"{parent_cong_obj.name} (Principal)"
             target_sub_cong_id = None
@@ -1770,6 +1770,34 @@ def page_lancamentos(user: "User"):
             
             st.markdown("##### Entradas (Resumo Diário)")
             st.caption("Esta tabela mostra o total por dia. Para lançar múltiplos dízimos ou ofertas no mesmo dia, use o 'Formulário único'.")
+            
+            base_df = _entrada_summary_df(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
+            edited_df = st.data_editor(
+                base_df,
+                use_container_width=True, hide_index=True, num_rows="dynamic",
+                key=f"lancamentos_entrada_summary_editor_{parent_cong_obj.id}_{target_sub_cong_id}",
+                column_config={
+                    "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
+                    "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", format="R$ %.2f"),
+                    "Oferta": st.column_config.NumberColumn("Oferta (R$)", format="R$ %.2f"),
+                    "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
+                }
+            )
+            def _save_summary():
+                _apply_entrada_summary_changes(orig_df=base_df, edited_df=edited_df, cong_id=parent_cong_obj.id, start=start_tab, end=end_tab, sub_cong_id=target_sub_cong_id)
+            _save_btn(_save_summary, f"save_entrada_summary_{parent_cong_obj.id}_{target_sub_cong_id}", "entrada")
+
+            st.markdown("---")
+            st.markdown("##### Lançamento de Dizimistas (Nominal)")
+            tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id == target_sub_cong_id)
+            tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
+            _editor_dizimos(tithes, "", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
+
+            st.markdown("---")
+            st.markdown("##### Lançamento de Saídas")
+            txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_OUT, Transaction.sub_congregation_id == target_sub_cong_id)
+            txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
+            _editor_lancamentos(txs_out, "", tx_type_hint=TYPE_OUT, force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
             
             # (O restante do código para exibir as 3 tabelas editáveis vai aqui,
             # usando _entrada_summary_df, _editor_dizimos, e _editor_lancamentos
