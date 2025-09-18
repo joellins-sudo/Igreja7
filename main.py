@@ -902,16 +902,24 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
         d = df.copy()
         if "Valor" in d.columns: d["Valor"] = d["Valor"].map(_to_float_brl)
         if "Data" in d.columns: d["Data"] = d["Data"].map(_to_date)
-        for c in ("Categoria", "Descrição"):
+        for c in ("Categoria", "Descrição", "Congregação"):
             if c in d.columns: d[c] = d[c].astype(str).fillna("")
         return d
 
     o = norm_df(orig_df)
-    n = norm_df(edited_df)
+    n_bruto = norm_df(edited_df)
 
-    old_ids = set(int(x) for x in o["ID"].tolist() if pd.notna(x))
-    new_ids = set(int(x) for x in n["ID"].tolist() if pd.notna(x) and int(x) > 0)
+    # --- LÓGICA DE EXCLUSÃO CORRIGIDA ---
+    # Considera válidas apenas as linhas com valor e categoria preenchidos
+    n = n_bruto[
+        (n_bruto["Valor"].abs() > 0.01) & 
+        (n_bruto["Categoria"] != "")
+    ].copy()
+
+    old_ids = set(int(x) for x in o["ID"].tolist() if pd.notna(x) and x > 0)
+    new_ids = set(int(x) for x in n["ID"].tolist() if pd.notna(x) and x > 0)
     to_delete = list(old_ids - new_ids)
+    
     old_map = {int(r["ID"]): r for _, r in o.iterrows() if pd.notna(r["ID"])}
 
     with SessionLocal() as db:
@@ -921,57 +929,34 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
             db.query(Transaction).filter(Transaction.id.in_(to_delete)).delete(synchronize_session=False)
 
         for rid in sorted(new_ids & old_ids):
-            old = old_map[rid]
             new = n.loc[n["ID"] == rid].iloc[0]
             t = db.get(Transaction, rid)
             if not t: continue
             
-            new_amount = _to_float_brl(new.get("Valor"))
-            new_cat_name = str(new.get("Categoria", "")).strip()
-            if abs(new_amount) < 0.01 or not new_cat_name:
-                st.warning(f"Alteração no ID {rid} ignorada: valor ou categoria inválidos.")
-                continue
-
             changed = False
-            if t.date != _to_date(new["Data"]): t.date = _to_date(new["Data"]); changed = True
-            cat = cat_by_name.get(new_cat_name)
+            if t.date != new["Data"]: t.date = new["Data"]; changed = True
+            cat = cat_by_name.get(new["Categoria"])
             if cat and t.category_id != cat.id: t.category_id = cat.id; changed = True
-            if t.amount != new_amount: t.amount = new_amount; changed = True
-            if (t.description or "") != (new.get("Descrição", "") or ""): t.description = (new.get("Descrição", "") or None); changed = True
-            if "_cong_id" in n.columns:
-                new_cid = int(new.get("_cong_id", 0) or 0)
-                if new_cid and new_cid != t.congregation_id:
-                    t.congregation_id = new_cid; changed = True
+            if t.amount != new["Valor"]: t.amount = new["Valor"]; changed = True
+            if (t.description or "") != (new.get("Descrição", "") or ""): t.description = new.get("Descrição"); changed = True
+            if "_cong_id" in n.columns and int(new["_cong_id"]) != t.congregation_id:
+                t.congregation_id = int(new["_cong_id"]); changed = True
             if changed: db.add(t)
 
         for _, row in n.iterrows():
             rid = row.get("ID", None)
-            is_new = pd.isna(rid) or int(rid) <= 0 or int(rid) not in old_ids
-            if not is_new: continue
-            
-            amount = _to_float_brl(row.get("Valor"))
-            cat_name = str(row.get("Categoria", "")).strip()
-            if not cat_name or abs(amount) < 0.01: continue
+            if pd.notna(rid) and int(rid) > 0: continue # Já foi tratado como atualização
 
-            cat = cat_by_name.get(cat_name)
+            cat = cat_by_name.get(row["Categoria"])
             if not cat: continue
-            
-            # --- LÓGICA DE BUSCA DE ID CORRIGIDA ---
-            # Prioriza o ID da linha (para o editor de missões)
-            cong_id = int(row.get("_cong_id", 0) or 0)
-            # Se não houver na linha, usa o padrão (para outros editores)
-            if not cong_id:
-                cong_id = default_cong_id
-            
-            # Se ainda assim não houver um ID válido, pula a linha.
-            if not cong_id:
-                continue
 
+            cong_id = int(row.get("_cong_id", 0) or 0) or default_cong_id
+            if not cong_id: continue
+            
             db.add(Transaction(
-                date=_to_date(row.get("Data")), type=tx_type, category_id=cat.id, 
-                amount=amount, description=(str(row.get("Descrição", "")).strip() or None),
-                congregation_id=cong_id,
-                sub_congregation_id=default_sub_cong_id
+                date=row["Data"], type=tx_type, category_id=cat.id, 
+                amount=row["Valor"], description=(row.get("Descrição") or None),
+                congregation_id=cong_id, sub_congregation_id=default_sub_cong_id
             ))
         db.commit()
 
@@ -988,11 +973,19 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
         return d
 
     o = norm_df(orig_df)
-    n = norm_df(edited_df)
+    n_bruto = norm_df(edited_df)
 
-    old_ids = set(int(x) for x in o["ID"].tolist() if pd.notna(x))
-    new_ids = set(int(x) for x in n["ID"].tolist() if pd.notna(x) and int(x) > 0)
+    # --- LÓGICA DE EXCLUSÃO CORRIGIDA ---
+    # Considera válidas apenas as linhas com valor e nome de dizimista preenchidos
+    n = n_bruto[
+        (n_bruto["Valor"].abs() > 0.01) & 
+        (n_bruto["Dizimista"] != "")
+    ].copy()
+
+    old_ids = set(int(x) for x in o["ID"].tolist() if pd.notna(x) and x > 0)
+    new_ids = set(int(x) for x in n["ID"].tolist() if pd.notna(x) and x > 0)
     to_delete = list(old_ids - new_ids)
+
     old_map = {int(r["ID"]): r for _, r in o.iterrows() if pd.notna(r["ID"])}
 
     with SessionLocal() as db:
@@ -1000,39 +993,26 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
             db.query(Tithe).filter(Tithe.id.in_(to_delete)).delete(synchronize_session=False)
 
         for rid in sorted(new_ids & old_ids):
-            old = old_map[rid]
             new = n.loc[n["ID"] == rid].iloc[0]
             t = db.get(Tithe, rid)
             if not t: continue
             
-            new_nome = str(new.get("Dizimista", "")).strip()
-            new_amount = _to_float_brl(new.get("Valor"))
-            if not new_nome or abs(new_amount) < 0.0001:
-                st.warning(f"Alteração no ID {rid} ignorada: nome ou valor inválido.")
-                continue
-            
             changed = False
-            if t.date != _to_date(new["Data"]): t.date = _to_date(new["Data"]); changed = True
-            if t.tither_name != new_nome: t.tither_name = new_nome; changed = True
-            if t.amount != new_amount: t.amount = new_amount; changed = True
-            if (t.payment_method or "") != (new["Forma de Pagamento"] or ""): t.payment_method = (new["Forma de Pagamento"] or None); changed = True
+            if t.date != new["Data"]: t.date = new["Data"]; changed = True
+            if t.tither_name != new["Dizimista"]: t.tither_name = new["Dizimista"]; changed = True
+            if t.amount != new["Valor"]: t.amount = new["Valor"]; changed = True
+            if (t.payment_method or "") != (new["Forma de Pagamento"] or ""): t.payment_method = new["Forma de Pagamento"] or None; changed = True
             if changed: db.add(t)
 
         for _, row in n.iterrows():
             rid = row.get("ID", None)
-            is_new = pd.isna(rid) or int(rid) <= 0 or int(rid) not in old_ids
-            if not is_new: continue
-            
-            nome = str(row.get("Dizimista", "")).strip()
-            amount = _to_float_brl(row.get("Valor"))
-            if not nome or abs(amount) < 0.0001: continue
-            
+            if pd.notna(rid) and int(rid) > 0: continue
+
             if default_cong_id is None: continue
             db.add(Tithe(
-                date=_to_date(row.get("Data")), tither_name=nome, amount=amount,
-                congregation_id=int(default_cong_id),
-                sub_congregation_id=default_sub_cong_id,
-                payment_method=(str(row.get("Forma de Pagamento", "")).strip() or None)
+                date=row["Data"], tither_name=row["Dizimista"], amount=row["Valor"],
+                congregation_id=int(default_cong_id), sub_congregation_id=default_sub_cong_id,
+                payment_method=(row.get("Forma de Pagamento") or None)
             ))
         db.commit()
         # ================================================================
