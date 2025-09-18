@@ -1127,10 +1127,19 @@ def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFram
             edited[col] = edited[col].map(_to_float_brl)
         edited["Data do Culto"] = edited["Data do Culto"].map(lambda x: _to_date(x) if pd.notna(x) else None)
         edited.dropna(subset=["Data do Culto"], inplace=True)
+
+        # --- ALTERAÇÃO PRINCIPAL ---
+        # Agrega o DataFrame editado por data para suportar múltiplas linhas de culto no UI.
+        # Isso soma todas as entradas para o mesmo dia antes de processar.
+        if not edited.empty:
+            edited_summed = edited.groupby('Data do Culto').agg({'Dízimo': 'sum', 'Oferta': 'sum'}).reset_index()
+        else:
+            edited_summed = edited
+        # --- FIM DA ALTERAÇÃO ---
+
+        wanted = {r["Data do Culto"]: (float(r["Dízimo"]), float(r["Oferta"])) for _, r in edited_summed.iterrows()}
         
-        wanted = {r["Data do Culto"]: (float(r["Dízimo"]), float(r["Oferta"])) for _, r in edited.iterrows()}
-        
-        orig_dates = set(pd.to_datetime(orig_df["Data do Culto"]).dt.date)
+        orig_dates = set(pd.to_datetime(orig_df["Data do Culto"]).dt.date) if not orig_df.empty else set()
         edited_dates = set(wanted.keys())
         all_dates = sorted(list(orig_dates.union(edited_dates)))
         
@@ -1142,26 +1151,17 @@ def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFram
             tithe_sub_filter = Tithe.sub_congregation_id.is_(None) if sub_cong_id is None else Tithe.sub_congregation_id == sub_cong_id
             tx_sub_filter = Transaction.sub_congregation_id.is_(None) if sub_cong_id is None else Transaction.sub_congregation_id == sub_cong_id
 
-            # [NOVO] Lógica para apagar dízimos nominais se o total do dia for zerado no resumo
             if d in orig_dates and abs(want_dz) < 0.01:
-                # 1. Deletar todos os Dízimos Nominais (Tithe) para este dia/unidade
                 db.query(Tithe).filter(
-                    Tithe.congregation_id == cong_id,
-                    Tithe.date == d,
-                    tithe_sub_filter
+                    Tithe.congregation_id == cong_id, Tithe.date == d, tithe_sub_filter
                 ).delete(synchronize_session=False)
 
-                # 2. Deletar todas as Transações de Dízimo (Transaction) para este dia/unidade
-                db.query(Transaction).filter(
-                    Transaction.congregation_id == cong_id,
-                    Transaction.date == d,
-                    Transaction.category_id == cat_diz.id,
-                    tx_sub_filter
-                ).delete(synchronize_session=False)
-                
-                # Zera o valor de oferta também, pois a linha inteira foi removida
+                if cat_diz:
+                    db.query(Transaction).filter(
+                        Transaction.congregation_id == cong_id, Transaction.date == d,
+                        Transaction.category_id == cat_diz.id, tx_sub_filter
+                    ).delete(synchronize_session=False)
                 want_of = 0.0
-            # [FIM DO NOVO BLOCO]
 
             sum_dz_tithes_q = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
                 Tithe.congregation_id == cong_id, Tithe.date == d, tithe_sub_filter
@@ -1662,7 +1662,7 @@ def page_lancamentos(user: "User"):
             st.divider()
             
             with st.expander("➕ Lançar ENTRADA", expanded=True):
-                with st.form("form_entrada"):
+                 with st.form("form_entrada"):
                     cats_in = [c for c in categories_for_type(db, TYPE_IN) if "ajuste" not in _norm(c.name)]
                     c1, c2 = st.columns(2)
                     with c1: ent_data = st.date_input("Data da Entrada", value=today_bahia(), key="ent_data")
@@ -1717,40 +1717,47 @@ def page_lancamentos(user: "User"):
             ref_tab = get_month_selector("Mês de referência da tabela")
             start_tab, end_tab = month_bounds(ref_tab)
             
-            # --- Bloco de Verificação de Divergência ---
             datas_divergentes = _verificar_divergencia_dizimos(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
             if datas_divergentes:
                 datas_str = ", ".join([d.strftime('%d/%m') for d in datas_divergentes])
-                st.warning(f"**Atenção:** Valores de entrada de dízimo total por culto e valores de entrada de dízimo por dizimista estão divergindo nos dias: **{datas_str}**. Favor, verifique.")
+                st.warning(f"**Atenção:** Valores de dízimo estão divergindo nos dias: **{datas_str}**. Verifique os lançamentos.")
             
-            st.markdown("##### Entradas (Dízimo e Oferta)")
-            df_entradas = _entrada_summary_df(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
-            if df_entradas.empty:
-                df_entradas = pd.DataFrame([{"Data do Culto": today_bahia(), "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0}])
-            edited_entradas = st.data_editor(df_entradas, use_container_width=True, hide_index=True, num_rows="dynamic", key=f"editor_entradas_{parent_cong_obj.id}_{target_sub_cong_id}")
+            st.markdown("##### Entradas (Dízimo e Oferta) por Culto")
+            st.caption("Você pode adicionar múltiplas linhas para a mesma data. Ao salvar, os valores serão somados no total do dia.")
             
-            try:
-                total_dizimo, total_oferta, total_geral = 0.0, 0.0, 0.0
-                if isinstance(edited_entradas, pd.DataFrame) and not edited_entradas.empty:
-                    df_calc = edited_entradas.copy(); df_calc["Dízimo"] = df_calc["Dízimo"].map(_to_float_brl); df_calc["Oferta"] = df_calc["Oferta"].map(_to_float_brl)
-                    total_dizimo = df_calc["Dízimo"].sum(); total_oferta = df_calc["Oferta"].sum(); total_geral = total_dizimo + total_oferta
-            except Exception: pass
+            base_df = _entrada_summary_df(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
             
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total Dízimos (tabela)", format_currency(total_dizimo))
-            col2.metric("Total Ofertas (tabela)", format_currency(total_oferta))
-            col3.metric("Total Geral (tabela)", format_currency(total_geral))
-            _save_btn(lambda: _apply_entrada_summary_changes(df_entradas, edited_entradas, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id), f"lan_tab_{parent_cong_obj.id}_{target_sub_cong_id}", "entrada")
+            # Garante que, se o dataframe estiver vazio, o editor apareça com uma linha em branco para inserção
+            df_para_editar = base_df if not base_df.empty else pd.DataFrame([{"Data do Culto": today_bahia(), "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0}])
+
+            edited_entradas = st.data_editor(
+                df_para_editar, 
+                use_container_width=True, hide_index=True, num_rows="dynamic", 
+                key=f"editor_entradas_{parent_cong_obj.id}_{target_sub_cong_id}",
+                column_config={
+                    "Data do Culto": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
+                    "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", format="R$ %.2f"),
+                    "Oferta": st.column_config.NumberColumn("Oferta (R$)", format="R$ %.2f"),
+                    "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
+                }
+            )
+            
+            def _save_summary():
+                _apply_entrada_summary_changes(orig_df=base_df, edited_df=edited_entradas, cong_id=parent_cong_obj.id, start=start_tab, end=end_tab, sub_cong_id=target_sub_cong_id)
+                st.toast("💾 Alterações de entrada salvas com sucesso!", icon="✅")
+                st.rerun()
+            
+            _save_btn(_save_summary, f"lan_tab_{parent_cong_obj.id}_{target_sub_cong_id}", "entrada")
 
             st.markdown("---")
             tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id == target_sub_cong_id)
             tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
-            _editor_dizimos(tithes, f"Dizimistas - {contexto_tabela}", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
+            _editor_dizimos(tithes, f"Lançamento de Dizimistas - {contexto_tabela}", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
 
             st.markdown("---")
             txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_OUT, Transaction.sub_congregation_id == target_sub_cong_id)
             txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
-            _editor_lancamentos(txs_out, f"Saídas - {contexto_tabela}", tx_type_hint=TYPE_OUT, force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
+            _editor_lancamentos(txs_out, f"Lançamento de Saídas - {contexto_tabela}", tx_type_hint=TYPE_OUT, force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
 # ===== PÁGINA: LANÇAMENTOS (com modo Tabela + 3 editores) =====
 # ===== PÁGINA: LANÇAMENTOS (modo Tabela mostra total abaixo de cada uma) =====
 
