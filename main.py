@@ -60,6 +60,8 @@ ADJ_ENTRY_DESC = "[Ajuste via relatório de entrada]"
 ADJ_MISS_IN_DESC = "[Ajuste Missões por Congregação]"
 ADJ_ENTRY_AGG_DESC = "[Ajuste total de entradas (mês, sede)]"
 ADJ_OUT_AGG_DESC   = "[Ajuste total de saídas (mês, sede)]"
+ADJ_HIER_ENTRY_DESC = "[Ajuste via Relatório Hierárquico (Entrada)]"
+ADJ_HIER_OUT_DESC = "[Ajuste via Relatório Hierárquico (Saída)]"
 
 # ===================== ST CONFIG / THEME =====================
 # ===================== ST CONFIG / THEME =====================
@@ -2978,99 +2980,204 @@ def page_cadastro(user: "User"):
             # ... (seu código de usuários aqui) ...
 # ===================== PAGE: LANÇAMENTOS =====================
 
-def display_entry_hierarchy(congs_all: List[Congregation], start: date, end: date, db: Session):
-    """Gera e exibe um DataFrame com a hierarquia de entradas, sem somar a principal com as subs."""
-    st.info("Este é um relatório de visualização. A edição é feita na visão detalhada de cada unidade.")
+def display_entry_hierarchy(user: User, congs_all: List[Congregation], start: date, end: date, db: Session):
+    st.info("Visualização hierárquica de todas as entradas (exceto Missões).")
     
     report_data = []
-    grand_total = 0.0
-
     for cong in congs_all:
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id).order_by(SubCongregation.name)).all()
         
         principal_totals = _collect_month_data(db, cong.id, start, end, sub_cong_id=None)["totals"]
         principal_entradas = principal_totals["entradas_total_sem_missoes"]
         
-        # Se não houver subs, mostra apenas uma linha simples
-        if not sub_congs:
-            report_data.append({"Unidade": cong.name, "Entradas": principal_entradas})
-            grand_total += principal_entradas
-            continue
-
-        # Se houver subs, monta a estrutura hierárquica
-        subs_data = []
-        total_subs = 0.0
+        # Adiciona a linha da congregação principal
+        report_data.append({
+            "Unidade": f"{cong.name} (Principal)", "Entradas": principal_entradas,
+            "cong_id": cong.id, "sub_id": None
+        })
+        
         for sub in sub_congs:
             sub_totals = _collect_month_data(db, cong.id, start, end, sub_cong_id=sub.id)["totals"]
             sub_entradas = sub_totals["entradas_total_sem_missoes"]
-            subs_data.append({"Unidade": f"↳ {sub.name}", "Entradas": sub_entradas})
-            total_subs += sub_entradas
-            
-        subs_data.sort(key=lambda item: item["Entradas"], reverse=True)
-        
-        # Adiciona um título para o grupo
-        report_data.append({"Unidade": f"**{cong.name}**", "Entradas": ""})
-        # Adiciona a linha da congregação principal e das subs
-        report_data.append({"Unidade": f"↳ {cong.name} (Principal)", "Entradas": principal_entradas})
-        report_data.extend(subs_data)
-        
-        # Atualiza o total geral
-        grand_total += principal_entradas + total_subs
+            report_data.append({
+                "Unidade": f"↳ {sub.name}", "Entradas": sub_entradas,
+                "cong_id": cong.id, "sub_id": sub.id
+            })
 
     if not report_data:
         st.warning("Nenhum dado de entrada encontrado para o período."); return
 
     df_report = pd.DataFrame(report_data)
     
-    st.dataframe(
-        df_report.style.format({"Entradas": format_currency}).hide(axis="index"),
-        use_container_width=True
-    )
-    st.metric("Total Geral de Entradas (todas as congregações)", format_currency(grand_total))
+    # Se for SEDE, mostra editor. Senão, mostra tabela normal.
+    if user.role == "SEDE":
+        st.warning("✏️ Modo de edição para SEDE ativado. As alterações aqui criarão lançamentos de ajuste.")
+        
+        df_editor_view = df_report[["Unidade", "Entradas"]].copy()
 
-def display_exit_hierarchy(congs_all: List[Congregation], start: date, end: date, db: Session):
-    """Gera e exibe um DataFrame com a hierarquia de saídas, sem somar a principal com as subs."""
-    st.info("Este é um relatório de visualização. A edição é feita na visão detalhada de cada unidade.")
+        edited_df = st.data_editor(
+            df_editor_view,
+            use_container_width=True,
+            hide_index=True,
+            key="hierarchical_entry_editor",
+            column_config={
+                "Unidade": st.column_config.TextColumn("Unidade", disabled=True),
+                "Entradas": st.column_config.NumberColumn("Entradas (R$)", format="R$ %.2f", min_value=0.0)
+            }
+        )
+
+        def _save_changes():
+            # Mescla os dados originais (com IDs) com os dados editados
+            merged_df = pd.merge(df_report, edited_df, on="Unidade", suffixes=('_orig', '_new'))
+            
+            with SessionLocal() as db_session:
+                cat_oferta = db_session.scalar(select(Category).where(func.lower(Category.name) == "oferta"))
+                if not cat_oferta:
+                    st.error("Categoria 'Oferta' não encontrada, necessária para salvar ajustes.")
+                    return
+
+                for _, row in merged_df.iterrows():
+                    valor_original = float(row['Entradas_orig'])
+                    valor_novo = float(row['Entradas_new'])
+                    
+                    if abs(valor_original - valor_novo) < 0.01:
+                        continue # Pula se não houver mudança
+
+                    ajuste_necessario = valor_novo - valor_original
+                    cong_id, sub_id = row['cong_id'], row['sub_id']
+                    
+                    tx_sub_filter = Transaction.sub_congregation_id.is_(None) if sub_id is None else Transaction.sub_congregation_id == sub_id
+                    
+                    q_adj = select(Transaction).where(
+                        Transaction.congregation_id == cong_id, tx_sub_filter,
+                        Transaction.date == start, Transaction.description == ADJ_HIER_ENTRY_DESC
+                    )
+                    adj_existente = db_session.scalar(q_adj)
+
+                    if adj_existente:
+                        novo_valor = adj_existente.amount + ajuste_necessario
+                        if abs(novo_valor) < 0.01:
+                            db_session.delete(adj_existente)
+                        else:
+                            adj_existente.amount = novo_valor
+                    else:
+                        db_session.add(Transaction(
+                            date=start, type=TYPE_IN, category_id=cat_oferta.id,
+                            amount=ajuste_necessario, description=ADJ_HIER_ENTRY_DESC,
+                            congregation_id=cong_id, sub_congregation_id=sub_id
+                        ))
+                
+                db_session.commit()
+                st.toast("Ajustes de entrada salvos com sucesso!", icon="✅")
+                st.rerun()
+
+        _save_btn(_save_changes, "save_hier_entry", theme="entrada")
+
+    else: # Visualização para outros usuários
+        st.dataframe(
+            df_report[["Unidade", "Entradas"]].style.format({"Entradas": format_currency}),
+            use_container_width=True, hide_index=True
+        )
+
+    grand_total = df_report["Entradas"].sum()
+    st.metric("Total Geral de Entradas (todas as unidades)", format_currency(grand_total))
+
+def display_exit_hierarchy(user: User, congs_all: List[Congregation], start: date, end: date, db: Session):
+    st.info("Visualização hierárquica de todas as saídas.")
     
     report_data = []
-    grand_total = 0.0
-
     for cong in congs_all:
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id).order_by(SubCongregation.name)).all()
         
         principal_totals = _collect_month_data(db, cong.id, start, end, sub_cong_id=None)["totals"]
         principal_saidas = principal_totals["saidas_total"]
         
-        if not sub_congs:
-            report_data.append({"Unidade": cong.name, "Saídas": principal_saidas})
-            grand_total += principal_saidas
-            continue
-
-        subs_data = []
-        total_subs = 0.0
+        report_data.append({
+            "Unidade": f"{cong.name} (Principal)", "Saídas": principal_saidas,
+            "cong_id": cong.id, "sub_id": None
+        })
+        
         for sub in sub_congs:
             sub_totals = _collect_month_data(db, cong.id, start, end, sub_cong_id=sub.id)["totals"]
             sub_saidas = sub_totals["saidas_total"]
-            subs_data.append({"Unidade": f"↳ {sub.name}", "Saídas": sub_saidas})
-            total_subs += sub_saidas
-            
-        subs_data.sort(key=lambda item: item["Saídas"], reverse=True)
-            
-        grand_total += principal_saidas + total_subs
-        
-        report_data.append({"Unidade": f"**{cong.name}**", "Saídas": ""})
-        report_data.append({"Unidade": f"↳ {cong.name} (Principal)", "Saídas": principal_saidas})
-        report_data.extend(subs_data)
+            report_data.append({
+                "Unidade": f"↳ {sub.name}", "Saídas": sub_saidas,
+                "cong_id": cong.id, "sub_id": sub.id
+            })
 
     if not report_data:
         st.warning("Nenhum dado de saída encontrado para o período."); return
 
     df_report = pd.DataFrame(report_data)
-    
-    st.dataframe(
-        df_report.style.format({"Saídas": format_currency}).hide(axis="index"),
-        use_container_width=True
-    )
+
+    if user.role == "SEDE":
+        st.warning("✏️ Modo de edição para SEDE ativado. As alterações aqui criarão lançamentos de ajuste.")
+
+        df_editor_view = df_report[["Unidade", "Saídas"]].copy()
+        
+        edited_df = st.data_editor(
+            df_editor_view,
+            use_container_width=True, hide_index=True,
+            key="hierarchical_exit_editor",
+            column_config={
+                "Unidade": st.column_config.TextColumn("Unidade", disabled=True),
+                "Saídas": st.column_config.NumberColumn("Saídas (R$)", format="R$ %.2f", min_value=0.0)
+            }
+        )
+
+        def _save_changes():
+            merged_df = pd.merge(df_report, edited_df, on="Unidade", suffixes=('_orig', '_new'))
+            
+            with SessionLocal() as db_session:
+                cat_out_default = db_session.scalars(select(Category).where(Category.type == TYPE_OUT)).first()
+                if not cat_out_default:
+                    st.error("Nenhuma categoria de SAÍDA encontrada, necessária para salvar ajustes.")
+                    return
+
+                for _, row in merged_df.iterrows():
+                    valor_original = float(row['Saídas_orig'])
+                    valor_novo = float(row['Saídas_new'])
+                    
+                    if abs(valor_original - valor_novo) < 0.01:
+                        continue
+
+                    ajuste_necessario = valor_novo - valor_original
+                    cong_id, sub_id = row['cong_id'], row['sub_id']
+                    
+                    tx_sub_filter = Transaction.sub_congregation_id.is_(None) if sub_id is None else Transaction.sub_congregation_id == sub_id
+                    
+                    q_adj = select(Transaction).where(
+                        Transaction.congregation_id == cong_id, tx_sub_filter,
+                        Transaction.date == start, Transaction.description == ADJ_HIER_OUT_DESC
+                    )
+                    adj_existente = db_session.scalar(q_adj)
+
+                    if adj_existente:
+                        novo_valor = adj_existente.amount + ajuste_necessario
+                        if abs(novo_valor) < 0.01:
+                            db_session.delete(adj_existente)
+                        else:
+                            adj_existente.amount = novo_valor
+                    else:
+                        db_session.add(Transaction(
+                            date=start, type=TYPE_OUT, category_id=cat_out_default.id,
+                            amount=ajuste_necessario, description=ADJ_HIER_OUT_DESC,
+                            congregation_id=cong_id, sub_congregation_id=sub_id
+                        ))
+                
+                db_session.commit()
+                st.toast("Ajustes de saída salvos com sucesso!", icon="✅")
+                st.rerun()
+
+        _save_btn(_save_changes, "save_hier_exit", theme="saida")
+
+    else: # Visualização para outros usuários
+        st.dataframe(
+            df_report[["Unidade", "Saídas"]].style.format({"Saídas": format_currency}),
+            use_container_width=True, hide_index=True
+        )
+
+    grand_total = df_report["Saídas"].sum()
     st.metric("Total Geral de Saídas (todas as congregações)", format_currency(grand_total))
                    
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
