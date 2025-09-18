@@ -769,6 +769,50 @@ def order_congs_sede_first(congs: List[Congregation]) -> List[Congregation]:
     others = sorted([c for c in congs if _norm(c.name) != "sede"], key=lambda x: _norm(x.name))
     return (sede + others) if sede else others
 
+def _verificar_divergencia_dizimos(db: Session, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> List[date]:
+    """
+    Verifica se há divergência entre os dízimos nominais (Tithe) e os
+    lançados como transação de categoria 'Dízimo'. Retorna uma lista de datas com divergências.
+    """
+    # Filtros para sub-congregação que funcionam corretamente com None (Principal)
+    tithe_sub_filter = Tithe.sub_congregation_id.is_(None) if sub_cong_id is None else Tithe.sub_congregation_id == sub_cong_id
+    tx_sub_filter = Transaction.sub_congregation_id.is_(None) if sub_cong_id is None else Transaction.sub_congregation_id == sub_cong_id
+
+    # 1. Soma dos dízimos nominais (Tithe) por dia
+    q_tithes = select(Tithe.date, func.sum(Tithe.amount)).where(
+        Tithe.congregation_id == cong_id,
+        Tithe.date >= start, Tithe.date < end,
+        tithe_sub_filter
+    ).group_by(Tithe.date)
+    tithes_por_dia = {d: float(s or 0.0) for d, s in db.execute(q_tithes)}
+
+    # 2. Soma dos dízimos em transações (Transaction) por dia
+    cat_diz = db.scalar(select(Category).where(func.lower(Category.name).in_(("dizimo", "dízimo"))))
+    if not cat_diz:
+        return [] # Se não há categoria dízimo, não há como comparar
+
+    q_trans = select(Transaction.date, func.sum(Transaction.amount)).where(
+        Transaction.congregation_id == cong_id,
+        Transaction.date >= start, Transaction.date < end,
+        Transaction.category_id == cat_diz.id,
+        tx_sub_filter
+    ).group_by(Transaction.date)
+    trans_por_dia = {d: float(s or 0.0) for d, s in db.execute(q_trans)}
+
+    # 3. Compara os valores e encontra os dias com divergência
+    datas_divergentes = []
+    todos_os_dias = sorted(list(set(tithes_por_dia.keys()) | set(trans_por_dia.keys())))
+
+    for dia in todos_os_dias:
+        total_tithe = tithes_por_dia.get(dia, 0.0)
+        total_trans = trans_por_dia.get(dia, 0.0)
+
+        # A divergência ocorre se os valores são diferentes (com uma pequena tolerância para floats)
+        if abs(total_tithe - total_trans) > 0.01:
+             datas_divergentes.append(dia)
+
+    return datas_divergentes
+
 def sidebar_common(user: "User") -> str:
     """
     Desenha o menu lateral e retorna a página selecionada.
@@ -1672,6 +1716,12 @@ def page_lancamentos(user: "User"):
             st.info(f"Editando lançamentos de: **{contexto_tabela}**")
             ref_tab = get_month_selector("Mês de referência da tabela")
             start_tab, end_tab = month_bounds(ref_tab)
+            
+            # --- Bloco de Verificação de Divergência ---
+            datas_divergentes = _verificar_divergencia_dizimos(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
+            if datas_divergentes:
+                datas_str = ", ".join([d.strftime('%d/%m') for d in datas_divergentes])
+                st.warning(f"**Atenção:** Valores de entrada de dízimo total por culto e valores de entrada de dízimo por dizimista estão divergindo nos dias: **{datas_str}**. Favor, verifique.")
             
             st.markdown("##### Entradas (Dízimo e Oferta)")
             df_entradas = _entrada_summary_df(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
@@ -3196,18 +3246,18 @@ def page_relatorio_entrada(user: "User"):
         if user.role == "SEDE":
             congs_all = order_congs_sede_first(cong_options_for(user, db))
             escopo_opts = [
-                "-- Relatório Hierárquico (Visualização) --", 
-                "-- Visão Agregada (Visualização) --"
+                "-- Relatório Hierárquico --", 
+                "-- Visão Agregada (Editável) --"
             ] + [c.name for c in congs_all]
             
             escopo_selecionado = st.selectbox("Selecione o escopo do relatório:", escopo_opts, key="re_sede_escopo")
             
-            if escopo_selecionado == "-- Relatório Hierárquico (Visualização) --":
+            if escopo_selecionado == "-- Relatório Hierárquico --":
                 display_entry_hierarchy(user, congs_all, start, end, db)
                 return
-            elif escopo_selecionado == "-- Visão Agregada (Visualização) --": # Alterado o label
-                st.info("Visualização do total de entradas por unidade.")
-                _editor_entradas_agg_all(congs_all, start, end)
+            elif escopo_selecionado == "-- Visão Agregada (Editável) --":
+                st.info("Modo de edição do total de entradas por unidade.")
+                _editor_entradas_agg_all(user, congs_all, start, end)
                 return
             else:
                 parent_cong_obj = next((c for c in congs_all if c.name == escopo_selecionado), None)
@@ -3247,9 +3297,14 @@ def page_relatorio_entrada(user: "User"):
             df_agg = pd.DataFrame(rows)
             st.dataframe(df_agg.style.format({"Dízimos": format_currency, "Ofertas": format_currency, "Total Entradas": format_currency}), use_container_width=True, hide_index=True)
         else:
+            # --- Bloco de Verificação de Divergência ---
+            datas_divergentes = _verificar_divergencia_dizimos(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id_or_all)
+            if datas_divergentes:
+                datas_str = ", ".join([d.strftime('%d/%m') for d in datas_divergentes])
+                st.warning(f"**Atenção:** Valores de entrada de dízimo total por culto e valores de entrada de dízimo por dizimista estão divergindo nos dias: **{datas_str}**. Favor, verifique.")
+            
             base_df = _entrada_summary_df(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id_or_all)
             
-            # ALTERADO: st.data_editor virou st.dataframe
             st.dataframe(
                 base_df.style.format({
                     "Data do Culto": "{:%d/%m/%Y}",
@@ -3260,8 +3315,7 @@ def page_relatorio_entrada(user: "User"):
                 use_container_width=True,
                 hide_index=True
             )
-
-            # Lógica de totais agora usa o 'base_df' (dataframe original)
+            
             try:
                 total_dizimo, total_oferta, total_geral_unidade = 0.0, 0.0, 0.0
                 if not base_df.empty:
