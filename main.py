@@ -810,7 +810,6 @@ def _gerar_df_cultos(db: Session, cong_id: int, start: date, end: date, sub_cong
         for d, tag, total in db.execute(q_ofe_tx):
             cultos[(d, tag or "")]["oferta"] += float(total or 0.0)
 
-    # Nomes de coluna e cálculo do total ajustados aqui
     if not cultos:
         return pd.DataFrame(columns=["Data do Culto", "Culto/Evento", "Dízimos", "Oferta", "Total"])
 
@@ -831,7 +830,7 @@ def _gerar_df_cultos(db: Session, cong_id: int, start: date, end: date, sub_cong
 
 def _aplicar_mudancas_cultos(orig_df: pd.DataFrame, edited_df: pd.DataFrame, cong_id: int, sub_cong_id: Optional[int]):
     """Salva as alterações da tabela de cultos, usando os novos nomes de coluna."""
-    # Nomes de coluna atualizados
+    # CORREÇÃO: Usando os nomes de coluna corretos
     edited_df['Data do Culto'] = pd.to_datetime(edited_df['Data do Culto'], errors='coerce').dt.date
     edited_df.dropna(subset=['Data do Culto'], inplace=True)
     
@@ -851,6 +850,7 @@ def _aplicar_mudancas_cultos(orig_df: pd.DataFrame, edited_df: pd.DataFrame, con
             key = row['key']
             orig_row = orig_df[orig_df['key'] == key]
             
+            # CORREÇÃO: Usando os nomes de coluna corretos
             new_dizimo, new_oferta = row['Dízimos'], row['Oferta']
             orig_dizimo = orig_row['Dízimos'].iloc[0] if not orig_row.empty else 0.0
             orig_oferta = orig_row['Oferta'].iloc[0] if not orig_row.empty else 0.0
@@ -1788,11 +1788,10 @@ def page_lancamentos(user: "User"):
             st.error("Nenhuma congregação selecionada ou encontrada."); return
 
         st.markdown(f"### CONGREGAÇÃO: {parent_cong_obj.name.upper()}")
-
-        # --- SELETOR DE MODO SIMPLIFICADO ---
+        
         modo = st.radio(
             "Modo de lançamento:",
-            ["Formulário Detalhado", "Editar Tabelas do Mês"],
+            ["Editar Tabelas do Mês", "Formulário Detalhado"],
             horizontal=True,
             key="lan_modo_sel"
         )
@@ -1869,7 +1868,7 @@ def page_lancamentos(user: "User"):
                                 sub_congregation_id=target_sub_cong_id, service_tag=(sai_service_tag.strip() or None)
                             ))
                             db.commit(); st.success("Saída registrada!"); st.rerun()
-
+                            
         elif modo == "Editar Tabelas do Mês":
             st.info(f"Editando tabelas de: **{contexto_selecionado}**")
             ref_tab = get_month_selector("Mês de referência")
@@ -1881,14 +1880,13 @@ def page_lancamentos(user: "User"):
                 datas_str = ", ".join([d.strftime('%d/%m') for d in datas_divergentes])
                 st.warning(f"**Atenção:** Valores de dízimo estão divergindo nos dias: **{datas_str}**. Verifique os lançamentos.")
             
-            # --- Tabela 1: Entradas por Culto ---
             st.markdown("##### Entradas por Culto/Evento")
             st.caption("Adicione ou edite linhas para cada culto (ex: 'Manhã', 'Noite').")
 
-            base_df_cultos = _gerar_df_cultos(db, parent_cong_obj.id, start_tab, end_tab, target_sub_cong_id)
+            base_df = _gerar_df_cultos(db, parent_cong_obj.id, start_tab, end_tab, target_sub_cong_id)
             
-            edited_df_cultos = st.data_editor(
-                base_df_cultos,
+            edited_df = st.data_editor(
+                base_df,
                 use_container_width=True, hide_index=True, num_rows="dynamic",
                 key=f"editor_cultos_{parent_cong_obj.id}_{target_sub_cong_id}",
                 column_config={
@@ -1901,19 +1899,17 @@ def page_lancamentos(user: "User"):
             )
 
             def _save_cultos():
-                _aplicar_mudancas_cultos(base_df_cultos, edited_df_cultos, parent_cong_obj.id, target_sub_cong_id)
+                _aplicar_mudancas_cultos(base_df, edited_df, parent_cong_obj.id, target_sub_cong_id)
                 st.toast("✅ Entradas por culto salvas com sucesso!", icon="✅")
                 st.rerun()
 
             _save_btn(_save_cultos, f"save_cultos_{parent_cong_obj.id}_{target_sub_cong_id}", "entrada")
             
-            # --- Tabela 2: Dizimistas ---
             st.markdown("---")
             tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id == target_sub_cong_id)
             tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
             _editor_dizimos(tithes, f"Lançamento de Dizimistas (Nominal)", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
 
-            # --- Tabela 3: Saídas ---
             st.markdown("---")
             txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_OUT, Transaction.sub_congregation_id == target_sub_cong_id)
             txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
