@@ -1747,7 +1747,7 @@ def page_relatorio_dizimistas(user: "User"):
                 method = (tithe.payment_method or "Não Informado").upper()
                 tithes_by_payment[method]["count"] += 1
                 tithes_by_payment[method]["total"] += float(tithe.amount)
-
+            
             st.subheader("Resumo de Pagamentos de Dízimos")
             if tithes_by_payment:
                 cols_metrics = st.columns(len(tithes_by_payment))
@@ -1756,8 +1756,7 @@ def page_relatorio_dizimistas(user: "User"):
 
             st.divider()
             
-            # --- ALTERAÇÃO PRINCIPAL AQUI ---
-            # A chamada para _editor_dizimos foi trocada por um st.dataframe para ser apenas visualização.
+            # --- CORREÇÃO APLICADA AQUI ---
             st.markdown("##### Dizimistas do Período (Visualização)")
             if tithes:
                 rows = [
@@ -1782,11 +1781,11 @@ def page_relatorio_dizimistas(user: "User"):
                 st.metric("Total de Dízimos (nominal) no período", format_currency(total_mes))
             else:
                 st.caption("Nenhum dízimo nominal registrado para este período.")
-            # --- FIM DA ALTERAÇÃO ---
+            # --- FIM DA CORREÇÃO ---
 
         st.divider()
-        # A funcionalidade de pesquisa abaixo permanece inalterada
         st.subheader("Pesquisa de Dizimistas (por Ano)")
+        # O resto da função (pesquisa) continua exatamente igual
         c1, c2, c3, c4, c5 = st.columns([1.2, 1.8, 1.4, 2.2, 1.6])
         with c1:
             ano_pesq = st.number_input("Ano", value=today_bahia().year, step=1, format="%d", key="srch_year")
@@ -1855,7 +1854,6 @@ def page_relatorio_dizimistas(user: "User"):
         if not df_pesq.empty:
             df_show = df_pesq.sort_values(["Qtde de meses no ano","Dizimista"], ascending=[False, True]).reset_index(drop=True)
             
-            # Criando uma cópia para exibição com o valor formatado
             df_display = df_show.copy()
             df_display["Total no ano (R$)"] = df_display["Total no ano (R$)"].map(format_currency)
 
