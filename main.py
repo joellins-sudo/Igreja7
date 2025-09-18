@@ -47,7 +47,7 @@ import locale as _locale
 import pandas as pd
 import streamlit as st
 
-from sqlalchemy import select, func, String, Date, Float, ForeignKey, create_engine, and_, not_
+from sqlalchemy import select, func, String, Date, Float, ForeignKey, create_engine, and_, or_, not_, delete
 from sqlalchemy.orm import relationship, Mapped, mapped_column, sessionmaker, joinedload, Session
 from sqlalchemy.orm import DeclarativeBase
 import unicodedata as ud
@@ -1196,18 +1196,21 @@ def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFram
             tx_sub_filter = Transaction.sub_congregation_id.is_(None) if sub_cong_id is None else Transaction.sub_congregation_id == sub_cong_id
 
             if d in orig_dates and abs(want_dz) < 0.01:
-                # --- CORREÇÃO APLICADA AQUI com and_() ---
-                db.query(Tithe).filter(and_(
+                # --- CORREÇÃO APLICADA AQUI: Usando o método moderno de delete ---
+                stmt_tithe = delete(Tithe).where(and_(
                     Tithe.congregation_id == cong_id, Tithe.date == d, tithe_sub_filter
-                )).delete(synchronize_session=False)
+                ))
+                db.execute(stmt_tithe)
                 
                 if cat_diz:
-                    db.query(Transaction).filter(and_(
+                    stmt_tx = delete(Transaction).where(and_(
                         Transaction.congregation_id == cong_id, Transaction.date == d, 
                         Transaction.category_id == cat_diz.id, tx_sub_filter
-                    )).delete(synchronize_session=False)
+                    ))
+                    db.execute(stmt_tx)
                 want_of = 0.0
-
+            
+            # O restante da lógica de cálculo de ajuste permanece igual
             sum_dz_tithes_q = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(Tithe.congregation_id == cong_id, Tithe.date == d, tithe_sub_filter)
             sum_dz_tithes = float(db.scalar(sum_dz_tithes_q) or 0.0)
             
