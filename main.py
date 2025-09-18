@@ -47,7 +47,7 @@ import locale as _locale
 import pandas as pd
 import streamlit as st
 
-from sqlalchemy import select, func, String, Date, Float, ForeignKey, create_engine, and_
+from sqlalchemy import select, func, String, Date, Float, ForeignKey, create_engine, and_, not__
 from sqlalchemy.orm import relationship, Mapped, mapped_column, sessionmaker, joinedload, Session
 from sqlalchemy.orm import DeclarativeBase
 import unicodedata as ud
@@ -1219,13 +1219,31 @@ def _apply_entrada_summary_changes_split(
             return float(db.scalar(q) or 0.0)
 
         def sum_tx_no_adj_dia(d: date, cat_id: int) -> float:
-            # Exclui qualquer ajuste (tanto o genérico quanto os "por tipo")
+            """
+            Soma das transações do dia para a categoria indicada, EXCLUINDO:
+            - Ajuste genérico de entrada (prefixo ADJ_ENTRY_DESC)
+            - Ajustes 'por tipo' (prefixo ADJ_ENTRY_DESC_SPLIT_PREFIX)
+            Mantém a filtragem correta da (sub)congregação.
+            """
+            # (desc IS NULL) OR (desc NOT LIKE 'ajuste%') AND (desc NOT LIKE 'ajuste_por_tipo%')
+            desc = Transaction.description
+            exclude_desc = or_(
+                desc.is_(None),
+                and_(
+                    not_(desc.like(f"{ADJ_ENTRY_DESC}%")),
+                    not_(desc.like(f"{ADJ_ENTRY_DESC_SPLIT_PREFIX}%")),
+                )
+            )
+
             q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
-                Transaction.congregation_id == cong_id, Transaction.date == d,
-                Transaction.category_id == cat_id, _unit_filter(Transaction.sub_congregation_id),
-                ~func.startswith(func.coalesce(Transaction.description, ""), ADJ_ENTRY_DESC)  # exclui "[Ajuste via relatório de entrada"
+                Transaction.congregation_id == cong_id,
+                Transaction.date == d,
+                Transaction.category_id == cat_id,
+                _unit_filter(Transaction.sub_congregation_id),
+                exclude_desc,
             )
             return float(db.scalar(q) or 0.0)
+
 
         # 1) calculamos, por data, o total desejado (soma das linhas por tipo)
         wanted_by_date = {}
