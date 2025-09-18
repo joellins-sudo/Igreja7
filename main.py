@@ -78,6 +78,16 @@ ADJ_OUT_AGG_DESC   = "[Ajuste total de saídas (mês, sede)]"
 ADJ_HIER_ENTRY_DESC = "[Ajuste via Relatório Hierárquico (Entrada)]"
 ADJ_HIER_OUT_DESC = "[Ajuste via Relatório Hierárquico (Saída)]"
 
+TIPOS_DE_CULTO = [
+    "", # Opção para deixar em branco
+    "Domingo (Manhã)",
+    "Domingo (Noite)",
+    "Santa Ceia",
+    "Círculo de Oração",
+    "Doutrina",
+    "Outro",
+]
+
 # ===================== ST CONFIG / THEME =====================
 # ===================== ST CONFIG / THEME =====================
 
@@ -1085,8 +1095,8 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
         if "Valor" in d.columns: d["Valor"] = d["Valor"].map(_to_float_brl)
         if "Data" in d.columns:
             d["Data"] = d["Data"].map(_to_date)
-            d.dropna(subset=["Data"], inplace=True) # Garante que linhas sem data válida sejam removidas
-        for c in ("Categoria", "Descrição", "Congregação"):
+            d.dropna(subset=["Data"], inplace=True)
+        for c in ("Categoria", "Descrição", "Congregação", "Tipo de Culto"):
             if c in d.columns: d[c] = d[c].astype(str).fillna("")
         return d
 
@@ -1119,6 +1129,7 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
             if cat and t.category_id != cat.id: t.category_id = cat.id; changed = True
             if t.amount != new["Valor"]: t.amount = new["Valor"]; changed = True
             if (t.description or "") != (new.get("Descrição", "") or ""): t.description = new.get("Descrição"); changed = True
+            if (t.service_tag or "") != (new.get("Tipo de Culto", "") or ""): t.service_tag = new.get("Tipo de Culto") or None; changed = True
             if "_cong_id" in n.columns and int(new["_cong_id"]) != t.congregation_id:
                 t.congregation_id = int(new["_cong_id"]); changed = True
             if changed: db.add(t)
@@ -1136,7 +1147,8 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
             db.add(Transaction(
                 date=row["Data"], type=tx_type, category_id=cat.id, 
                 amount=row["Valor"], description=(row.get("Descrição") or None),
-                congregation_id=cong_id, sub_congregation_id=default_sub_cong_id
+                congregation_id=cong_id, sub_congregation_id=default_sub_cong_id,
+                service_tag=(row.get("Tipo de Culto") or None)
             ))
         db.commit()
 
@@ -1149,8 +1161,8 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
         if "Valor" in d.columns: d["Valor"] = d["Valor"].map(_to_float_brl)
         if "Data" in d.columns:
             d["Data"] = d["Data"].map(_to_date)
-            d.dropna(subset=["Data"], inplace=True) # Garante que linhas sem data válida sejam removidas
-        for c in ("Dizimista", "Forma de Pagamento"):
+            d.dropna(subset=["Data"], inplace=True)
+        for c in ("Dizimista", "Forma de Pagamento", "Tipo de Culto"):
             if c in d.columns: d[c] = d[c].astype(str).fillna("")
         return d
 
@@ -1180,6 +1192,7 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
             if t.tither_name != new["Dizimista"]: t.tither_name = new["Dizimista"]; changed = True
             if t.amount != new["Valor"]: t.amount = new["Valor"]; changed = True
             if (t.payment_method or "") != (new["Forma de Pagamento"] or ""): t.payment_method = new["Forma de Pagamento"] or None; changed = True
+            if (t.service_tag or "") != (new.get("Tipo de Culto", "") or ""): t.service_tag = new.get("Tipo de Culto") or None; changed = True
             if changed: db.add(t)
 
         for _, row in n.iterrows():
@@ -1190,12 +1203,12 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
             db.add(Tithe(
                 date=row["Data"], tither_name=row["Dizimista"], amount=row["Valor"],
                 congregation_id=int(default_cong_id), sub_congregation_id=default_sub_cong_id,
-                payment_method=(row.get("Forma de Pagamento") or None)
+                payment_method=(row.get("Forma de Pagamento") or None),
+                service_tag=(row.get("Tipo de Culto") or None)
             ))
         db.commit()
         # ================================================================
 
-# ===================== RELATÓRIO DE ENTRADA — TABELA ÚNICA (EDIT SUMÁRIO) =====================
 # ===================== RELATÓRIO DE ENTRADA — TABELA ÚNICA (EDIT SUMÁRIO) =====================
 def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
     # Base queries
@@ -1378,38 +1391,34 @@ def _editor_lancamentos(
 
     with SessionLocal() as db:
         cats = categories_for_type(db, tx_type)
-        # Em entradas, não mostrar Dízimo, pois ele tem tabela própria
         if tx_type == TYPE_IN:
-            cats = [c for c in cats if "dizimo" not in _norm(c.name)]
-        
+            cats = [c for c in cats if "ajuste" not in _norm(c.name) and "dizimo" not in _norm(c.name)]
         cat_names = [c.name for c in cats] or ["—"]
 
     rows = []
     if transactions:
         for t in transactions:
-            # Não exibir transações de ajuste de culto nesta tabela
             if t.description not in [ADJ_CULTOS_DIZIMO_DESC, ADJ_CULTOS_OFERTA_DESC]:
                 rows.append({
-                    "ID": t.id, "Data": t.date,
+                    "ID": t.id, "Data": t.date, "Tipo de Culto": t.service_tag or "",
                     "Categoria": (t.category.name if t.category else ""),
                     "Valor": float(t.amount), "Descrição": t.description or "",
                     "_cong_id": int(t.congregation_id or 0),
                 })
     else:
-        rows = [{"ID": None, "Data": today_bahia(), "Categoria": (cat_names[0] if cat_names else ""), "Valor": 0.0, "Descrição": "", "_cong_id": int(force_cong_id or 0)}]
+        rows = [{"ID": None, "Data": today_bahia(), "Tipo de Culto": "", "Categoria": (cat_names[0] if cat_names else ""), "Valor": 0.0, "Descrição": "", "_cong_id": int(force_cong_id or 0)}]
 
     df_full = pd.DataFrame(rows)
     df_view = df_full.drop(columns=["_cong_id"])
 
-    if titulo:
-        st.markdown(f"**{titulo}**")
+    if titulo: st.markdown(f"**{titulo}**")
         
     edited_view = st.data_editor(
         df_view, use_container_width=True, hide_index=True, num_rows="dynamic",
         column_config={
             "ID": st.column_config.Column("ID", disabled=True),
-            # --- CORREÇÃO APLICADA AQUI ---
             "Data": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
+            "Tipo de Culto": st.column_config.SelectboxColumn("Tipo de Culto", options=TIPOS_DE_CULTO, required=False),
             "Categoria": st.column_config.SelectboxColumn("Categoria", options=cat_names, required=True),
             "Valor": st.column_config.NumberColumn("Valor (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
             "Descrição": st.column_config.TextColumn("Descrição", max_chars=200),
@@ -1418,11 +1427,7 @@ def _editor_lancamentos(
     )
 
     try:
-        _total_val = 0.0
-        if isinstance(edited_view, pd.DataFrame) and not edited_view.empty and ("Valor" in edited_view.columns):
-            _ev = edited_view.copy()
-            _ev["Valor"] = _ev["Valor"].map(_to_float_brl)
-            _total_val = float(_ev["Valor"].sum())
+        _total_val = edited_view["Valor"].map(_to_float_brl).sum() if isinstance(edited_view, pd.DataFrame) else 0.0
     except Exception:
         _total_val = 0.0
     
@@ -1441,22 +1446,26 @@ def _editor_lancamentos(
 def _editor_dizimos(tithes: List["Tithe"], titulo: str, force_cong_id: Optional[int] = None, force_sub_cong_id: Optional[int] = None):
     rows = []
     if tithes:
-        rows = [{"ID": t.id, "Data": t.date, "Dizimista": t.tither_name, "Valor": float(t.amount), "Forma de Pagamento": t.payment_method or "", "_cong_id": int(t.congregation_id or 0)} for t in tithes]
+        rows = [{
+            "ID": t.id, "Data": t.date, "Tipo de Culto": t.service_tag or "", 
+            "Dizimista": t.tither_name, "Valor": float(t.amount), 
+            "Forma de Pagamento": t.payment_method or "", 
+            "_cong_id": int(t.congregation_id or 0)
+        } for t in tithes]
     else:
-        rows = [{"ID": None, "Data": today_bahia(), "Dizimista": "", "Valor": 0.0, "Forma de Pagamento": "", "_cong_id": int(force_cong_id or 0)}]
+        rows = [{"ID": None, "Data": today_bahia(), "Tipo de Culto": "", "Dizimista": "", "Valor": 0.0, "Forma de Pagamento": "", "_cong_id": int(force_cong_id or 0)}]
 
     df_full = pd.DataFrame(rows)
     df_view = df_full.drop(columns=["_cong_id"])
 
-    if titulo:
-        st.markdown(f"**{titulo}**")
+    if titulo: st.markdown(f"**{titulo}**")
         
     edited_view = st.data_editor(
         df_view, use_container_width=True, hide_index=True, num_rows="dynamic",
         column_config={
             "ID": st.column_config.Column("ID", disabled=True),
-            # --- CORREÇÃO APLICADA AQUI ---
             "Data": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
+            "Tipo de Culto": st.column_config.SelectboxColumn("Tipo de Culto", options=TIPOS_DE_CULTO, required=False),
             "Dizimista": st.column_config.TextColumn("Dizimista", max_chars=120, required=True),
             "Valor": st.column_config.NumberColumn("Valor (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
             "Forma de Pagamento": st.column_config.SelectboxColumn("Forma de Pagamento", options=["Dinheiro", "PIX", "Cartão", "Transferência", ""], required=False),
@@ -1465,11 +1474,7 @@ def _editor_dizimos(tithes: List["Tithe"], titulo: str, force_cong_id: Optional[
     )
 
     try:
-        _total_val = 0.0
-        if isinstance(edited_view, pd.DataFrame) and not edited_view.empty and ("Valor" in edited_view.columns):
-            _ev = edited_view.copy()
-            _ev["Valor"] = _ev["Valor"].map(_to_float_brl)
-            _total_val = float(_ev["Valor"].sum())
+        _total_val = edited_view["Valor"].map(_to_float_brl).sum() if isinstance(edited_view, pd.DataFrame) else 0.0
     except Exception:
         _total_val = 0.0
     st.metric("Total de DÍZIMOS (tabela)", format_currency(_total_val))
@@ -1802,7 +1807,7 @@ def page_lancamentos(user: "User"):
 
         modo = st.radio(
             "Modo de lançamento:",
-            ["Formulário Detalhado", "Editar Tabelas do Mês"],
+            ["Editar Tabelas do Mês", "Formulário Detalhado"],
             horizontal=True,
             key="lan_modo_sel"
         )
@@ -1826,10 +1831,11 @@ def page_lancamentos(user: "User"):
             with st.expander("➕ Lançar ENTRADA (Ofertas, Votos, etc)", expanded=False):
                  with st.form("form_entrada"):
                     cats_in = [c for c in categories_for_type(db, TYPE_IN) if "dizimo" not in _norm(c.name)]
-                    c1, c2 = st.columns(2)
+                    c1, c2, c3 = st.columns(3)
                     with c1: ent_data = st.date_input("Data da Entrada", value=today_bahia(), key="ent_data")
                     with c2: ent_cat_name = st.selectbox("Categoria", [c.name for c in cats_in] or ["—"], key="ent_cat")
-                    ent_desc = st.text_input("Descrição (Obrigatória para diferenciar cultos)", key="ent_desc", placeholder="Ex: Oferta Culto da Manhã")
+                    with c3: ent_service_tag = st.selectbox("Tipo de Culto (Opcional)", options=TIPOS_DE_CULTO, key="ent_service_tag")
+                    ent_desc = st.text_input("Descrição (opcional)", key="ent_desc", placeholder="Ex: Oferta Culto da Manhã")
                     ent_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="ent_valor")
                     
                     if _submit_btn("Salvar ENTRADA", "form_entrada_btn", theme="entrada"):
@@ -1838,13 +1844,15 @@ def page_lancamentos(user: "User"):
                             db.add(Transaction(
                                 date=ent_data, type=TYPE_IN, category_id=cat_obj.id, amount=ent_valor, 
                                 description=(ent_desc or None), congregation_id=parent_cong_obj.id, 
-                                sub_congregation_id=target_sub_cong_id
+                                sub_congregation_id=target_sub_cong_id, service_tag=(ent_service_tag.strip() or None)
                             ))
                             db.commit(); st.success("Entrada registrada!"); st.rerun()
 
             with st.expander("👤 Lançar DÍZIMO (Nominal)", expanded=True):
                 with st.form("form_dizimo"):
-                    dz_data = st.date_input("Data do Dízimo", value=today_bahia(), key="dz_data")
+                    c1, c2 = st.columns(2)
+                    with c1: dz_data = st.date_input("Data do Dízimo", value=today_bahia(), key="dz_data")
+                    with c2: dz_service_tag = st.selectbox("Tipo de Culto (Opcional)", options=TIPOS_DE_CULTO, key="dz_service_tag")
                     dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
                     dz_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="dz_valor")
                     dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência"], key="dz_pay")
@@ -1854,7 +1862,7 @@ def page_lancamentos(user: "User"):
                             db.add(Tithe(
                                 date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor, 
                                 congregation_id=parent_cong_obj.id, sub_congregation_id=target_sub_cong_id, 
-                                payment_method=dz_payment
+                                payment_method=dz_payment, service_tag=(dz_service_tag.strip() or None)
                             ))
                             db.commit(); st.success("Dízimo registrado!"); st.rerun()
 
@@ -1883,18 +1891,13 @@ def page_lancamentos(user: "User"):
             start_tab, end_tab = month_bounds(ref_tab)
             st.subheader("Edição em Tabela (Mês Completo)")
 
-            # --- Tabela 1: Dízimos Nominais ---
             st.markdown("##### Lançamento de Dizimistas (Nominal)")
-            st.caption("Adicione os dízimos individuais aqui. Você pode adicionar várias linhas para a mesma data.")
             tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id == target_sub_cong_id)
             tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
             _editor_dizimos(tithes, "", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
 
             st.markdown("---")
-
-            # --- Tabela 2: Outras Entradas (Ofertas, etc) ---
             st.markdown("##### Lançamento de Outras Entradas (Ofertas, Votos, etc.)")
-            st.caption("Use a coluna 'Descrição' para identificar o culto (ex: 'Oferta Culto da Manhã').")
             txs_in_query = select(Transaction).options(joinedload(Transaction.category)).where(
                 Transaction.congregation_id == parent_cong_obj.id, 
                 Transaction.date >= start_tab, Transaction.date < end_tab, 
@@ -1904,8 +1907,6 @@ def page_lancamentos(user: "User"):
             _editor_lancamentos(txs_in, "", tx_type_hint=TYPE_IN, force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
             
             st.markdown("---")
-
-            # --- Tabela 3: Saídas ---
             st.markdown("##### Lançamento de Saídas")
             txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_OUT, Transaction.sub_congregation_id == target_sub_cong_id)
             txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
