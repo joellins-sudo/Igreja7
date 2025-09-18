@@ -366,6 +366,14 @@ def now_bahia() -> datetime:
         return datetime.now(TZ_BA) if TZ_BA else datetime.now()
     except Exception:
         return datetime.now()
+    
+def _pick_col(df: pd.DataFrame, *cands: str) -> str | None:
+    """Retorna o primeiro nome de coluna existente dentre os candidatos."""
+    for c in cands:
+        if c in df.columns:
+            return c
+    return None
+   
 
 def today_bahia() -> date:
     return now_bahia().date()
@@ -1224,101 +1232,123 @@ def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date, sub_c
 
 def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None):
     with SessionLocal() as db:
+        # --- categorias obrigatórias
         cats_in = categories_for_type(db, TYPE_IN)
-        cat_diz = next((c for c in cats_in if _norm(c.name) in ("dizimo", "dízimo")), None)
+        cat_diz = next((c for c in cats_in if _norm(c.name) in ("dizimo","dízimo")), None)
         cat_ofe = next((c for c in cats_in if _norm(c.name) == "oferta"), None)
         if not (cat_diz and cat_ofe):
-            st.error("Categorias 'Dízimo' e/ou 'Oferta' não encontradas."); return
+            st.error("Categorias 'Dízimo' e/ou 'Oferta' não encontradas."); 
+            return
 
-        edited = edited_df.copy()
-        
-        for col in ["Dízimo", "Oferta"]:
-            edited[col] = edited[col].map(_to_float_brl)
-        edited["Data do Culto"] = edited["Data do Culto"].map(lambda x: _to_date(x) if pd.notna(x) else None)
-        edited.dropna(subset=["Data do Culto"], inplace=True)
+        # --- NORMALIZAÇÃO DE COLUNAS (aceita os dois jeitos de exibir)
+        df = edited_df.copy() if isinstance(edited_df, pd.DataFrame) else pd.DataFrame()
 
-        # --- ALTERAÇÃO PRINCIPAL ---
-        # Agrega o DataFrame editado por data para suportar múltiplas linhas de culto no UI.
-        # Isso soma todas as entradas para o mesmo dia antes de processar.
-        if not edited.empty:
-            edited_summed = edited.groupby('Data do Culto').agg({'Dízimo': 'sum', 'Oferta': 'sum'}).reset_index()
+        # nomes possíveis
+        date_col = _pick_col(df, "Data do Culto", "Data")
+        diz_col  = _pick_col(df, "Dízimo", "Total Dízimos (R$)", "Total Dizimos (R$)")
+        ofe_col  = _pick_col(df, "Oferta", "Total Ofertas (R$)")
+
+        # se não houver nada, cria colunas vazias
+        if date_col is None:
+            df["__DATE__"] = None
+            date_col = "__DATE__"
+        if diz_col is None:
+            df["__DIZ__"] = 0.0
+            diz_col = "__DIZ__"
+        if ofe_col is None:
+            df["__OFE__"] = 0.0
+            ofe_col = "__OFE__"
+
+        # coerções
+        df[diz_col] = df[diz_col].map(_to_float_brl).fillna(0.0)
+        df[ofe_col] = df[ofe_col].map(_to_float_brl).fillna(0.0)
+        df[date_col] = df[date_col].map(lambda x: _to_date(x) if pd.notna(x) and str(x).strip() != "" else None)
+
+        # remove a “linha fantasma”
+        EPS = 1e-3
+        df = df[~(df[date_col].isna() & (df[diz_col].abs() < EPS) & (df[ofe_col].abs() < EPS))].copy()
+        df.dropna(subset=[date_col], inplace=True)
+
+        # mapa desejado
+        wanted = {r[date_col]: (float(r[diz_col] or 0.0), float(r[ofe_col] or 0.0)) for _, r in df.iterrows()}
+
+        # datas originais + editadas
+        if isinstance(orig_df, pd.DataFrame) and not orig_df.empty:
+            odc = _pick_col(orig_df, "Data do Culto", "Data") or "Data do Culto"
+            orig_dates = set(pd.to_datetime(orig_df[odc]).dt.date)
         else:
-            edited_summed = edited
-        # --- FIM DA ALTERAÇÃO ---
-
-        wanted = {r["Data do Culto"]: (float(r["Dízimo"]), float(r["Oferta"])) for _, r in edited_summed.iterrows()}
-        
-        orig_dates = set(pd.to_datetime(orig_df["Data do Culto"]).dt.date) if not orig_df.empty else set()
+            orig_dates = set()
         edited_dates = set(wanted.keys())
         all_dates = sorted(list(orig_dates.union(edited_dates)))
-        
-        for d in all_dates:
-            if d is None: continue
-            
-            want_dz, want_of = wanted.get(d, (0.0, 0.0))
 
-            tithe_sub_filter = Tithe.sub_congregation_id.is_(None) if sub_cong_id is None else Tithe.sub_congregation_id == sub_cong_id
-            tx_sub_filter = Transaction.sub_congregation_id.is_(None) if sub_cong_id is None else Transaction.sub_congregation_id == sub_cong_id
+        # ------------ DAQUI PRA BAIXO MANTÉM A SUA LÓGICA DE AJUSTES ------------
+        def _unit_filter(col):
+            return col.is_(None) if (sub_cong_id is None) else (col == sub_cong_id)
 
-            if d in orig_dates and abs(want_dz) < 0.01:
-                db.query(Tithe).filter(
-                    Tithe.congregation_id == cong_id, Tithe.date == d, tithe_sub_filter
-                ).delete(synchronize_session=False)
-
-                if cat_diz:
-                    db.query(Transaction).filter(
-                        Transaction.congregation_id == cong_id, Transaction.date == d,
-                        Transaction.category_id == cat_diz.id, tx_sub_filter
-                    ).delete(synchronize_session=False)
-                want_of = 0.0
-
-            sum_dz_tithes_q = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
-                Tithe.congregation_id == cong_id, Tithe.date == d, tithe_sub_filter
+        def sum_tithes_dia(d: date) -> float:
+            q = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
+                Tithe.congregation_id == cong_id, Tithe.date == d, _unit_filter(Tithe.sub_congregation_id)
             )
-            sum_dz_tithes = float(db.scalar(sum_dz_tithes_q) or 0.0)
-            
-            sum_dz_tx_no_adj_q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).join(Category).where(
-                Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_diz.id,
-                tx_sub_filter, func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
+            return float(db.scalar(q) or 0.0)
+
+        def sum_tx_no_adj_dia(d: date, cat_id: int) -> float:
+            q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+                Transaction.congregation_id == cong_id, Transaction.date == d,
+                Transaction.category_id == cat_id, _unit_filter(Transaction.sub_congregation_id),
+                func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
             )
-            sum_dz_tx_no_adj = float(db.scalar(sum_dz_tx_no_adj_q) or 0.0)
-            sum_dz_others = max(sum_dz_tithes, sum_dz_tx_no_adj)
-            
-            sum_of_others_q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
-                Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_ofe.id,
-                tx_sub_filter, func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
-            )
-            sum_of_others = float(db.scalar(sum_of_others_q) or 0.0)
+            return float(db.scalar(q) or 0.0)
 
-            adj_dz_new = want_dz - sum_dz_others
-            adj_of_new = want_of - sum_of_others
+        def get_ajuste(d: date, cat_id: int) -> Optional[Transaction]:
+            q = select(Transaction).where(
+                Transaction.congregation_id == cong_id, Transaction.date == d,
+                Transaction.category_id == cat_id, _unit_filter(Transaction.sub_congregation_id),
+                func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC
+            ).limit(1)
+            return db.scalar(q)
 
-            adj_dz = db.scalar(select(Transaction).where(
-                Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_diz.id,
-                tx_sub_filter, func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC
-            ))
-            adj_of = db.scalar(select(Transaction).where(
-                Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_ofe.id,
-                tx_sub_filter, func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC
-            ))
+        try:
+            for d in all_dates:
+                want_dz, want_of = wanted.get(d, (0.0, 0.0))
+                base_dz = max(sum_tithes_dia(d), sum_tx_no_adj_dia(d, cat_diz.id))
+                base_of = sum_tx_no_adj_dia(d, cat_ofe.id)
+                adj_dz_new = float(want_dz) - float(base_dz)
+                adj_of_new = float(want_of) - float(base_of)
 
-            if abs(adj_dz_new) < 0.001:
-                if adj_dz: db.delete(adj_dz)
-            else:
-                if adj_dz: 
-                    adj_dz.amount = float(adj_dz_new)
-                else: 
-                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id, amount=float(adj_dz_new), description=ADJ_ENTRY_DESC, congregation_id=cong_id, sub_congregation_id=sub_cong_id))
+                # dízimo
+                adj_dz = get_ajuste(d, cat_diz.id)
+                if abs(adj_dz_new) < EPS:
+                    if adj_dz: db.delete(adj_dz)
+                else:
+                    if adj_dz:
+                        adj_dz.amount = float(adj_dz_new); db.add(adj_dz)
+                    else:
+                        db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id,
+                                           amount=float(adj_dz_new), description=ADJ_ENTRY_DESC,
+                                           congregation_id=cong_id, sub_congregation_id=sub_cong_id))
+                # oferta
+                adj_of = get_ajuste(d, cat_ofe.id)
+                if abs(adj_of_new) < EPS:
+                    if adj_of: db.delete(adj_of)
+                else:
+                    if adj_of:
+                        adj_of.amount = float(adj_of_new); db.add(adj_of)
+                    else:
+                        db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id,
+                                           amount=float(adj_of_new), description=ADJ_ENTRY_DESC,
+                                           congregation_id=cong_id, sub_congregation_id=sub_cong_id))
 
-            if abs(adj_of_new) < 0.001:
-                if adj_of: db.delete(adj_of)
-            else:
-                if adj_of: 
-                    adj_of.amount = float(adj_of_new)
-                else: 
-                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=float(adj_of_new), description=ADJ_ENTRY_DESC, congregation_id=cong_id, sub_congregation_id=sub_cong_id))
-        
-        db.commit()
+            db.flush()
+            db.commit()
+            st.toast("💾 Ajustes aplicados com sucesso.", icon="✅")
+
+        except IntegrityError as ie:
+            db.rollback()
+            st.error(f"Erro de integridade ao salvar o resumo: {getattr(ie, 'orig', ie)}")
+        except Exception as e:
+            db.rollback()
+            st.error(f"Falha ao salvar o resumo: {getattr(e, 'orig', e)}")
+
 
 # ===================== EDITORES INLINE REUTILIZÁVEIS (com botão Salvar) =====================
 # ===== EDITOR DE LANÇAMENTOS (com force_cong_id e linha vazia) =====
