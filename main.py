@@ -1332,7 +1332,7 @@ def _editor_lancamentos(
 
 # ===== EDITOR DE DÍZIMOS (com force_cong_id e linha vazia) =====
 # ===== EDITOR DE DÍZIMOS (com total abaixo da tabela) =====
-ddef _editor_dizimos(tithes: List["Tithe"], titulo: str, force_cong_id: Optional[int] = None, force_sub_cong_id: Optional[int] = None):
+def _editor_dizimos(tithes: List["Tithe"], titulo: str, force_cong_id: Optional[int] = None, force_sub_cong_id: Optional[int] = None):
     rows = []
     if tithes:
         rows = [{"ID": t.id, "Data": t.date, "Dizimista": t.tither_name, "Valor": float(t.amount), "Forma de Pagamento": t.payment_method or "", "_cong_id": int(t.congregation_id or 0)} for t in tithes]
