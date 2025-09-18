@@ -1157,12 +1157,12 @@ def _entrada_summary_split_df(db: Session, cong_id: int, start: date, end: date,
 
 def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None):
     # Filtra linhas vazias que o editor possa ter adicionado
-    if not edited_df.empty:
+    if edited_df is not None and not edited_df.empty:
         df_clean = edited_df.dropna(subset=['Data do Culto'])
         df_clean = df_clean[~(
             (df_clean['Dízimo'].fillna(0).eq(0)) & 
             (df_clean['Oferta'].fillna(0).eq(0))
-        )]
+        )].copy()
     else:
         df_clean = edited_df
 
@@ -1175,8 +1175,10 @@ def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFram
 
         edited = df_clean.copy()
         for col in ["Dízimo", "Oferta"]:
-            edited[col] = edited[col].map(_to_float_brl)
-        edited["Data do Culto"] = edited["Data do Culto"].map(_to_date)
+            if col in edited.columns:
+                edited[col] = edited[col].map(_to_float_brl)
+        if "Data do Culto" in edited.columns:
+            edited["Data do Culto"] = edited["Data do Culto"].map(_to_date)
         edited.dropna(subset=["Data do Culto"], inplace=True)
         
         wanted = {r["Data do Culto"]: (float(r["Dízimo"]), float(r["Oferta"])) for _, r in edited.iterrows()}
@@ -1190,18 +1192,22 @@ def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFram
             
             want_dz, want_of = wanted.get(d, (0.0, 0.0))
 
-            # Filtros corretos para sub-congregação
             tithe_sub_filter = Tithe.sub_congregation_id.is_(None) if sub_cong_id is None else Tithe.sub_congregation_id == sub_cong_id
             tx_sub_filter = Transaction.sub_congregation_id.is_(None) if sub_cong_id is None else Transaction.sub_congregation_id == sub_cong_id
 
-            # Deletar dízimos se o valor for zerado no resumo
             if d in orig_dates and abs(want_dz) < 0.01:
-                db.query(Tithe).filter(Tithe.congregation_id == cong_id, Tithe.date == d, tithe_sub_filter).delete(synchronize_session=False)
+                # --- CORREÇÃO APLICADA AQUI com and_() ---
+                db.query(Tithe).filter(and_(
+                    Tithe.congregation_id == cong_id, Tithe.date == d, tithe_sub_filter
+                )).delete(synchronize_session=False)
+                
                 if cat_diz:
-                    db.query(Transaction).filter(Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_diz.id, tx_sub_filter).delete(synchronize_session=False)
+                    db.query(Transaction).filter(and_(
+                        Transaction.congregation_id == cong_id, Transaction.date == d, 
+                        Transaction.category_id == cat_diz.id, tx_sub_filter
+                    )).delete(synchronize_session=False)
                 want_of = 0.0
 
-            # Lógica de cálculo de ajuste
             sum_dz_tithes_q = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(Tithe.congregation_id == cong_id, Tithe.date == d, tithe_sub_filter)
             sum_dz_tithes = float(db.scalar(sum_dz_tithes_q) or 0.0)
             
@@ -1221,7 +1227,6 @@ def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFram
             adj_dz_new = want_dz - sum_dz_others
             adj_of_new = want_of - sum_of_others
 
-            # Aplicação do ajuste de Dízimo
             adj_dz = db.scalar(select(Transaction).where(Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_diz.id, tx_sub_filter, Transaction.description == ADJ_ENTRY_DESC))
             if abs(adj_dz_new) < 0.01:
                 if adj_dz: db.delete(adj_dz)
@@ -1231,7 +1236,6 @@ def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFram
                 else: 
                     db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id, amount=float(adj_dz_new), description=ADJ_ENTRY_DESC, congregation_id=cong_id, sub_congregation_id=sub_cong_id))
 
-            # Aplicação do ajuste de Oferta
             adj_of = db.scalar(select(Transaction).where(Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_ofe.id, tx_sub_filter, Transaction.description == ADJ_ENTRY_DESC))
             if abs(adj_of_new) < 0.01:
                 if adj_of: db.delete(adj_of)
