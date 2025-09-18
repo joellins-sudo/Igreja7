@@ -1998,11 +1998,16 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
     styles = getSampleStyleSheet()
     start, end = month_bounds(ref)
 
+    # --- CORREÇÃO DEFINITIVA ---
+    # Define TA_RIGHT manualmente para garantir que sempre funcione
+    TA_RIGHT = 2 
+    
     # Estilos
     title_style = ParagraphStyle('title', parent=styles['h1'], alignment=TA_CENTER, fontSize=16, spaceAfter=4)
     subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=11, spaceAfter=12)
     heading_style = ParagraphStyle('heading', parent=styles['h2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
     normal_style = styles['Normal']
+    right_align_style = ParagraphStyle('rightAlign', parent=styles['Normal'], alignment=TA_RIGHT)
     signature_style = ParagraphStyle('signature', parent=styles['Normal'], alignment=TA_CENTER, spaceBefore=0)
     
     story: List = []
@@ -2023,13 +2028,8 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
     if not df_entradas.empty:
         data_in = [["Data do Culto", "Dízimo", "Oferta", "Total"]]
         for _, row in df_entradas.iterrows():
-            data_in.append([
-                row["Data do Culto"].strftime("%d/%m/%Y"),
-                format_currency(row["Dízimo"]),
-                format_currency(row["Oferta"]),
-                format_currency(row["Total"])
-            ])
-        # --- LINHA DE TOTAIS CORRIGIDA ---
+            data_in.append([row["Data do Culto"].strftime("%d/%m/%Y"), format_currency(row["Dízimo"]), format_currency(row["Oferta"]), format_currency(row["Total"])])
+        
         data_in.append([
             Paragraph("<b>Totais</b>", normal_style),
             Paragraph(f"<b>{format_currency(totals['dizimos'])}</b>", normal_style),
@@ -2055,8 +2055,7 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
         for t in data["tx_out"]:
             data_out.append([t.date.strftime("%d/%m/%Y"), t.category.name, t.description or "", format_currency(t.amount)])
         
-        # --- LINHA DE TOTAIS CORRIGIDA ---
-        data_out.append([Paragraph("<b>Total de Saídas:</b>", styles['RightAlign']), "", "", Paragraph(f"<b>{format_currency(totals['saidas_total'])}</b>", styles['RightAlign'])])
+        data_out.append([Paragraph("<b>Total de Saídas:</b>", right_align_style), "", "", Paragraph(f"<b>{format_currency(totals['saidas_total'])}</b>", right_align_style)])
         
         tbl_out = Table(data_out, colWidths=[2.5*cm, 4.5*cm, 6.5*cm, 3*cm], repeatRows=1)
         tbl_out.setStyle(TableStyle([
@@ -2242,6 +2241,9 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
     styles = getSampleStyleSheet()
     start, end = month_bounds(ref)
 
+    # --- CORREÇÃO DEFINITIVA ---
+    TA_RIGHT = 2
+    
     # Estilos
     title_style = ParagraphStyle('title', parent=styles['h1'], alignment=TA_CENTER, fontSize=16, spaceAfter=4)
     subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=11, spaceAfter=12)
@@ -2287,7 +2289,6 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
             for _, row in df_entradas.iterrows():
                 data_in.append([row["Data do Culto"].strftime("%d/%m/%Y"), format_currency(row["Dízimo"]), format_currency(row["Oferta"]), format_currency(row["Total"])])
             
-            # --- NOVA LINHA DE TOTAIS ---
             data_in.append([
                 Paragraph("<b>Totais</b>", normal_style),
                 Paragraph(f"<b>{format_currency(totals['dizimos'])}</b>", normal_style),
@@ -2299,7 +2300,7 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
             tbl_in.setStyle(TableStyle([
                 ('GRID', (0,0), (-1,-1), 1, colors.grey), ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
                 ('ALIGN', (1,1), (-1,-1), 'RIGHT'), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                ('BACKGROUND', (0,-1), (-1,-1), colors.lightgreen) # Destaque na linha de total
+                ('BACKGROUND', (0,-1), (-1,-1), colors.lightgreen)
             ]))
             story.append(tbl_in)
         else:
@@ -2314,7 +2315,6 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
             for t in txs_out:
                 data_out.append([t.date.strftime("%d/%m/%Y"), t.category.name, t.description or "", format_currency(t.amount)])
             
-            # --- NOVA LINHA DE TOTAIS ---
             data_out.append([Paragraph("<b>Total de Saídas:</b>", right_align_style), "", "", Paragraph(f"<b>{format_currency(unit_total_saidas)}</b>", right_align_style)])
             
             tbl_out = Table(data_out, colWidths=[2.5*cm, 4.5*cm, 6.5*cm, 3*cm], repeatRows=1)
