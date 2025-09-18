@@ -1728,26 +1728,26 @@ def page_lancamentos(user: "User"):
                 st.warning(f"**Atenção:** Valores de dízimo estão divergindo nos dias: **{datas_str}**. Verifique os lançamentos.")
             
             st.markdown("##### Entradas (Dízimo e Oferta) por Culto")
-            st.caption("Você pode adicionar múltiplas linhas para a mesma data. Ao salvar, os valores serão somados no total do dia.")
+            st.caption("Você pode adicionar múltiplas linhas para a mesma data. Ao salvar, os valores serão consolidados no total do dia.")
             
             base_df = _entrada_summary_df(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
             
-            # Garante que, se o dataframe estiver vazio, o editor apareça com uma linha em branco para inserção
-            df_para_editar = base_df if not base_df.empty else pd.DataFrame([{"Data do Culto": today_bahia(), "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0}])
+            if base_df.empty:
+                base_df = pd.DataFrame([{"Data do Culto": today_bahia(), "Dízimo": 0.0, "Oferta": 0.0}])
 
             edited_entradas = st.data_editor(
-                df_para_editar, 
+                base_df, 
                 use_container_width=True, hide_index=True, num_rows="dynamic", 
                 key=f"editor_entradas_{parent_cong_obj.id}_{target_sub_cong_id}",
                 column_config={
                     "Data do Culto": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
                     "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", format="R$ %.2f"),
                     "Oferta": st.column_config.NumberColumn("Oferta (R$)", format="R$ %.2f"),
-                    "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
                 }
             )
             
             def _save_summary():
+                # Passa o dataframe original (base_df) e o editado (edited_entradas)
                 _apply_entrada_summary_changes(orig_df=base_df, edited_df=edited_entradas, cong_id=parent_cong_obj.id, start=start_tab, end=end_tab, sub_cong_id=target_sub_cong_id)
                 st.toast("💾 Alterações de entrada salvas com sucesso!", icon="✅")
                 st.rerun()
