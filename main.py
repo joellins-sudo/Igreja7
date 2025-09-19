@@ -19,7 +19,11 @@ except Exception:
     sac = None  # fallback p/ radio padrão
 import hashlib
 from sqlalchemy import select
-
+# ... outras importações ...
+from sqlalchemy import select, func, String, Date, Float, ForeignKey, create_engine, and_
+from sqlalchemy.exc import IntegrityError  # <-- ADICIONE ESTA LINHA
+from sqlalchemy.orm import relationship, Mapped, mapped_column, sessionmaker, joinedload, Session
+# ...
 import os
 from datetime import date, timedelta, datetime
 from typing import Optional, List, Tuple, Dict, Any
@@ -299,7 +303,6 @@ FORM_BUTTONS_CSS = """
 # Alias para manter compatibilidade com a linha 256
 BUTTONS_CSS = FORM_BUTTONS_CSS
 
-st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)
 
 st.markdown(BUTTONS_CSS, unsafe_allow_html=True)
 
@@ -349,6 +352,16 @@ def now_bahia() -> datetime:
 
 def today_bahia() -> date:
     return now_bahia().date()
+
+# NOVO HELPER: Função genérica para limpar campos
+def _clear_launch_fields(keys_to_clear: List[str]):
+    """Limpa campos específicos no session state para permitir novos lançamentos."""
+    for key in keys_to_clear:
+        # Define valor padrão para os campos que devem ser limpos
+        if key.endswith("valor"):
+            st.session_state[key] = 0.0
+        elif key.endswith("desc") or key.endswith("nome"):
+            st.session_state[key] = ""
 
 def format_currency(value: float) -> str:
     try:
@@ -544,6 +557,10 @@ def _check_inactivity_and_logout(cm):
 
 def logout():
     st.session_state.uid = None
+    # Novo: Limpar o estado de navegação para forçar a página inicial no próximo login
+    if "main_menu_page" in st.session_state:
+        del st.session_state["main_menu_page"] 
+        
     try:
         cm = get_cookie_manager()
         if hasattr(cm, "delete"):
@@ -727,15 +744,40 @@ def order_congs_sede_first(congs: List[Congregation]) -> List[Congregation]:
 
 def sidebar_common(user: "User") -> str:
     """
-    Desenha o menu lateral apenas uma vez e retorna a página selecionada.
-    Em reruns, mantém a escolha do usuário.
+    Desenha o menu lateral e retorna a página selecionada.
     """
-    # Se já desenhou nesta execução, só devolve a última seleção
-    if st.session_state.get("sidebar_rendered", False):
-        return st.session_state.get("main_menu_page", "Visão Geral")
+    
+    # 1. Definições de Menu
+    MENU_PAGES = {
+        "Lançamentos": "📥", "Relatório de Entrada": "📊", "Relatório de Saída": "📉",
+        "Relatório de Missões": "🌍", "Relatório de Dizimistas": "🧾", "Visão Geral": "🏁",
+        "Cadastro": "🛠️",
+    }
+    
+    role = getattr(user, "role", "")
+    if role == "SEDE":
+        menu_options_plain = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Cadastro"]
+    elif role == "TESOUREIRO":
+        menu_options_plain = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"]
+    elif role == "TESOUREIRO MISSIONÁRIO":
+        menu_options_plain = ["Relatório de Missões"]
+    else:
+        menu_options_plain = ["Visão Geral"]
+
+    menu_labels_pretty = [f"{MENU_PAGES.get(opt, '•')} {opt}" for opt in menu_options_plain]
+    label_to_page = {label: page for label, page in zip(menu_labels_pretty, menu_options_plain)}
+
+    # 2. Determina o índice padrão para o st.radio
+    session_key = "main_menu_page"  
+    current_page_name = st.session_state.get(session_key, "Visão Geral")
+    
+    try:
+        default_index = menu_options_plain.index(current_page_name)
+    except ValueError:
+        default_index = 0 # Fallback se a página salva não estiver mais disponível
 
     with st.sidebar:
-        # Identidade / logo
+        # Identidade e Logo
         try:
             if os.path.exists(LOGO_PATH):
                 st.image(LOGO_PATH, use_column_width=True)
@@ -743,71 +785,27 @@ def sidebar_common(user: "User") -> str:
             pass
         st.write(f"👤 **{getattr(user, 'username', 'Usuário')}** — *{getattr(user, 'role', '')}*")
 
-        # Ícones
-        MENU_ICONS = {
-            "Lançamentos": "📥",
-            "Relatório de Entrada": "📊",
-            "Relatório de Saída": "📉",
-            "Relatório de Missões": "🌍",
-            "Relatório de Dizimistas": "🧾",
-            "Visão Geral": "🏁",
-            "Cadastro": "🛠️",
-        }
-
-        # Opções conforme o papel
-        role = getattr(user, "role", "")
-        if role == "SEDE":
-            menu_options_plain = [
-                "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
-                "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Cadastro"
-            ]
-        elif role == "TESOUREIRO":
-            menu_options_plain = [
-                "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
-                "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"
-            ]
-        elif role == "TESOUREIRO MISSIONÁRIO":
-            menu_options_plain = ["Relatório de Missões"]
-        else:
-            menu_options_plain = ["Visão Geral"]
-
-        # Labels com ícones
-        menu_labels_pretty = [f"{MENU_ICONS.get(opt, '•')} {opt}" for opt in menu_options_plain]
-
-        # Chave estável do widget
-        state_key = f"main_menu_nav_{getattr(user, 'id', 'anon')}"
-
-        # Define valor inicial só uma vez (sem passar index no radio)
-        if state_key not in st.session_state:
-            # usa última página escolhida, se houver
-            prev_page = st.session_state.get("main_menu_page")
-            if prev_page in menu_options_plain:
-                init_label = f"{MENU_ICONS.get(prev_page, '•')} {prev_page}"
-            else:
-                init_label = menu_labels_pretty[0]
-            st.session_state[state_key] = init_label
-
+        # 3. Desenha o menu
         sel_label = st.radio(
             "Menu",
             options=menu_labels_pretty,
-            key=state_key,
+            index=default_index,
+            key=session_key,  # O widget usa a chave e atualiza o estado automaticamente
             label_visibility="visible",
         )
 
-        # Converte label -> página “pura”
-        sel_index = menu_labels_pretty.index(sel_label)
-        page = menu_options_plain[sel_index]
-        st.session_state["main_menu_page"] = page
-
+        # 4. Converte o label selecionado de volta para o nome da página
+        page = label_to_page.get(sel_label, "Visão Geral")
+        
+        # A LINHA ABAIXO FOI REMOVIDA, POIS CAUSAVA O ERRO
+        # st.session_state[session_key] = page 
+        
         st.divider()
         if st.button("Sair", key=f"btn_logout_{getattr(user, 'id', 'anon')}"):
             logout()
+            st.rerun()  
 
-        # Marca como renderizado
-        st.session_state["sidebar_rendered"] = True
-
-        return page
-
+    return page
 
 # ======= NOVO: helper padrão para botões 'Salvar alterações' =======
 # ====== CORES P/ BOTÕES ======
@@ -934,9 +932,18 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
             is_new = pd.isna(rid) or int(rid) <= 0 or int(rid) not in old_ids
             if not is_new:
                 continue
+                
+            # --- CORREÇÃO: VERIFICAÇÃO DE DADOS MÍNIMOS ---
             data = _to_date(row.get("Data"))
             amount = _to_float_brl(row.get("Valor"))
             desc = str(row.get("Descrição","")).strip() or None
+
+            # Linha considerada inválida se: 1) não tem data válida ou 2) valor é zero/nulo
+            if not data or abs(amount) < 0.0001:
+                # Linha nova e vazia, ignorar
+                continue
+            # --- FIM CORREÇÃO ---
+            
             if "Categoria" in n.columns:
                 cat_name = str(row.get("Categoria","")).strip()
                 if not cat_name:
@@ -963,7 +970,6 @@ def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: s
             ))
         db.commit()
 
-
 def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default_cong_id: Optional[int]):
     def norm_df(df: pd.DataFrame) -> pd.DataFrame:
         d = df.copy()
@@ -982,50 +988,72 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
     old_ids = set(int(x) for x in o["ID"].tolist() if pd.notna(x))
     new_ids = set(int(x) for x in n["ID"].tolist() if pd.notna(x) and int(x) > 0)
     to_delete = list(old_ids - new_ids)
-    old_map = {int(r["ID"]): r for _, r in o.iterrows()}
+    
+    old_map = {int(r["ID"]): r for _, r in o.iterrows() if pd.notna(r["ID"])}
 
     with SessionLocal() as db:
         if to_delete:
             db.query(Tithe).filter(Tithe.id.in_(to_delete)).delete(synchronize_session=False)
 
+        # Loop de ATUALIZAÇÃO de registros existentes
         for rid in sorted(new_ids & old_ids):
             old = old_map[rid]
             new = n.loc[n["ID"] == rid].iloc[0]
+            
+            # ================================================================
+            # NOVO BLOCO DE VALIDAÇÃO PARA ATUALIZAÇÕES
+            # ================================================================
+            new_nome = str(new.get("Dizimista", "")).strip()
+            new_amount = _to_float_brl(new.get("Valor"))
+
+            if not new_nome or abs(new_amount) < 0.0001:
+                st.warning(f"A alteração para o ID {rid} foi ignorada porque o nome ou valor se tornou inválido.")
+                continue # Pula para o próximo registro sem salvar este
+            # ================================================================
+
             changed = False
             t = db.get(Tithe, rid)
             if not t:
                 continue
-            if old["Data"] != new["Data"]:
+                
+            if t.date != _to_date(new["Data"]):
                 t.date = _to_date(new["Data"]); changed = True
-            if (old["Dizimista"] or "") != (new["Dizimista"] or ""):
-                t.tither_name = (new["Dizimista"] or ""); changed = True
-            if float(old["Valor"]) != float(new["Valor"]):
-                t.amount = float(new["Valor"]); changed = True
-            if (old["Forma de Pagamento"] or "") != (new["Forma de Pagamento"] or ""):
+            if t.tither_name != new_nome:
+                t.tither_name = new_nome; changed = True
+            if t.amount != new_amount:
+                t.amount = new_amount; changed = True
+            if (t.payment_method or "") != (new["Forma de Pagamento"] or ""):
                 t.payment_method = (new["Forma de Pagamento"] or None); changed = True
+                
             if changed:
                 db.add(t)
 
+        # Loop de INSERÇÃO de novos registros
         for _, row in n.iterrows():
             rid = row.get("ID", None)
             is_new = pd.isna(rid) or int(rid) <= 0 or int(rid) not in old_ids
             if not is_new:
                 continue
+            
             data = _to_date(row.get("Data"))
             nome = str(row.get("Dizimista","")).strip()
             amount = _to_float_brl(row.get("Valor"))
             forma = str(row.get("Forma de Pagamento","")).strip() or None
-            if not nome:
+            
+            if not nome or abs(amount) < 0.0001:
                 continue
+
             cong_id = default_cong_id
             if cong_id is None and not o.empty:
                 cong_id = int(o.iloc[0].get("_cong_id", 0)) or None
             if cong_id is None:
                 continue
+                
             db.add(Tithe(
                 date=data, tither_name=nome, amount=float(amount),
                 congregation_id=int(cong_id), payment_method=forma
             ))
+            
         db.commit()
 
 # ===================== RELATÓRIO DE ENTRADA — TABELA ÚNICA (EDIT SUMÁRIO) =====================
@@ -1090,45 +1118,70 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
 
         baseline = current_sums()
         edited = edited_df.copy()
-        edited["Data do Culto"] = edited["Data do Culto"].map(_to_date)
-        wanted = {r["Data do Culto"]: (float(_to_float_brl(r["Dízimo"])), float(_to_float_brl(r["Oferta"]))) for _, r in edited.iterrows()}
+        
+        # 1. Converte Colunas numéricas de forma segura e remove linhas sem valores válidos
+        for col in ["Dízimo", "Oferta"]:
+            edited[col] = edited[col].map(_to_float_brl) 
+            edited = edited.dropna(subset=[col]) 
+        
+        # 2. Converte Data e remove linhas sem data válida
+        edited["Data do Culto"] = edited["Data do Culto"].map(lambda x: _to_date(x) if pd.notna(x) else None)
+        edited = edited.dropna(subset=["Data do Culto"])
 
+        # 3. Mapeia os valores desejados (want_dz, want_of) a partir do DF limpo
+        wanted = {r["Data do Culto"]: (float(r["Dízimo"]), float(r["Oferta"])) for _, r in edited.iterrows()}
+        
+        # Adiciona as datas que já existiam na base (para limpar ajustes se os valores foram zerados)
         all_dates = sorted(set(list(baseline.keys()) + list(wanted.keys())))
+        
         for d in all_dates:
-            cur_dz, cur_of = baseline.get(d, (0.0, 0.0))
+            if d is None:
+                continue 
+            
+            # Pega o que o usuário quer que seja o total do dia (0.0 se a linha foi apagada no editor)
             want_dz, want_of = wanted.get(d, (0.0, 0.0))
 
-            # [EQ FIX]: equivalência → base de "outros" do dízimo é o MAIOR entre (tithes do dia) e (doações 'Dízimo' do dia, exceto ajustes)
+            # --- BUSCA DE LANÇAMENTOS ORIGINAIS (SEM AJUSTE) APENAS PARA A DATA 'd' ---
+            
+            # Tithe (apenas desta data)
             sum_dz_tithes = float(db.scalar(
                 select(func.coalesce(func.sum(Tithe.amount), 0.0))
                 .where(and_(Tithe.congregation_id == cong_id, Tithe.date == d))
             ) or 0.0)
+            
+            # Transações Dízimo (apenas desta data, sem ajuste)
             sum_dz_tx_no_adj = float(db.scalar(
                 select(func.coalesce(func.sum(Transaction.amount), 0.0))
+                .join(Category, Transaction.category_id == Category.id)
                 .where(and_(
                     Transaction.congregation_id == cong_id,
-                    Transaction.date == d,
+                    Transaction.date == d, # <--- FILTRO CRÍTICO
                     Transaction.type.in_((TYPE_IN, "RECEITA")),
                     Transaction.category_id == cat_diz.id,
                     func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
                 ))
             ) or 0.0)
-            sum_dz_others = max(sum_dz_tithes, sum_dz_tx_no_adj)  # [EQ FIX]
-
+            sum_dz_others = max(sum_dz_tithes, sum_dz_tx_no_adj)
+            
+            # Transações Oferta (apenas desta data, sem ajuste)
             sum_of_others = float(db.scalar(
                 select(func.coalesce(func.sum(Transaction.amount), 0.0))
                 .where(and_(
                     Transaction.congregation_id == cong_id,
-                    Transaction.date == d,
+                    Transaction.date == d, # <--- FILTRO CRÍTICO
                     Transaction.type.in_((TYPE_IN, "RECEITA")),
                     Transaction.category_id == cat_ofe.id,
                     func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
                 ))
             ) or 0.0)
 
+            # --- FIM DA BUSCA ---
+
+            # Calcula o novo ajuste necessário para atingir o valor desejado
             adj_dz_new = want_dz - sum_dz_others
             adj_of_new = want_of - sum_of_others
 
+            # Busca ajustes existentes (também filtrando pela data 'd')
             adj_dz = db.scalar(select(Transaction).where(
                 Transaction.congregation_id == cong_id, Transaction.date == d,
                 Transaction.type.in_((TYPE_IN, "RECEITA")), Transaction.category_id == cat_diz.id,
@@ -1140,6 +1193,8 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
                 func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC
             ))
 
+            # Aplica ou remove o ajuste de Dízimo
+            # Se adj_dz_new é zero, e houver ajuste existente, ele o deleta (limpa ajuste antigo)
             if abs(adj_dz_new) < 0.0001:
                 if adj_dz: db.delete(adj_dz)
             else:
@@ -1149,6 +1204,7 @@ def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_
                                        amount=float(adj_dz_new), description=ADJ_ENTRY_DESC,
                                        congregation_id=cong_id))
 
+            # Aplica ou remove o ajuste de Oferta
             if abs(adj_of_new) < 0.0001:
                 if adj_of: db.delete(adj_of)
             else:
@@ -1704,7 +1760,7 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, is_all: bool =
 
     total_dizimos_tithe = sum(float(t.amount) for t in tithes)
     total_dizimos_trans = sum(float(t.amount) for t in tx_in if _is_dizimo_tx(t))
-    total_dizimos_final = max(total_dizimos_tithe, total_dizimos_trans)  # [EQ FIX] já existia essa lógica global
+    total_dizimos_final = max(total_dizimos_tithe, total_dizimos_trans)
 
     total_ofertas = sum(float(t.amount) for t in tx_in if _is_oferta_tx(t))
     total_missoes = sum(float(t.amount) for t in tx_in if _is_mission_entry(t))
@@ -1725,7 +1781,7 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, is_all: bool =
             "ofertas": total_ofertas,
             "missoes": total_missoes,
             "entradas_outros": total_entradas_outros,
-            "entradas_total_sem_missoes": total_geral_entradas_outros if (total_geral_entradas_outros:=total_geral_entradas_sem_missoes) else total_geral_entradas_sem_missoes,  # preserva nome antigo
+            "entradas_total_sem_missoes": total_geral_entradas_sem_missoes,
             "saidas_total": total_saidas,
             "saldo": saldo
         }
@@ -1735,479 +1791,11 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, is_all: bool =
 # ===================== PAGE: LANÇAMENTOS (com modo Tabela fora do form) =====================
 # ===== PÁGINA: LANÇAMENTOS (com modo Tabela + 3 editores) =====
 # ===== PÁGINA: LANÇAMENTOS (modo Tabela mostra total abaixo de cada uma) =====
-def page_lancamentos(user: "User"):
-    ensure_seed()
-    with SessionLocal() as db:
-        sidebar_common(user)
-
-        st.markdown(f"<h1 class='page-title'>Lançamentos</h1>", unsafe_allow_html=True)
-
-        # congregações disponíveis
-        congs = cong_options_for(user, db)
-        if not congs:
-            st.info("Nenhuma congregação disponível.")
-            return
-
-        # seleção da congregação
-        if user.role == "SEDE":
-            congs_ordered = order_congs_sede_first(congs)
-            cong_sel = st.selectbox("Selecione a congregação", [c.name for c in congs_ordered], key="lan_cong_sel")
-            cong_obj = next(c for c in congs_ordered if c.name == cong_sel)
-        else:
-            cong_obj = congs[0]
-
-        st.markdown(f"<div class='cong-title'>CONGREGAÇÃO: {cong_obj.name.upper()}</div>", unsafe_allow_html=True)
-
-        # ===== modo de inserção =====
-        modo = st.radio(
-            " ",
-            ["Formulário único", "Inserir na tabela (Dízimo + Oferta, Dizimistas e Saídas)"],
-            horizontal=False,
-            key="lan_modo_sel",
-        )
-
-        if modo == "Inserir na tabela (Dízimo + Oferta, Dizimistas e Saídas)":
-            st.subheader("Inserir pela Tabela — Dízimo, Oferta, Dizimistas e Saídas")
-
-            # mês único para os três editores
-            ref_tab = get_month_selector("Mês da tabela")
-            start_tab, end_tab = month_bounds(ref_tab)
-
-            # -------- TABELA 1: Agregado Diário (Dízimo + Oferta) --------
-            st.info(f"Escopo: **{cong_obj.name}** — edite as linhas abaixo. O campo **Total** é calculado.")
-            df = _entrada_summary_df(db, cong_obj.id, start_tab, end_tab)
-            if df.empty:
-                df = pd.DataFrame([{
-                    "Data do Culto": today_bahia(),
-                    "Dízimo": 0.0,
-                    "Oferta": 0.0,
-                    "Total": 0.0
-                }])
-            df = df.copy()
-            try:
-                df["Dízimo"] = df["Dízimo"].map(float)
-                df["Oferta"] = df["Oferta"].map(float)
-            except Exception:
-                pass
-            df["Total"] = df["Dízimo"] + df["Oferta"]
-
-            edited_tab = st.data_editor(
-                df[["Data do Culto", "Dízimo", "Oferta", "Total"]],
-                use_container_width=True,
-                hide_index=True,
-                num_rows="dynamic",
-                column_config={
-                    "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
-                    "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
-                    "Oferta": st.column_config.NumberColumn("Oferta (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
-                    "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
-                },
-                key=f"lan_tab_editor_{cong_obj.id}_{start_tab:%Y_%m}",
-            )
-
-            # === TOTAL logo abaixo da tabela D+O ===
-            try:
-                _sum_total_mes = float(
-                    edited_tab.assign(
-                        **{
-                            "Dízimo": edited_tab["Dízimo"].map(_to_float_brl),
-                            "Oferta": edited_tab["Oferta"].map(_to_float_brl)
-                        }
-                    ).eval("Dízimo + Oferta").sum()
-                )
-            except Exception:
-                _sum_total_mes = 0.0
-            st.metric("Total de Entradas (Dízimo + Oferta) — tabela", format_currency(_sum_total_mes))
-
-            def _save_tab():
-                _apply_entrada_summary_changes(cong_obj.id, start_tab, end_tab, edited_tab)
-                st.toast("💾 Tabela salva com sucesso.", icon="✅")
-                st.rerun()
-            _save_btn(_save_tab, f"lan_tab_{cong_obj.id}_{start_tab:%Y_%m}", theme="entrada")
-
-            st.markdown("---")
-
-            # -------- TABELA 2: Dizimistas (mostra total abaixo) --------
-            with SessionLocal() as _db_dz:
-                tithes = _db_dz.scalars(
-                    select(Tithe).where(
-                        Tithe.date >= start_tab, Tithe.date < end_tab,
-                        Tithe.congregation_id == cong_obj.id
-                    ).order_by(Tithe.date)
-                ).all()
-            _editor_dizimos(tithes, "Dizimistas do período (editar na tabela)", force_cong_id=cong_obj.id)
-
-            st.markdown("---")
-
-            # -------- TABELA 3: Saídas (mostra total abaixo) --------
-            with SessionLocal() as _db_out:
-                txs_out = _db_out.scalars(
-                    select(Transaction).options(joinedload(Transaction.category)).where(
-                        Transaction.date >= start_tab, Transaction.date < end_tab,
-                        Transaction.type.in_(("SAÍDA", "DESPESA")),
-                        Transaction.congregation_id == cong_obj.id
-                    )
-                ).all()
-            _editor_lancamentos(
-                txs_out,
-                "Saídas do período (editar na tabela)",
-                tx_type_hint=TYPE_OUT,
-                force_cong_id=cong_obj.id
-            )
-
-            return  # fim do modo tabela
-
-        # ===================== FORMULÁRIOS ÚNICOS (mantidos) =====================
-        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
-        st.subheader("Lançar ENTRADA (Doação)")
-        with st.form("form_entrada", clear_on_submit=True):
-            c1, c2, c3 = st.columns([1.1, 1.6, 2])
-            ent_data = st.date_input("Data do Culto", value=today_bahia(), key="ent_data", format="DD/MM/YYYY")
-            with c2:
-                cats_in = categories_for_type(db, TYPE_IN)
-                cats_in = [c for c in cats_in if "ajuste" not in _norm(c.name)]
-                cat_names_in = [c.name for c in cats_in] or ["—"]
-                desired = ["Dízimo", "Oferta", "Missões"]
-                desired_norm = [_norm(x) for x in desired]
-                top = [n for n in cat_names_in if _norm(n) in desired_norm]
-                rest = [n for n in cat_names_in if _norm(n) not in desired_norm]
-                cat_display = top + rest
-                ent_cat = st.selectbox("Categoria", cat_display, key="ent_cat")
-
-            ent_desc = st.text_input("Descrição (opcional)", key="ent_desc")
-            ent_flag_missoes = _norm(ent_cat) == "oferta" and st.checkbox("Oferta de missões?", key="ent_flag_missoes")
-            ent_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="ent_valor")
-
-            if st.form_submit_button("Salvar ENTRADA", type="primary"):
-                with SessionLocal() as _db:
-                    cat_name = "Missões" if ent_flag_missoes else ent_cat
-                    if ent_flag_missoes and not _db.scalar(select(Category).where(Category.name == "Missões")):
-                        _db.add(Category(name="Missões", type=TYPE_IN)); _db.commit()
-                    cat_obj = _db.scalar(select(Category).where(Category.name == cat_name))
-                    if not cat_obj:
-                        st.error("Informe a categoria.")
-                    else:
-                        _db.add(Transaction(
-                            date=ent_data, type=TYPE_IN, category_id=cat_obj.id,
-                            amount=float(ent_valor), description=(ent_desc or None),
-                            congregation_id=cong_obj.id, payment_method=None
-                        ))
-                        _db.commit()
-                        st.success("Entrada registrada.")
-        st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown("---")
-
-        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
-        st.subheader("Salvar DIZIMISTA")
-        with st.form("form_dizimo", clear_on_submit=True):
-            dz_data = st.date_input("Data do Culto", value=today_bahia(), key="dz_data", format="DD/MM/YYYY")
-            dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
-            dz_valor = st.number_input("Valor dízimo (R$)", min_value=0.0, step=1.0, format="%.2f", key="dz_valor")
-            dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX"], key="dz_payment_method")
-
-            if st.form_submit_button("Salvar DIZIMISTA", type="primary"):
-                nome = (dz_nome or "").strip()
-                if not nome:
-                    st.error("Informe o nome do dizimista.")
-                else:
-                    with SessionLocal() as _db:
-                        _db.add(Tithe(
-                            date=dz_data, tither_name=nome, amount=float(dz_valor),
-                            congregation_id=cong_obj.id, payment_method=dz_payment
-                        ))
-                        _db.commit()
-                        st.success("Dízimo registrado.")
-        st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown("---")
-
-        st.markdown('<div class="st-container-card">', unsafe_allow_html=True)
-        st.subheader("Lançar SAÍDA")
-        with st.form("form_saida", clear_on_submit=True):
-            sai_data = st.date_input("Data", value=today_bahia(), key="sai_data", format="DD/MM/YYYY")
-            cats_out = categories_for_type(db, TYPE_OUT)
-            sai_cat = st.selectbox("Tipo da saída (Categoria)", [c.name for c in cats_out] or ["—"], key="sai_cat")
-            sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
-            sai_valor = st.number_input("Valor (R$)", min_value=0.0, step=1.0, format="%.2f", key="sai_valor")
-
-            if st.form_submit_button("Salvar SAÍDA", type="primary"):
-                with SessionLocal() as _db:
-                    cat_obj = _db.scalar(select(Category).where(Category.name == sai_cat))
-                    if not cat_obj:
-                        st.error("Informe o tipo de saída.")
-                    else:
-                        _db.add(Transaction(
-                            date=sai_data, type=TYPE_OUT, category_id=cat_obj.id,
-                            amount=float(sai_valor), description=(sai_desc or None),
-                            congregation_id=cong_obj.id,
-                        ))
-                        _db.commit()
-                        st.success("Saída registrada.")
-        st.markdown('</div>', unsafe_allow_html=True)
 
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
-def page_relatorio_entrada(user: "User"):
-    ensure_seed()
-    with SessionLocal() as db:
-        sidebar_common(user)
-
-        st.markdown("<h1 class='page-title'>Relatório de Entrada</h1>", unsafe_allow_html=True)
-        ref = get_month_selector()
-        start, end = month_bounds(ref)
-
-        congs = cong_options_for(user, db)
-        if user.role == "SEDE":
-            ordered = order_congs_sede_first(congs)
-            esc_opt = ["Todas as congregações"] + [c.name for c in ordered]
-            esc = st.selectbox("Escopo", esc_opt, key="re_in_allopt")
-            is_all = (esc == "Todas as congregações")
-            cong_obj = None if is_all else next(c for c in ordered if c.name == esc)
-        else:
-            is_all = False
-            cong_obj = congs[0] if congs else None
-
-        # === MODO SEDE: TODAS AS CONGREGAÇÕES ===
-        if is_all:
-            st.info("Escopo: **Todas as congregações** — edite o total de entradas mensal por congregação abaixo.")
-            _editor_entradas_agg_all(ordered, start, end)
-
-            # Total geral de ENTRADAS (todas as congregações) em destaque
-            with SessionLocal() as _db_tot_in:
-                total_geral_in = 0.0
-                for _c in ordered:
-                    _t = _collect_month_data(_db_tot_in, _c.id, start, end)["totals"]
-                    total_geral_in += float(_t["entradas_total_sem_missoes"])
-            st.metric("Total geral de entradas (todas as congregações)", format_currency(total_geral_in))
-            return
-
-        # === CONGREGAÇÃO ESPECÍFICA ===
-        if not cong_obj:
-            st.info("Selecione uma congregação."); 
-            return
-
-        st.info(f"Escopo: **{cong_obj.name}**")
-
-        base_df = _entrada_summary_df(db, cong_obj.id, start, end)
-        if base_df.empty:
-            base_df = pd.DataFrame(columns=["Data do Culto","Dízimo","Oferta","Total"])
-        view_df = base_df.copy()
-
-        edited = st.data_editor(
-            view_df,
-            use_container_width=True,
-            hide_index=True,
-            num_rows="dynamic",
-            column_config={
-                "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
-                "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", min_value=-999999999.0, step=1.0, format="R$ %.2f"),
-                "Oferta": st.column_config.NumberColumn("Oferta (R$)", min_value=-999999999.0, step=1.0, format="R$ %.2f"),
-                "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
-            },
-            key="re_entrada_sum_editor",
-        )
-
-        # Recalcula a coluna Total (visual)
-        if not edited.empty:
-            try:
-                edited["Total"] = edited["Dízimo"].map(_to_float_brl) + edited["Oferta"].map(_to_float_brl)
-            except Exception:
-                pass
-
-        # === TOTAL DO MÊS EM DESTAQUE (abaixo da tabela) ===
-        try:
-            _sum_total_mes = 0.0
-            if isinstance(edited, pd.DataFrame) and not edited.empty and {"Dízimo","Oferta"}.issubset(set(edited.columns)):
-                _calc = edited.copy()
-                _calc["Dízimo"] = _calc["Dízimo"].map(_to_float_brl)
-                _calc["Oferta"] = _calc["Oferta"].map(_to_float_brl)
-                _calc["Total"]  = _calc["Dízimo"] + _calc["Oferta"]
-                _sum_total_mes = float(_calc["Total"].sum())
-        except Exception:
-            _sum_total_mes = 0.0
-
-        st.metric("Total de Entradas (Dízimo + Oferta) no mês", format_currency(_sum_total_mes))
-
-        # Botão Salvar (persiste no banco via _apply_entrada_summary_changes)
-        def _save_sum():
-            _apply_entrada_summary_changes(cong_obj.id, start, end, edited)
-            st.toast("💾 Alterações salvas.", icon="✅")
-            st.rerun()
-
-        _save_btn(_save_sum, "entrada_sum")
-
-        # === [BLOCO: Apagar linhas do resumo de entrada] — logo após o botão Salvar ===
-        if isinstance(edited, pd.DataFrame) and not edited.empty and ("Data do Culto" in edited.columns):
-            try:
-                # Converte as datas e cria rótulos "dd/mm/aaaa"
-                _datas_ord = sorted({_to_date(d) for d in edited["Data do Culto"].tolist() if pd.notna(d)})
-                _label_map = {format_date(d): d for d in _datas_ord}  # "dd/mm/aaaa" -> date
-                _rotulos = list(_label_map.keys())
-            except Exception:
-                _rotulos = []
-                _label_map = {}
-
-            _sel_del = st.multiselect(
-                "Selecione as datas que deseja APAGAR desta tabela-resumo",
-                options=_rotulos,
-                key="re_entrada_sum_del_dates"
-            )
-
-            def _delete_selected_rows():
-                if not _sel_del:
-                    st.warning("Selecione ao menos uma data para apagar.")
-                    return
-
-                # Datas selecionadas (tipo date)
-                to_drop = {_label_map[x] for x in _sel_del if x in _label_map}
-
-                # Remove linhas com essas datas e salva
-                edited_clean = edited.copy()
-                edited_clean["Data do Culto"] = edited_clean["Data do Culto"].map(_to_date)
-                edited_clean = edited_clean[~edited_clean["Data do Culto"].isin(to_drop)]
-
-                _apply_entrada_summary_changes(cong_obj.id, start, end, edited_clean)
-                st.toast("🗑️ Linhas apagadas com sucesso.", icon="✅")
-                st.rerun()
-
-            st.button(
-                "🗑️ Apagar linhas selecionadas",
-                type="secondary",
-                on_click=_delete_selected_rows,
-                key="btn_del_entrada_sum"
-            )
-        # === [FIM: Apagar linhas] ===
-
-        st.divider()
-
-        # Download CSV do período
-        csv = edited.assign(**{
-            "Data do Culto": edited["Data do Culto"].map(lambda d: _to_date(d).strftime("%Y-%m-%d")),
-        }).to_csv(index=False).encode("utf-8-sig")
-        st.download_button(
-            "⬇️ Baixar CSV (Entradas do período)",
-            data=csv,
-            file_name=f"entradas_resumo_{start.strftime('%Y-%m')}.csv",
-            mime="text/csv"
-        )
-
-# ===================== PAGE: RELATÓRIO DE SAÍDA =====================
-def page_relatorio_saida(user: "User"):
-    ensure_seed()
-    with SessionLocal() as db:
-        sidebar_common(user)
-
-        st.markdown("<h1 class='page-title'>Relatório de Saída</h1>", unsafe_allow_html=True)
-        ref = get_month_selector()
-        start, end = month_bounds(ref)
-
-        congs = cong_options_for(user, db)
-        if user.role == "SEDE":
-            ordered = order_congs_sede_first(congs)
-            esc_opt = ["Todas as congregações"] + [c.name for c in ordered]
-            esc = st.selectbox("Escopo", esc_opt, key="rs_escopo")
-            is_all = (esc == "Todas as congregações")
-            cong_obj = None if is_all else next(c for c in ordered if c.name == esc)
-        else:
-            cong_obj = congs[0] if congs else None; is_all = False
-
-        if is_all:
-            st.info("Escopo: **Todas as congregações** — edite o total mensal de saídas por congregação abaixo.")
-            _editor_saidas_agg_all(ordered, start, end)
-
-            # === [BLOCO 7: Total geral de SAÍDAS (todas as congregações)] ===
-            with SessionLocal() as _db_tot_out:
-                total_geral_out = 0.0
-                for _c in ordered:
-                    _t = _collect_month_data(_db_tot_out, _c.id, start, end)["totals"]
-                    total_geral_out += float(_t["saidas_total"])
-            st.metric("Total geral de SAÍDAS (todas as congregações)", format_currency(total_geral_out))
-            # === [FIM DO BLOCO 7] ===
-
-            st.divider()
-            with SessionLocal() as db2:
-                rows = []
-                for c in ordered:
-                    total = _collect_month_data(db2, c.id, start, end)["totals"]["saidas_total"]
-                    rows.append({"Congregação": c.name, "Total Saídas (R$)": float(total)})
-            csv = pd.DataFrame(rows).to_csv(index=False).encode("utf-8-sig")
-            st.download_button("⬇️ Baixar CSV (Saídas por congregação)", data=csv, file_name=f"saidas_congregacoes_{start.strftime('%Y-%m')}.csv", mime="text/csv")
-            return
-
-        if not cong_obj:
-            st.info("Sem congregação vinculada."); return
-        st.info(f"Escopo: **{cong_obj.name}**")
-
-        q = select(Transaction).options(joinedload(Transaction.category)).where(
-            Transaction.date >= start, Transaction.date < end, Transaction.type.in_(("SAÍDA", "DESPESA")),
-            Transaction.congregation_id == cong_obj.id
-        )
-        txs = db.scalars(q).all()
-
-        total_saidas = sum(float(t.amount) for t in txs)
-        st.metric("Total de saídas", format_currency(total_saidas))
-
-        st.divider()
-        _editor_lancamentos(txs, "Saídas do período (editar na tabela)", tx_type_hint=TYPE_OUT)
-
-        st.divider()
-        rows_csv = [{
-            "Data": t.date.strftime("%Y-%m-%d"),
-            "Congregação": t.congregation.name,
-            "Tipo da saída": t.category.name,
-            "Valor": float(t.amount),
-            "Descrição": t.description or ""
-        } for t in txs]
-        csv = pd.DataFrame(rows_csv).to_csv(index=False).encode("utf-8-sig")
-        st.download_button(
-            "⬇️ Baixar CSV das SAÍDAS do período",
-            data=csv, file_name=f"saidas_{start.strftime('%Y-%m')}.csv", mime="text/csv"
-        )
-
-# ===================== PAGE: RELATÓRIO DE DIZIMISTAS =====================
-def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, mes_sel: str, nome_q: str) -> bytes:
-    buf = BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=portrait(A4), leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('title', parent=styles['Heading1'], alignment=TA_CENTER, fontSize=16, spaceAfter=8)
-    subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=12, textColor=colors.black, spaceAfter=12)
-
-    story = []
-    story.append(Paragraph("Relatório de Pesquisa de Dizimistas", title_style))
-    story.append(Paragraph(f"Ano: {ano_pesq} | Congregação: {cong_sel} | Mês: {mes_sel}", subtitle_style))
-    if (nome_q or "").strip():
-        story.append(Paragraph(f"Filtrado por: '{nome_q}'", subtitle_style))
-    story.append(Spacer(1, 0.5*cm))
-
-    data_table = [df.columns.tolist()] + df.values.tolist()
-    total_value = float(df["Total no ano (R$)"].sum())
-    total_row = ["", "", "", "Total Geral:", total_value, "", ""]
-    data_table.append(total_row)
-    for row in data_table[1:]:
-        if isinstance(row[4], float):
-            row[4] = format_currency(row[4])
-
-    tbl = Table(data_table, colWidths=[3.5*cm, 3.5*cm, 2.0*cm, 2.5*cm, 2.5*cm, 2.0*cm, 2.0*cm])
-    tbl.setStyle(TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-        ("ALIGN", (4, 1), (4, -1), "RIGHT"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-    ]))
-    story.append(tbl)
-    story.append(Spacer(1, 0.5*cm))
-    story.append(Paragraph(f"Dizimistas encontrados: **{len(df)}**", styles['Normal']))
-    story.append(Paragraph(f"Total geral da pesquisa: **{format_currency(total_value)}**", styles['Normal']))
-
-    doc.build(story)
-    return buf.getvalue()
-
 def page_relatorio_dizimistas(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
-        sidebar_common(user)
-
         st.markdown("<h1 class='page-title'>Relatório de Dizimistas</h1>", unsafe_allow_html=True)
         ref = get_month_selector()
         start, end = month_bounds(ref)
@@ -2342,7 +1930,266 @@ def page_relatorio_dizimistas(user: "User"):
 
             csv = df_show.to_csv(index=False).encode("utf-8-sig")
             st.download_button("⬇️ Baixar CSV da pesquisa", data=csv, file_name=f"pesquisa_dizimistas_{ano_pesq}.csv", mime="text/csv")
-            pdf_data = build_dizimista_search_pdf(df_show.assign(**{"Total no ano (R$)": df_show["Total no ano (R$)"]}), ano_pesq, cong_sel, mes_sel, nome_q)
+            
+            pdf_data = build_dizimista_search_pdf(df_show, ano_pesq, cong_sel, mes_sel, nome_q)
+            st.download_button("⬇️ Baixar PDF da pesquisa", data=pdf_data, file_name=f"pesquisa_dizimistas_{ano_pesq}.pdf", mime="application/pdf")
+        else:
+            st.caption("Nenhum resultado para os filtros informados.")
+
+# ===================== PAGE: RELATÓRIO DE SAÍDA =====================
+def page_relatorio_saida(user: "User"):
+    ensure_seed()
+    with SessionLocal() as db:
+        # sidebar_common(user) <--- CHAMADA REMOVIDA
+
+        st.markdown("<h1 class='page-title'>Relatório de Saída</h1>", unsafe_allow_html=True)
+        ref = get_month_selector()
+        start, end = month_bounds(ref)
+
+        congs = cong_options_for(user, db)
+        if user.role == "SEDE":
+            ordered = order_congs_sede_first(congs)
+            esc_opt = ["Todas as congregações"] + [c.name for c in ordered]
+            esc = st.selectbox("Escopo", esc_opt, key="rs_escopo")
+            is_all = (esc == "Todas as congregações")
+            cong_obj = None if is_all else next(c for c in ordered if c.name == esc)
+        else:
+            cong_obj = congs[0] if congs else None; is_all = False
+
+        if is_all:
+            st.info("Escopo: **Todas as congregações** — edite o total mensal de saídas por congregação abaixo.")
+            _editor_saidas_agg_all(ordered, start, end)
+
+            # === [BLOCO 7: Total geral de SAÍDAS (todas as congregações)] ===
+            with SessionLocal() as _db_tot_out:
+                total_geral_out = 0.0
+                for _c in ordered:
+                    _t = _collect_month_data(_db_tot_out, _c.id, start, end)["totals"]
+                    total_geral_out += float(_t["saidas_total"])
+            st.metric("Total geral de SAÍDAS (todas as congregações)", format_currency(total_geral_out))
+            # === [FIM DO BLOCO 7] ===
+
+            st.divider()
+            with SessionLocal() as db2:
+                rows = []
+                for c in ordered:
+                    total = _collect_month_data(db2, c.id, start, end)["totals"]["saidas_total"]
+                    rows.append({"Congregação": c.name, "Total Saídas (R$)": float(total)})
+            csv = pd.DataFrame(rows).to_csv(index=False).encode("utf-8-sig")
+            st.download_button("⬇️ Baixar CSV (Saídas por congregação)", data=csv, file_name=f"saidas_congregacoes_{start.strftime('%Y-%m')}.csv", mime="text/csv")
+            return
+
+        if not cong_obj:
+            st.info("Sem congregação vinculada."); return
+        st.info(f"Escopo: **{cong_obj.name}**")
+
+        q = select(Transaction).options(joinedload(Transaction.category)).where(
+            Transaction.date >= start, Transaction.date < end, Transaction.type.in_(("SAÍDA", "DESPESA")),
+            Transaction.congregation_id == cong_obj.id
+        )
+        txs = db.scalars(q).all()
+
+        total_saidas = sum(float(t.amount) for t in txs)
+        st.metric("Total de saídas", format_currency(total_saidas))
+
+        st.divider()
+        _editor_lancamentos(txs, "Saídas do período (editar na tabela)", tx_type_hint=TYPE_OUT)
+
+        st.divider()
+        rows_csv = [{
+            "Data": t.date.strftime("%Y-%m-%d"),
+            "Congregação": t.congregation.name,
+            "Tipo da saída": t.category.name,
+            "Valor": float(t.amount),
+            "Descrição": t.description or ""
+        } for t in txs]
+        csv = pd.DataFrame(rows_csv).to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            "⬇️ Baixar CSV das SAÍDAS do período",
+            data=csv, file_name=f"saidas_{start.strftime('%Y-%m')}.csv", mime="text/csv"
+        )
+
+# ===================== PAGE: RELATÓRIO DE DIZIMISTAS =====================
+def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, mes_sel: str, nome_q: str) -> bytes:
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=portrait(A4), leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('title', parent=styles['Heading1'], alignment=TA_CENTER, fontSize=16, spaceAfter=8)
+    subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=12, textColor=colors.black, spaceAfter=12)
+
+    story = []
+    story.append(Paragraph("Relatório de Pesquisa de Dizimistas", title_style))
+    story.append(Paragraph(f"Ano: {ano_pesq} | Congregação: {cong_sel} | Mês: {mes_sel}", subtitle_style))
+    if (nome_q or "").strip():
+        story.append(Paragraph(f"Filtrado por: '{nome_q}'", subtitle_style))
+    story.append(Spacer(1, 0.5*cm))
+
+    data_table = [df.columns.tolist()] + df.values.tolist()
+    total_value = float(df["Total no ano (R$)"].sum())
+    total_row = ["", "", "", "Total Geral:", total_value, "", ""]
+    data_table.append(total_row)
+    for row in data_table[1:]:
+        if isinstance(row[4], float):
+            row[4] = format_currency(row[4])
+
+    tbl = Table(data_table, colWidths=[3.5*cm, 3.5*cm, 2.0*cm, 2.5*cm, 2.5*cm, 2.0*cm, 2.0*cm])
+    tbl.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("ALIGN", (4, 1), (4, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    story.append(tbl)
+    story.append(Spacer(1, 0.5*cm))
+    story.append(Paragraph(f"Dizimistas encontrados: **{len(df)}**", styles['Normal']))
+    story.append(Paragraph(f"Total geral da pesquisa: **{format_currency(total_value)}**", styles['Normal']))
+
+    doc.build(story)
+    return buf.getvalue()
+
+def page_relatorio_dizimistas(user: "User"):
+    ensure_seed()
+    with SessionLocal() as db:
+        st.markdown("<h1 class='page-title'>Relatório de Dizimistas</h1>", unsafe_allow_html=True)
+        ref = get_month_selector()
+        start, end = month_bounds(ref)
+
+        congs = cong_options_for(user, db)
+        if user.role == "SEDE":
+            ordered = order_congs_sede_first(congs)
+            esc_opt = ["Todas as congregações"] + [c.name for c in ordered]
+            esc = st.selectbox("Escopo", esc_opt, key="rd_escopo")
+            is_all = (esc == "Todas as congregações")
+            cong_obj = None if is_all else next(c for c in ordered if c.name == esc)
+        else:
+            cong_obj = congs[0] if congs else None; is_all = False
+
+        if not cong_obj and not is_all:
+            st.info("Sem congregação vinculada."); return
+        if cong_obj:
+            st.info(f"Escopo: **{cong_obj.name}**")
+
+        if is_all:
+            all_tz = db.scalars(select(Tithe).where(Tithe.date >= start, Tithe.date < end)).all()
+            by_cong = defaultdict(lambda: {"qtd":0, "valor":0.0})
+            for t in all_tz:
+                k = t.congregation.name
+                by_cong[k]["qtd"] += 1
+                by_cong[k]["valor"] += float(t.amount)
+            df = pd.DataFrame([{"Congregação": k, "Qtde de dizimistas": v["qtd"], "Total (R$)": format_currency(v["valor"])} for k,v in sorted(by_cong.items())])
+            st.dataframe(df, use_container_width=True, hide_index=True, height=200)
+            st.info("Selecione uma congregação específica para ver a lista nominal e editar.")
+        else:
+            tithes = db.scalars(select(Tithe).where(
+                Tithe.date >= start, Tithe.date < end, Tithe.congregation_id == cong_obj.id
+            ).order_by(Tithe.date)).all()
+
+            tithes_by_payment = defaultdict(lambda: {"count": 0, "total": 0.0})
+            for tithe in tithes:
+                method = (tithe.payment_method or "Não Informado").upper()
+                tithes_by_payment[method]["count"] += 1
+                tithes_by_payment[method]["total"] += float(tithe.amount)
+
+            st.subheader("Resumo de Pagamentos de Dízimos")
+            cols_metrics = st.columns(max(1, len(tithes_by_payment)))
+            for i, (method, datax) in enumerate(tithes_by_payment.items()):
+                cols_metrics[i].metric(f"Total ({method})", format_currency(datax["total"]), f"{datax['count']} dízimos")
+
+            st.divider()
+            _editor_dizimos(tithes, "Dizimistas do período (editar na tabela)")
+
+        st.divider()
+        st.subheader("Pesquisa de Dizimistas (por Ano)")
+        c1, c2, c3, c4, c5 = st.columns([1.2, 1.8, 1.4, 2.2, 1.6])
+        with c1:
+            ano_pesq = st.number_input("Ano", value=today_bahia().year, step=1, format="%d", key="srch_year")
+        with c2:
+            if user.role == "SEDE":
+                cong_opts = ["Todas"] + [c.name for c in order_congs_sede_first(congs)]
+                cong_sel = st.selectbox("Congregação", cong_opts, key="srch_cong")
+            else:
+                cong_sel = cong_obj.name
+                st.text_input("Congregação", cong_sel, disabled=True, key="srch_cong_disabled")
+        with c3:
+            mes_opt = ["Todos"] + MONTHS
+            mes_sel = st.selectbox("Mês", mes_opt, index=0, key="srch_month")
+        with c4:
+            nome_q = st.text_input("Nome do dizimista (contém)", key="srch_name")
+        with c5:
+            only_pix = st.checkbox("Somente PIX", value=False, key="srch_only_pix")
+
+        year_start = date(int(ano_pesq), 1, 1)
+        year_end = date(int(ano_pesq)+1, 1, 1)
+        q = select(Tithe).options(joinedload(Tithe.congregation)).where(Tithe.date >= year_start, Tithe.date < year_end)
+
+        if user.role == "SEDE":
+            if cong_sel != "Todas":
+                cong_id_sel = next(c.id for c in congs if c.name == cong_sel)
+                q = q.where(Tithe.congregation_id == cong_id_sel)
+        else:
+            q = q.where(Tithe.congregation_id == cong_obj.id)
+
+        with SessionLocal() as db2:
+            t_list = db2.scalars(q.order_by(Tithe.tither_name, Tithe.date)).all()
+
+        if (nome_q or "").strip():
+            nneedle = _norm(nome_q)
+            t_list = [t for t in t_list if nneedle in _norm(t.tither_name)]
+
+        if only_pix:
+            t_list = [t for t in t_list if (t.payment_method or "").strip().upper() == "PIX"]
+
+        agg = {}
+        for t in t_list:
+            key = (_norm(t.tither_name), t.congregation_id)
+            if key not in agg:
+                agg[key] = {"nome_display": t.tither_name, "congregacao": t.congregation.name if t.congregation else "—",
+                            "total_ano": 0.0, "meses": set(), "primeiro": t.date, "ultimo": t.date}
+            agg[key]["total_ano"] += float(t.amount)
+            agg[key]["meses"].add(t.date.month)
+            if t.date < agg[key]["primeiro"]: agg[key]["primeiro"] = t.date
+            if t.date > agg[key]["ultimo"]: agg[key]["ultimo"] = t.date
+
+        rows = []
+        for info in agg.values():
+            meses_sorted = sorted(list(info["meses"]))
+            rows.append({
+                "Dizimista": info["nome_display"],
+                "Congregação": info["congregacao"],
+                "Qtde de meses no ano": len(meses_sorted),
+                "Meses": ", ".join(MONTHS_SHORT[m-1] for m in meses_sorted) if meses_sorted else "—",
+                "Total no ano (R$)": info["total_ano"],
+                "Primeiro dízimo": format_date(info["primeiro"]) if info["primeiro"] else "—",
+                "Último dízimo": format_date(info["ultimo"]) if info["ultimo"] else "—",
+            })
+
+        df_pesq = pd.DataFrame(rows)
+        if not df_pesq.empty:
+            df_show = df_pesq.sort_values(["Qtde de meses no ano","Dizimista"], ascending=[False, True]).reset_index(drop=True)
+            st.dataframe(
+                df_show.assign(**{"Total no ano (R$)": df_show["Total no ano (R$)"].map(lambda x: format_currency(float(x)))}),
+                use_container_width=True, hide_index=True, height=320
+            )
+            tot_reg = len(df_show)
+            tot_val = float(df_show["Total no ano (R$)"].sum())
+            cA, cB, cC = st.columns(3)
+            cA.metric("Dizimistas encontrados", f"{tot_reg}")
+            cB.metric("Total geral da pesquisa", format_currency(tot_val))
+
+            pix_names = sorted({t.tither_name for t in t_list if (t.payment_method or "").strip().upper() == "PIX"})
+            cC.metric("Dizimaram por PIX (únicos)", f"{len(pix_names)}")
+            if pix_names:
+                st.caption("Nomes que dizimaram por PIX (neste filtro):")
+                st.write(", ".join(pix_names))
+
+            csv = df_show.to_csv(index=False).encode("utf-8-sig")
+            st.download_button("⬇️ Baixar CSV da pesquisa", data=csv, file_name=f"pesquisa_dizimistas_{ano_pesq}.csv", mime="text/csv")
+
+            # CORREÇÃO: Passando o DataFrame com dados numéricos, não o formatado
+            pdf_data = build_dizimista_search_pdf(df_show, ano_pesq, cong_sel, mes_sel, nome_q)
             st.download_button("⬇️ Baixar PDF da pesquisa", data=pdf_data, file_name=f"pesquisa_dizimistas_{ano_pesq}.pdf", mime="application/pdf")
         else:
             st.caption("Nenhum resultado para os filtros informados.")
@@ -2499,8 +2346,6 @@ def render_stat_card(col, label: str, full_text: str):
 def page_visao_geral(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
-        sidebar_common(user)
-
         st.markdown("<h1 class='page-title'>Visão Geral</h1>", unsafe_allow_html=True)
         ref = get_month_selector()
         start, end = month_bounds(ref)
@@ -2571,10 +2416,9 @@ def page_visao_geral(user: "User"):
             else:
                 st.caption("Sem dados neste mês.")
 
-            # === [BLOCO 9: Totais gerais — Entradas, Saídas e Saldo (todas as congregações)] ===
             try:
-                _tot_in    = sum(float(v)    for (_n, v, _s, _sal, _m) in agg_total)
-                _tot_out   = sum(float(_s)   for (_n, _v, _s, _sal, _m) in agg_total)
+                _tot_in   = sum(float(v)   for (_n, v, _s, _sal, _m) in agg_total)
+                _tot_out  = sum(float(_s)  for (_n, _v, _s, _sal, _m) in agg_total)
                 _tot_saldo = sum(float(_sal) for (_n, _v, _s, _sal, _m) in agg_total)
             except Exception:
                 _tot_in = _tot_out = _tot_saldo = 0.0
@@ -2583,24 +2427,12 @@ def page_visao_geral(user: "User"):
             c1.metric("Total de Entradas (todas as congregações)", format_currency(_tot_in))
             c2.metric("Total de Saídas (todas as congregações)", format_currency(_tot_out))
             c3.metric("Saldo (todas as congregações)", format_currency(_tot_saldo))
-            # === [FIM BLOCO 9] ===
-
-            st.divider()
-            st.subheader("Relatório Consolidado Mensal")
-            st.download_button(
-                "⬇️ Baixar PDF do Relatório Geral",
-                data=build_consolidated_pdf(agg_total, ref),
-                file_name=f"relatorio_mensal_{start.strftime('%Y-%m')}.pdf",
-                mime="application/pdf",
-                key=f"dl_pdf_relatorio_geral_{start.strftime('%Y_%m')}"
-            )
 
         # ==== Tesoureiro (apenas sua congregação) ====
         if user.role != "SEDE" and agg_total:
             st.divider()
             st.subheader("Resumo Financeiro Mensal")
 
-            # Totais detalhados para a congregação do usuário (dízimos e ofertas separadas)
             with SessionLocal() as _db_vg:
                 _tot = _collect_month_data(_db_vg, cong_obj.id, start, end)["totals"]
 
@@ -2620,28 +2452,7 @@ def page_visao_geral(user: "User"):
 
             st.dataframe(df_summary_5, use_container_width=True, hide_index=True)
 
-        # ==== PDF completo por congregação ====
-        st.subheader("Prestação de contas (PDF completo)")
-        if user.role == "SEDE":
-            sel = st.selectbox(
-                "Congregação",
-                [c.name for c in ordered],
-                key=f"pc_cong_sel_vg_{start.strftime('%Y_%m')}"
-            )
-            cong_obj = next(c for c in ordered if c.name == sel)
-        else:
-            cong_obj = ordered[0]
-
-        st.download_button(
-            "⬇️ Baixar PDF do mês (completo)",
-            data=build_full_statement_pdf(cong_obj.id, cong_obj.name, ref),
-            file_name=f"prestacao_{_norm(cong_obj.name)}_{start.strftime('%Y-%m')}.pdf",
-            mime="application/pdf",
-            key=f"dl_pdf_prestacao_{_norm(cong_obj.name)}_{start.strftime('%Y_%m')}"
-        )
-
-        # === [FIM BLOCO 8] ===
-
+        # ==== DOWNLOADS DE PDFS (BLOCO ÚNICO E CORRIGIDO) ====
         if user.role == "SEDE":
             st.divider()
             st.subheader("Relatório Consolidado Mensal")
@@ -2649,20 +2460,27 @@ def page_visao_geral(user: "User"):
                 "⬇️ Baixar PDF do Relatório Geral",
                 data=build_consolidated_pdf(agg_total, ref),
                 file_name=f"relatorio_mensal_{start.strftime('%Y-%m')}.pdf",
-                mime="application/pdf"
+                mime="application/pdf",
+                key=f"dl_pdf_relatorio_geral_{start.strftime('%Y_%m')}"
             )
 
         st.subheader("Prestação de contas (PDF completo)")
         if user.role == "SEDE":
-            sel = st.selectbox("Congregação", [c.name for c in ordered], key="pc_cong_sel")
-            cong_obj = next(c for c in ordered if c.name == sel)
+            sel = st.selectbox(
+                "Congregação",
+                [c.name for c in ordered],
+                key=f"pc_cong_sel_vg_{start.strftime('%Y_%m')}"
+            )
+            cong_obj_pdf = next(c for c in ordered if c.name == sel)
         else:
-            cong_obj = ordered[0]
+            cong_obj_pdf = ordered[0]
+
         st.download_button(
             "⬇️ Baixar PDF do mês (completo)",
-            data=build_full_statement_pdf(cong_obj.id, cong_obj.name, ref),
-            file_name=f"prestacao_{_norm(cong_obj.name)}_{start.strftime('%Y-%m')}.pdf",
-            mime="application/pdf"
+            data=build_full_statement_pdf(cong_obj_pdf.id, cong_obj_pdf.name, ref),
+            file_name=f"prestacao_{_norm(cong_obj_pdf.name)}_{start.strftime('%Y-%m')}.pdf",
+            mime="application/pdf",
+            key=f"dl_pdf_prestacao_{_norm(cong_obj_pdf.name)}_{start.strftime('%Y_%m')}"
         )
 
 # ===================== COLETA MISSÕES =====================
@@ -2765,8 +2583,6 @@ def page_relatorio_missoes(user: "User"):
     
     ensure_seed()
     with SessionLocal() as db:
-        sidebar_common(user)
-
         st.markdown("<h1 class='page-title'>Relatório de Missões</h1>", unsafe_allow_html=True)
         ref = get_month_selector()
         start, end = month_bounds(ref)
@@ -2784,23 +2600,21 @@ def page_relatorio_missoes(user: "User"):
 
         st.divider()
         st.subheader("Gerar Relatório de Missões (PDF)")
-        entradas_missoes, saidas_missoes = _collect_missions_data(db, start, end)
+        entradas_missoes, saidas_missoes_pdf = _collect_missions_data(db, start, end)
         st.download_button(
             "⬇️ Baixar Relatório de Missões (PDF)",
-            data=build_missions_report_pdf(ref, entradas_missoes, saidas_missoes),
+            data=build_missions_report_pdf(ref, entradas_missoes, saidas_missoes_pdf),
             file_name=f"relatorio_missoes_{start.strftime('%Y-%m')}.pdf",
             mime="application/pdf"
         )
 
 def page_relatorio_missoes_congregacao(user: "User"):
-    # Página do TESOUREIRO (congregações) — mostra APENAS o SALDO do mês
     if user.role != "TESOUREIRO":
         st.warning("🔒 Acesso restrito aos usuários TESOUREIRO (congregações).")
         return
 
     ensure_seed()
     with SessionLocal() as db:
-        sidebar_common(user)
         st.markdown("<h1 class='page-title'>Relatório de Missões (Minha Congregação)</h1>", unsafe_allow_html=True)
 
         ref = get_month_selector()
@@ -2809,14 +2623,15 @@ def page_relatorio_missoes_congregacao(user: "User"):
         if not user.congregation_id:
             st.info("Sua conta não está vinculada a uma congregação.")
             return
+        
+        cong_name = db.get(Congregation, user.congregation_id).name
+        st.info(f"Escopo: **{cong_name}**")
 
-        # Coleta apenas os lançamentos da congregação do usuário
         entradas, saidas = _collect_missions_data(db, start, end, only_cong_id=user.congregation_id)
         total_in = sum(float(t.amount) for t in entradas)
         total_out = sum(float(t.amount) for t in saidas)
         saldo_mes = float(total_in - total_out)
 
-        # === Somente SALDO em destaque ===
         st.metric("Saldo de Missões (mês corrente)", format_currency(saldo_mes))
 
         st.divider()
@@ -2827,6 +2642,172 @@ def page_relatorio_missoes_congregacao(user: "User"):
             file_name=f"relatorio_missoes_congregacao_{start.strftime('%Y-%m')}.pdf",
             mime="application/pdf"
         )
+
+def page_cadastro(user: "User"):
+    if not is_admin_general(user):
+        st.warning("🔒 Apenas o **administrador geral** (admin) pode acessar o Cadastro.")
+        return
+    with SessionLocal() as db:
+        st.markdown("<h1 class='page-title'>Cadastro</h1>", unsafe_allow_html=True)
+
+        # (restante do cadastro preservado — sem editores que precisem de botão)
+
+        # Congregações
+        st.subheader("Congregações")
+        col_single, col_mass = st.columns(2)
+        with col_single:
+            new_cong = st.text_input("Nova congregação (individual)", key="cad_new_cong")
+            if st.button("Adicionar congregação", disabled=not new_cong.strip(), key="cad_add_cong"):
+                if db.scalar(select(Congregation).where(Congregation.name == new_cong.strip())):
+                    st.error("Já existe congregação com esse nome.")
+                else:
+                    db.add(Congregation(name=new_cong.strip())); db.commit()
+                    st.success("Congregação adicionada."); st.rerun()
+        with col_mass:
+            mass_text = st.text_area("Adicionar em massa (uma congregação por linha)", height=140, key="cad_mass_cong")
+            if st.button("Adicionar lista", key="cad_add_cong_mass"):
+                linhas = [l.strip() for l in (mass_text or "").splitlines()]
+                linhas = [l for l in linhas if l]
+                if not linhas:
+                    st.warning("Informe ao menos um nome.")
+                else:
+                    inseridas = 0; repetidas = 0
+                    for nome in linhas:
+                        if db.scalar(select(Congregation).where(Congregation.name == nome)):
+                            repetidas += 1
+                        else:
+                            db.add(Congregation(name=nome)); inseridas += 1
+                    db.commit()
+                    st.success(f"Inseridas: {inseridas} | Já existiam: {repetidas}")
+                    st.rerun()
+
+        congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+        users_by_cong = dict(db.execute(select(Congregation.id, func.count(User.id))
+                                    .join(User, User.congregation_id == Congregation.id, isouter=True)
+                                    .group_by(Congregation.id)).all())
+        tx_by_cong = dict(db.execute(select(Congregation.id, func.count(Transaction.id))
+                                .join(Transaction, Transaction.congregation_id == Congregation.id, isouter=True)
+                                .group_by(Congregation.id)).all())
+        tithes_by_cong = dict(db.execute(select(Congregation.id, func.count(Tithe.id))
+                                    .join(Tithe, Tithe.congregation_id == Congregation.id, isouter=True)
+                                    .group_by(Congregation.id)).all())
+        dfc = pd.DataFrame([{
+            "ID": c.id, "Nome": c.name,
+            "Usuários": int(users_by_cong.get(c.id, 0)),
+            "Lançamentos": int(tx_by_cong.get(c.id, 0)),
+            "Dízimos": int(tithes_by_cong.get(c.id, 0)),
+        } for c in congs_all])
+        if not dfc.empty:
+            st.dataframe(dfc, use_container_width=True, hide_index=True, height=200)
+
+        with st.expander("Excluir congregações"):
+            st.caption("Só é possível excluir congregações **sem usuários, lançamentos ou dízimos**. A congregação **Sede** não pode ser excluída.")
+            eligible_ids = []
+            for c in congs_all:
+                if _norm(c.name) == "sede": continue
+                if users_by_cong.get(c.id, 0) == 0 and tx_by_cong.get(c.id, 0) == 0 and tithes_by_cong.get(c.id, 0) == 0:
+                    eligible_ids.append(c.id)
+            if not eligible_ids:
+                st.info("Nenhuma congregação elegível para exclusão.")
+            else:
+                ids_del_cong = st.multiselect("IDs de congregações para excluir", eligible_ids, key="cad_del_cong_ids")
+                confc2 = st.text_input("Digite EXCLUIR para confirmar", key="cad_del_cong_conf")
+                btn_disabled = (not ids_del_cong) or (not _confirm_ok(confc2))
+                if st.button("Excluir congregações selecionadas", disabled=btn_disabled, key="cad_del_cong_btn"):
+                    with SessionLocal() as _db:
+                        _db.query(Congregation).filter(Congregation.id.in_(ids_del_cong)).delete(synchronize_session=False)
+                        _db.commit()
+                    st.success(f"{len(ids_del_cong)} congregação(ões) excluída(s)."); st.rerun()
+        st.divider()
+
+        # Categorias
+        st.subheader("Categorias")
+        col1, col2 = st.columns(2)
+        with col1:
+            cat_name = st.text_input("Nome da categoria", key="cad_cat_name")
+        with col2:
+            cat_type = st.selectbox("Tipo", ["DOAÇÃO", "SAÍDA"], key="cad_cat_type")
+        if st.button("Adicionar categoria", disabled=not cat_name.strip(), key="cad_add_cat"):
+            if db.scalar(select(Category).where(Category.name == cat_name.strip())):
+                st.error("Já existe categoria com esse nome.")
+            else:
+                db.add(Category(name=cat_name.strip(), type=cat_type)); db.commit()
+                st.success("Categoria adicionada."); st.rerun()
+
+        cats = db.scalars(select(Category).order_by(Category.type, Category.name)).all()
+        usage = dict(db.execute(select(Category.id, func.count(Transaction.id))
+                                .join(Transaction, Transaction.category_id == Category.id, isouter=True)
+                                .group_by(Category.id)).all())
+        dfcat = pd.DataFrame([{
+            "ID": c.id, "Nome": c.name, "Tipo": c.type, "Usos em lançamentos": int(usage.get(c.id, 0))
+        } for c in cats])
+        if not dfcat.empty:
+            st.dataframe(dfcat, use_container_width=True, hide_index=True, height=200)
+
+        with st.expander("Excluir categorias"):
+            st.caption("Só é possível excluir categorias **sem lançamentos** vinculados.")
+            ids_del = st.multiselect("IDs de categorias para excluir", dfcat.loc[dfcat["Usos em lançamentos"] == 0, "ID"].tolist(), key="cad_del_cat_ids")
+            confc = st.text_input("Digite EXCLUIR para confirmar", key="cad_del_cat_conf")
+            btn_disabled = (not ids_del) or (not _confirm_ok(confc))
+            if st.button("Excluir categorias selecionadas", disabled=btn_disabled, key="cad_del_cat_btn"):
+                with SessionLocal() as _db:
+                    _db.query(Category).filter(Category.id.in_(ids_del)).delete(synchronize_session=False)
+                    _db.commit()
+                st.success(f"{len(ids_del)} categoria(s) excluída(s)."); st.rerun()
+        st.divider()
+
+        # Usuários
+        st.subheader("Usuários")
+        u_user = st.text_input("Usuário (login)", key="cad_user_login")
+        u_pwd = st.text_input("Senha", type="password", key="cad_user_pwd")
+        u_role = st.selectbox("Perfil", ["SEDE", "TESOUREIRO", "TESOUREIRO MISSIONÁRIO"], key="cad_user_role")
+        all_congs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+        cong_options = ["—"] + [c.name for c in all_congs]
+        if u_role == "TESOUREIRO MISSIONÁRIO":
+            try:
+                index = cong_options.index("Sede")
+            except ValueError:
+                index = 0
+            u_cong_name = st.selectbox("Congregação (vinculada a Saídas de Missões)", cong_options, index=index, key="cad_user_cong")
+        else:
+            u_cong_name = st.selectbox("Congregação", cong_options, key="cad_user_cong")
+
+        if st.button("Criar usuário", key="cad_user_add"):
+            if not u_user.strip() or not u_pwd.strip():
+                st.error("Usuário e senha são obrigatórios.")
+            elif db.scalar(select(User).where(User.username == u_user.strip())):
+                st.error("Usuário já existe.")
+            else:
+                cong_id = None
+                if u_role == "TESOUREIRO":
+                    if u_cong_name == "—":
+                        st.error("Selecione a congregação."); return
+                    cong_id = next(c.id for c in all_congs if c.name == u_cong_name)
+                elif u_role == "TESOUREIRO MISSIONÁRIO":
+                        cong_id = db.scalar(select(Congregation.id).where(Congregation.name == "Sede"))
+                db.add(User(username=u_user.strip(), password_hash=hash_password(u_pwd.strip()), role=u_role, congregation_id=cong_id))
+                db.commit()
+                st.success("Usuário criado."); st.rerun()
+
+        users = db.scalars(select(User).order_by(User.username)).all()
+        dfu = pd.DataFrame([{
+            "ID": u.id, "Usuário": u.username, "Perfil": u.role,
+            "Congregação": (db.get(Congregation, u.congregation_id).name if u.congregation_id else "—")
+        } for u in users])
+        if not dfu.empty:
+            st.dataframe(dfu, use_container_width=True, hide_index=True, height=200)
+
+        with st.expander("Excluir usuários"):
+            st.caption("Não é permitido excluir o usuário atualmente logado.")
+            ids_u = st.multiselect("IDs de usuários para excluir", dfu["ID"].tolist(), key="cad_del_users_ids")
+            ids_u = [i for i in ids_u if i != user.id]
+            confu = st.text_input("Digite EXCLUIR para confirmar", key="cad_del_users_conf")
+            btn_disabled = (not ids_u) or (not _confirm_ok(confu))
+            if st.button("Excluir usuários selecionadas", disabled=btn_disabled, key="cad_del_users_btn"):
+                with SessionLocal() as _db:
+                    _db.query(User).filter(User.id.in_(ids_u)).delete(synchronize_session=False)
+                    _db.commit()
+                st.success(f"{len(ids_u)} usuário(s) excluído(s)."); st.rerun()
 
 # ===================== PAGE: CADASTRO =====================
 def page_cadastro(user: "User"):
@@ -2996,62 +2977,350 @@ def page_cadastro(user: "User"):
                     _db.query(User).filter(User.id.in_(ids_u)).delete(synchronize_session=False)
                     _db.commit()
                 st.success(f"{len(ids_u)} usuário(s) excluído(s)."); st.rerun()
+# ===================== PAGE: LANÇAMENTOS =====================
+# ===================== PAGE: LANÇAMENTOS =====================
+def page_lancamentos(user: "User"):
+    ensure_seed()
+    with SessionLocal() as db:
+        st.markdown(f"<h1 class='page-title'>Lançamentos</h1>", unsafe_allow_html=True)
 
+        # congregações disponíveis
+        congs = cong_options_for(user, db)
+        if not congs:
+            st.info("Nenhuma congregação disponível.")
+            return
+
+        # seleção da congregação
+        if user.role == "SEDE":
+            congs_ordered = order_congs_sede_first(congs)
+            cong_sel = st.selectbox("Selecione a congregação", [c.name for c in congs_ordered], key="lan_cong_sel")
+            cong_obj = next(c for c in congs_ordered if c.name == cong_sel)
+        else:
+            cong_obj = congs[0]
+
+        st.markdown(f"### CONGREGAÇÃO: {cong_obj.name.upper()}", unsafe_allow_html=True)
+
+        # ===== modo de inserção =====
+        modo = st.radio(
+            "Modo de lançamento:",
+            ["Formulário único", "Editar direto na tabela"],
+            horizontal=True,
+            key="lan_modo_sel",
+        )
+
+        if modo == "Editar direto na tabela":
+            st.subheader("Edição em Tabela")
+            ref_tab = get_month_selector("Mês de referência da tabela")
+            start_tab, end_tab = month_bounds(ref_tab)
+
+            # -------- Tabela 1: Agregado Diário (Dízimo + Oferta) --------
+            st.markdown("##### Entradas (Dízimo e Oferta)")
+            df = _entrada_summary_df(db, cong_obj.id, start_tab, end_tab)
+            if df.empty:
+                df = pd.DataFrame([{"Data do Culto": today_bahia(), "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0}])
+            
+            edited_tab = st.data_editor(
+                df, use_container_width=True, hide_index=True, num_rows="dynamic",
+                column_config={
+                    "Data do Culto": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
+                    "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", min_value=0.0, format="R$ %.2f"),
+                    "Oferta": st.column_config.NumberColumn("Oferta (R$)", min_value=0.0, format="R$ %.2f"),
+                    "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
+                },
+                key=f"lan_tab_editor_{cong_obj.id}_{start_tab:%Y_%m}",
+            )
+            
+            # NOVO BLOCO DE TOTAIS PARA A TABELA DE ENTRADAS
+            try:
+                total_dizimo = 0.0
+                total_oferta = 0.0
+                total_geral = 0.0
+                if isinstance(edited_tab, pd.DataFrame) and not edited_tab.empty:
+                    df_calc = edited_tab.copy()
+                    df_calc["Dízimo"] = df_calc["Dízimo"].map(_to_float_brl)
+                    df_calc["Oferta"] = df_calc["Oferta"].map(_to_float_brl)
+                    total_dizimo = df_calc["Dízimo"].sum()
+                    total_oferta = df_calc["Oferta"].sum()
+                    total_geral = total_dizimo + total_oferta
+            except Exception:
+                pass
+            
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total Dízimos (tabela)", format_currency(total_dizimo))
+            col2.metric("Total Ofertas (tabela)", format_currency(total_oferta))
+            col3.metric("Total Geral (tabela)", format_currency(total_geral))
+            # FIM DO NOVO BLOCO
+
+            def _save_tab():
+                _apply_entrada_summary_changes(cong_obj.id, start_tab, end_tab, edited_tab)
+                st.toast("💾 Tabela de entradas salva!", icon="✅")
+                st.rerun() # Adicionado para recarregar após salvar
+            _save_btn(_save_tab, f"lan_tab_{cong_obj.id}_{start_tab:%Y_%m}", theme="entrada")
+
+            st.markdown("---")
+            # -------- Tabela 2: Dizimistas --------
+            tithes = db.scalars(select(Tithe).where(Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.congregation_id == cong_obj.id).order_by(Tithe.date)).all()
+            _editor_dizimos(tithes, "Dizimistas do período", force_cong_id=cong_obj.id)
+
+            st.markdown("---")
+            # -------- Tabela 3: Saídas --------
+            txs_out = db.scalars(select(Transaction).options(joinedload(Transaction.category)).where(Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type.in_(("SAÍDA", "DESPESA")), Transaction.congregation_id == cong_obj.id)).all()
+            _editor_lancamentos(txs_out, "Saídas do período", tx_type_hint=TYPE_OUT, force_cong_id=cong_obj.id)
+            return
+
+        # ===================== FORMULÁRIOS ÚNICOS =====================
+        
+        # Formulário de ENTRADA
+        with st.expander("➕ Lançar ENTRADA (Dízimo, Oferta, etc.)", expanded=True):
+            ENTRADA_CLEANUP_KEYS = ["ent_desc", "ent_valor"]
+            with st.form("form_entrada", clear_on_submit=False):
+                cats_in = [c for c in categories_for_type(db, TYPE_IN) if "ajuste" not in _norm(c.name)]
+                cat_names_in = [c.name for c in cats_in] or ["—"]
+                
+                c1, c2 = st.columns([1, 1.6])
+                with c1:
+                    ent_data = st.date_input("Data da Entrada", value=today_bahia(), key="ent_data", format="DD/MM/YYYY")
+                with c2:
+                    ent_cat = st.selectbox("Categoria da Entrada", cat_names_in, key="ent_cat")
+                
+                ent_desc = st.text_input("Descrição (opcional)", key="ent_desc", placeholder="Ex: Oferta de missões")
+                ent_valor = st.number_input("Valor da Entrada (R$)", min_value=0.0, step=1.0, format="%.2f", key="ent_valor")
+
+                if _submit_btn("Salvar ENTRADA", "submit_entrada", theme="entrada"):
+                    if ent_valor > 0 and ent_cat != "—":
+                        cat_obj = next((c for c in cats_in if c.name == ent_cat), None)
+                        db.add(Transaction(
+                            date=ent_data, type=TYPE_IN, category_id=cat_obj.id,
+                            amount=ent_valor, description=(ent_desc or None), congregation_id=cong_obj.id
+                        ))
+                        db.commit()
+                        st.success("Entrada registrada com sucesso!")
+                        _clear_launch_fields(ENTRADA_CLEANUP_KEYS)
+                    else:
+                        st.error("Preencha a categoria e um valor maior que zero.")
+                    st.rerun()
+
+        # Formulário de DIZIMISTA
+        with st.expander("👤 Lançar DÍZIMO (Nominal)"):
+            DIZIMISTA_CLEANUP_KEYS = ["dz_nome", "dz_valor"]
+            with st.form("form_dizimo", clear_on_submit=False):
+                dz_data = st.date_input("Data do Dízimo", value=today_bahia(), key="dz_data", format="DD/MM/YYYY")
+                dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
+                dz_valor = st.number_input("Valor do Dízimo (R$)", min_value=0.0, step=1.0, format="%.2f", key="dz_valor")
+                dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência", "Outro"], key="dz_payment_method")
+
+                if _submit_btn("Salvar DIZIMISTA", "submit_dizimista", theme="dizimista"):
+                    if dz_valor > 0 and dz_nome.strip():
+                        db.add(Tithe(
+                            date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor,
+                            congregation_id=cong_obj.id, payment_method=dz_payment
+                        ))
+                        db.commit()
+                        st.success(f"Dízimo de {dz_nome.strip()} registrado!")
+                        _clear_launch_fields(DIZIMISTA_CLEANUP_KEYS)
+                    else:
+                        st.error("Preencha o nome do dizimista e um valor maior que zero.")
+                    st.rerun()
+
+        # Formulário de SAÍDA
+        with st.expander("➖ Lançar SAÍDA"):
+            SAIDA_CLEANUP_KEYS = ["sai_desc", "sai_valor"]
+            with st.form("form_saida", clear_on_submit=False):
+                cats_out = categories_for_type(db, TYPE_OUT)
+                cat_names_out = [c.name for c in cats_out] or ["—"]
+
+                sai_data = st.date_input("Data da Saída", value=today_bahia(), key="sai_data", format="DD/MM/YYYY")
+                sai_cat = st.selectbox("Categoria da Saída", cat_names_out, key="sai_cat")
+                sai_desc = st.text_input("Descrição da Saída (opcional)", key="sai_desc", placeholder="Ex: Compra de material de limpeza")
+                sai_valor = st.number_input("Valor da Saída (R$)", min_value=0.0, step=1.0, format="%.2f", key="sai_valor")
+
+                if _submit_btn("Salvar SAÍDA", "submit_saida", theme="saida"):
+                    if sai_valor > 0 and sai_cat != "—":
+                        cat_obj = next((c for c in cats_out if c.name == sai_cat), None)
+                        db.add(Transaction(
+                            date=sai_data, type=TYPE_OUT, category_id=cat_obj.id,
+                            amount=sai_valor, description=(sai_desc or None), congregation_id=cong_obj.id
+                        ))
+                        db.commit()
+                        st.success("Saída registrada com sucesso!")
+                        _clear_launch_fields(SAIDA_CLEANUP_KEYS)
+                    else:
+                        st.error("Preencha a categoria e um valor maior que zero.")
+                    st.rerun()
+
+                    # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
+# ===================== PAGE: RELATÓRIO DE ENTRADA =====================
+def page_relatorio_entrada(user: "User"):
+    ensure_seed()
+    with SessionLocal() as db:
+        st.markdown("<h1 class='page-title'>Relatório de Entrada</h1>", unsafe_allow_html=True)
+        ref = get_month_selector()
+        start, end = month_bounds(ref)
+
+        congs = cong_options_for(user, db)
+        if user.role == "SEDE":
+            ordered = order_congs_sede_first(congs)
+            esc_opt = ["Todas as congregações"] + [c.name for c in ordered]
+            esc = st.selectbox("Escopo", esc_opt, key="re_in_allopt")
+            is_all = (esc == "Todas as congregações")
+            cong_obj = None if is_all else next(c for c in ordered if c.name == esc)
+        else:
+            is_all = False
+            cong_obj = congs[0] if congs else None
+
+        # --- Visão Agregada (SEDE) ---
+        if is_all:
+            st.info("Escopo: **Todas as congregações** — edite o total de entradas mensal por congregação abaixo.")
+            _editor_entradas_agg_all(ordered, start, end)
+            
+            # Adiciona o total geral para a visão de todas as congregações
+            with SessionLocal() as _db_tot_in:
+                total_geral_in = 0.0
+                for _c in ordered:
+                    _t = _collect_month_data(_db_tot_in, _c.id, start, end)["totals"]
+                    total_geral_in += float(_t["entradas_total_sem_missoes"])
+            st.metric("Total geral de entradas (todas as congregações)", format_currency(total_geral_in))
+            return
+
+        # --- Visão por Congregação Específica ---
+        if not cong_obj:
+            st.info("Selecione uma congregação."); return
+
+        st.info(f"Escopo: **{cong_obj.name}**")
+        base_df = _entrada_summary_df(db, cong_obj.id, start, end)
+        
+        edited = st.data_editor(
+            base_df, use_container_width=True, hide_index=True, num_rows="dynamic",
+            column_config={
+                "Data do Culto": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
+                "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", format="R$ %.2f"),
+                "Oferta": st.column_config.NumberColumn("Oferta (R$)", format="R$ %.2f"),
+                "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
+            },
+            key="re_entrada_sum_editor",
+        )
+        
+        # =================================================================
+        # NOVO BLOCO DE TOTAIS (GARANTINDO A EXIBIÇÃO CORRETA)
+        # =================================================================
+        try:
+            total_dizimo = 0.0
+            total_oferta = 0.0
+            total_geral = 0.0
+            if isinstance(edited, pd.DataFrame) and not edited.empty:
+                # Garante que os valores sejam numéricos para a soma
+                edited_calc = edited.copy()
+                edited_calc["Dízimo"] = edited_calc["Dízimo"].apply(_to_float_brl)
+                edited_calc["Oferta"] = edited_calc["Oferta"].apply(_to_float_brl)
+                
+                total_dizimo = edited_calc["Dízimo"].sum()
+                total_oferta = edited_calc["Oferta"].sum()
+                total_geral = total_dizimo + total_oferta
+        except Exception as e:
+            # Em caso de erro, os totais permanecerão zero, sem quebrar a aplicação
+            pass
+        
+        st.markdown("---")
+        st.subheader("Totais do Período (baseado na tabela acima)")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Soma Dízimos", format_currency(total_dizimo))
+        col2.metric("Soma Ofertas", format_currency(total_oferta))
+        col3.metric("Soma Geral", format_currency(total_geral))
+        st.markdown("---")
+        # =================================================================
+        # FIM DO BLOCO DE TOTAIS
+        # =================================================================
+
+        def _save_sum():
+            _apply_entrada_summary_changes(cong_obj.id, start, end, edited)
+            st.toast("💾 Alterações salvas.", icon="✅")
+            st.rerun()
+        _save_btn(_save_sum, "entrada_sum")
+
+        # Seção para apagar linhas (mantida como estava)
+        if isinstance(edited, pd.DataFrame) and not edited.empty and ("Data do Culto" in edited.columns):
+            with st.expander("🗑️ Apagar linhas da tabela-resumo"):
+                try:
+                    _datas_ord = sorted({_to_date(d) for d in edited["Data do Culto"].tolist() if pd.notna(d)})
+                    _label_map = {format_date(d): d for d in _datas_ord}
+                    _rotulos = list(_label_map.keys())
+                except Exception:
+                    _rotulos, _label_map = [], {}
+
+                _sel_del = st.multiselect(
+                    "Selecione as datas que deseja APAGAR", options=_rotulos, key="re_entrada_sum_del_dates"
+                )
+                def _delete_selected_rows():
+                    if not _sel_del: return
+                    to_drop = {_label_map[x] for x in _sel_del if x in _label_map}
+                    edited_clean = edited.copy()
+                    edited_clean["Data do Culto"] = edited_clean["Data do Culto"].map(_to_date)
+                    edited_clean = edited_clean[~edited_clean["Data do Culto"].isin(to_drop)]
+                    _apply_entrada_summary_changes(cong_obj.id, start, end, edited_clean)
+                    st.toast("🗑️ Linhas apagadas com sucesso.", icon="✅")
+                    st.rerun()
+
+                st.button(
+                    "Apagar linhas selecionadas", type="secondary", on_click=_delete_selected_rows, key="btn_del_entrada_sum"
+                )
 # ===================== MAIN =====================
 def main():
     try:
         ensure_seed()
 
-        # -------- sessão / cookies --------
-        try:
-            cm = get_cookie_manager()
-            tok = cm.get(COOKIE_NAME)
-            data = _read_token(tok)
-            if data and not st.session_state.get("uid"):
-                with SessionLocal() as db:
-                    u = db.get(User, int(data["uid"]))
-                    if u:
-                        st.session_state.uid = u.id
-            if st.session_state.get("uid"):
-                _check_inactivity_and_logout(cm)
-                _update_last_active(cm)
-        except Exception:
-            pass
-
-        # -------- auth --------
+        # Tenta carregar o usuário a partir da sessão ou dos cookies
         user = current_user()
         if not user:
+            try:
+                cm = get_cookie_manager()
+                tok = cm.get(COOKIE_NAME)
+                data = _read_token(tok)
+                if data:
+                    with SessionLocal() as db:
+                        u = db.get(User, int(data["uid"]))
+                        if u:
+                            st.session_state.uid = u.id
+                            st.rerun()
+            except Exception:
+                # Ignora erros do cookie manager se ele não estiver instalado
+                pass
+
+        # Estrutura Lógica Principal: OU mostra o login, OU mostra o app.
+        if 'uid' not in st.session_state or not st.session_state.uid:
+            # ESTADO DESLOGADO: Mostra apenas a UI de login
             login_ui()
-            return
-
-        # Força o menu a ser redesenhado a cada execução
-        st.session_state["sidebar_rendered"] = False
-
-        # -------- menu lateral (uma vez) --------
-        page = sidebar_common(user)
-
-        # -------- roteamento --------
-        if page == "Lançamentos":
-            page_lancamentos(user)
-        elif page == "Relatório de Entrada":
-            page_relatorio_entrada(user)
-        elif page == "Relatório de Saída":
-            page_relatorio_saida(user)
-        elif page == "Relatório de Dizimistas":
-            page_relatorio_dizimistas(user)
-        elif page == "Relatório de Missões":
-            if getattr(user, "role", "") == "TESOUREIRO":
-                page_relatorio_missoes_congregacao(user)
-            else:
-                page_relatorio_missoes(user)
-        elif page == "Visão Geral":
-            page_visao_geral(user)
-        elif page == "Cadastro":
-            page_cadastro(user)
         else:
-            st.warning("Seleção de página inválida.")
+            # ESTADO LOGADO: Carrega o usuário e mostra a interface principal
+            user = current_user()
+            if user:
+                page = sidebar_common(user)
+
+                # Roteamento de páginas
+                if page == "Lançamentos":
+                    page_lancamentos(user)
+                elif page == "Relatório de Entrada":
+                    page_relatorio_entrada(user)
+                elif page == "Relatório de Saída":
+                    page_relatorio_saida(user)
+                elif page == "Relatório de Dizimistas":
+                    page_relatorio_dizimistas(user)
+                elif page == "Relatório de Missões":
+                    if getattr(user, "role", "") == "TESOUREIRO":
+                        page_relatorio_missoes_congregacao(user)
+                    else:
+                        page_relatorio_missoes(user)
+                elif page == "Visão Geral":
+                    page_visao_geral(user)
+                elif page == "Cadastro":
+                    page_cadastro(user)
+                else:
+                    page_visao_geral(user)
+            else:
+                # Caso raro: UID na sessão mas usuário não encontrado no DB. Força logout.
+                logout()
+
     except Exception as e:
-        st.error("Ocorreu um erro ao renderizar a aplicação.")
+        st.error("Ocorreu um erro crítico na aplicação.")
         st.exception(e)
 
 if __name__ == "__main__":
