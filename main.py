@@ -212,95 +212,48 @@ label, [data-testid="stWidgetLabel"]{ font-size: 1.02rem; }
 hr{ opacity: .6; }
 </style>
 """
-# === Cores por formulário (Lançamentos) ===
-FORM_BUTTONS_CSS = """
-<style>
-/* Deixar nossos estilos ganharem a disputa */
-.adrf-entrada .stButton>button,
-.adrf-dizimo .stButton>button,
-.adrf-saida .stButton>button{
-  border-width:1px !important;
-  font-weight:700 !important;
-}
 
-/* ENTRADAS = verde */
-.adrf-entrada .stButton>button{
-  background:#16a34a !important;      /* verde */
-  border-color:#16a34a !important;
-  color:#fff !important;
-}
-.adrf-entrada .stButton>button:hover{
-  background:#15803d !important;
-  border-color:#15803d !important;
-}
-
-/* DIZIMISTAS = azul */
-.adrf-dizimo .stButton>button{
-  background:#1d4ed8 !important;      /* azul */
-  border-color:#1d4ed8 !important;
-  color:#fff !important;
-}
-.adrf-dizimo .stButton>button:hover{
-  background:#1e40af !important;
-  border-color:#1e40af !important;
-}
-
-/* SAÍDAS = vermelho (mantém) */
-.adrf-saida .stButton>button{
-  background:#dc2626 !important;      /* vermelho */
-  border-color:#dc2626 !important;
-  color:#fff !important;
-}
-.adrf-saida .stButton>button:hover{
-  background:#b91c1c !important;
-  border-color:#b91c1c !important;
-}
-</style>
-"""
 # === Cores dos botões por formulário (compat com chamada antiga BUTTONS_CSS) ===
+# SUBSTITUA SEU CSS DE BOTÕES ANTIGO POR ESTE
 FORM_BUTTONS_CSS = """
 <style>
-.adrf-entrada .stButton>button,
-.adrf-dizimo .stButton>button,
-.adrf-saida .stButton>button{
-  border-width:1px !important;
-  font-weight:700 !important;
+/* --- ENTRADAS (VERDE) --- */
+.adrf-entrada [data-testid="stFormSubmitButton"] button {
+    background-color: #16a34a !important;
+    border-color: #16a34a !important;
+    color: white !important;
+}
+.adrf-entrada [data-testid="stFormSubmitButton"] button:hover {
+    background-color: #15803d !important;
+    border-color: #15803d !important;
 }
 
-/* ENTRADAS = verde */
-.adrf-entrada .stButton>button{
-  background:#16a34a !important;
-  border-color:#16a34a !important;
-  color:#fff !important;
+/* --- DIZIMISTAS (AZUL) --- */
+.adrf-dizimo [data-testid="stFormSubmitButton"] button {
+    background-color: #1d4ed8 !important;
+    border-color: #1d4ed8 !important;
+    color: white !important;
 }
-.adrf-entrada .stButton>button:hover{
-  background:#15803d !important;
-  border-color:#15803d !important;
-}
-
-/* DIZIMISTAS = azul */
-.adrf-dizimo .stButton>button{
-  background:#1d4ed8 !important;
-  border-color:#1d4ed8 !important;
-  color:#fff !important;
-}
-.adrf-dizimo .stButton>button:hover{
-  background:#1e40af !important;
-  border-color:#1e40af !important;
+.adrf-dizimo [data-testid="stFormSubmitButton"] button:hover {
+    background-color: #1e40af !important;
+    border-color: #1e40af !important;
 }
 
-/* SAÍDAS = vermelho */
-.adrf-saida .stButton>button{
-  background:#dc2626 !important;
-  border-color:#dc2626 !important;
-  color:#fff !important;
+/* --- SAÍDAS (VERMELHO) --- */
+.adrf-saida [data-testid="stFormSubmitButton"] button {
+    background-color: #dc2626 !important;
+    border-color: #dc2626 !important;
+    color: white !important;
 }
-.adrf-saida .stButton>button:hover{
-  background:#b91c1c !important;
-  border-color:#b91c1c !important;
+.adrf-saida [data-testid="stFormSubmitButton"] button:hover {
+    background-color: #b91c1c !important;
+    border-color: #b91c1c !important;
 }
 </style>
 """
+
+# Garanta que a linha abaixo esteja no seu código, após a definição acima
+st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)
 
 # Alias para manter compatibilidade com a linha 256
 BUTTONS_CSS = FORM_BUTTONS_CSS
