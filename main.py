@@ -217,6 +217,8 @@ hr{ opacity: .6; }
 # SUBSTITUA SEU CSS DE BOTÕES ANTIGO POR ESTE
 # SUBSTITUA SEU CSS DE BOTÕES POR ESTA VERSÃO UNIVERSAL
 
+# SUBSTITUA SEU CSS DE BOTÕES POR ESTA VERSÃO UNIVERSAL E CORRIGIDA
+
 FORM_BUTTONS_CSS = """
 <style>
 /* --- ENTRADAS (VERDE) --- */
@@ -259,7 +261,8 @@ FORM_BUTTONS_CSS = """
 }
 </style>
 """
-st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)# SUBSTITUA SEU CSS DE BOTÕES ANTIGO POR ESTE BLOCO NO TOPO DO CÓDIGO
+# A linha abaixo já deve existir no seu código, apenas confirme
+st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)
 
 # Alias para manter compatibilidade com a linha 256
 BUTTONS_CSS = FORM_BUTTONS_CSS
