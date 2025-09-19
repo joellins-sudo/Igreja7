@@ -1506,6 +1506,8 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 
 # SUBSTITUA SUA page_lancamentos INTEIRA PELA VERSÃO CORRIGIDA ABAIXO
 
+# SUBSTITUA SUA page_lancamentos INTEIRA PELA VERSÃO CORRIGIDA ABAIXO
+
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1668,7 +1670,7 @@ def page_lancamentos(user: "User"):
                 _apply_service_log_changes(df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id)
                 st.rerun()
 
-            # ===== BOTÃO CORRIGIDO COM A CLASSE CSS =====
+            # ===== BOTÃO CORRIGIDO COM A CLASSE CSS E on_click =====
             st.markdown('<div class="adrf-entrada">', unsafe_allow_html=True)
             st.button("Salvar alterações na tabela", on_click=on_save_click, key=f"save_table_{parent_cong_obj.id}")
             st.markdown('</div>', unsafe_allow_html=True)
