@@ -1027,30 +1027,27 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
 def _load_multi_service_data(db: Session, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
     """
     Carrega os dados de entrada, separando-os por turnos (Manhã/Noite)
-    baseado na descrição dos lançamentos de ajuste.
+    baseado na descrição dos lançamentos.
     """
-    tx_sub_filter = Transaction.sub_cong_regation_id.is_(None) if sub_cong_id is None else Transaction.sub_congregation_id == sub_cong_id
+    # A CORREÇÃO ESTÁ AQUI:
+    tx_sub_filter = Transaction.sub_congregation_id.is_(None) if sub_cong_id is None else Transaction.sub_congregation_id == sub_cong_id
 
-    # Busca todas as transações de Dízimo e Oferta no período
-    q = select(Transaction).join(Category).where(
+    q = select(Transaction).options(joinedload(Transaction.category)).where(
         Transaction.congregation_id == cong_id,
         Transaction.date >= start, Transaction.date < end,
         tx_sub_filter,
-        func.lower(Category.name).in_(("dízimo", "dizimo", "oferta"))
+        Transaction.category.has(func.lower(Category.name).in_(("dízimo", "dizimo", "oferta")))
     )
     transactions = db.scalars(q).all()
 
-    # Busca todos os dízimos nominais (eles não têm turno, serão somados ao total)
     tithe_sub_filter = Tithe.sub_congregation_id.is_(None) if sub_cong_id is None else Tithe.sub_congregation_id == sub_cong_id
     tithes_total_by_date = db.execute(
         select(Tithe.date, func.sum(Tithe.amount))
         .where(Tithe.congregation_id == cong_id, Tithe.date >= start, Tithe.date < end, tithe_sub_filter)
         .group_by(Tithe.date)
     ).all()
-    
     tithe_map = {d: v for d, v in tithes_total_by_date}
 
-    # Estrutura para agrupar por dia
     data_by_day = defaultdict(lambda: {
         "Dízimo (Manhã)": 0.0, "Oferta (Manhã)": 0.0,
         "Dízimo (Noite)": 0.0, "Oferta (Noite)": 0.0,
@@ -1061,104 +1058,81 @@ def _load_multi_service_data(db: Session, cong_id: int, start: date, end: date, 
         desc = (t.description or "").lower()
         is_dizimo = "dízimo" in t.category.name.lower() or "dizimo" in t.category.name.lower()
         
-        if "manhã" in desc:
-            if is_dizimo:
-                data_by_day[t.date]["Dízimo (Manhã)"] += t.amount
-            else:
-                data_by_day[t.date]["Oferta (Manhã)"] += t.amount
-        elif "noite" in desc:
-            if is_dizimo:
-                data_by_day[t.date]["Dízimo (Noite)"] += t.amount
-            else:
-                data_by_day[t.date]["Oferta (Noite)"] += t.amount
+        if "noite" in desc:
+            if is_dizimo: data_by_day[t.date]["Dízimo (Noite)"] += t.amount
+            else: data_by_day[t.date]["Oferta (Noite)"] += t.amount
         else:
-            # Lançamentos sem descrição de turno vão para "Manhã" por padrão
-            if is_dizimo:
-                data_by_day[t.date]["Dízimo (Manhã)"] += t.amount
-            else:
-                data_by_day[t.date]["Oferta (Manhã)"] += t.amount
+            # Tudo que não for "Noite" cai como "Manhã" por padrão
+            if is_dizimo: data_by_day[t.date]["Dízimo (Manhã)"] += t.amount
+            else: data_by_day[t.date]["Oferta (Manhã)"] += t.amount
 
-    # Adiciona os dízimos nominais
     for d, total in tithe_map.items():
         data_by_day[d]["Total Dízimo Nominal"] = total
 
     if not data_by_day and not tithe_map:
         return pd.DataFrame()
 
-    # Monta o DataFrame final
     rows = []
     all_dates = sorted(data_by_day.keys() | tithe_map.keys())
     for d in all_dates:
         day_data = data_by_day[d]
-        
-        # A regra de equivalência: o dízimo total do dia é o MAIOR entre a soma dos nominais e a soma dos lançados
-        total_dizimo_tx = day_data["Dízimo (Manhã)"] + day_data["Dízimo (Noite)"]
-        total_dizimo_nominal = day_data["Total Dízimo Nominal"]
-        
-        dizimo_final_dia = max(total_dizimo_tx, total_dizimo_nominal)
-        
-        total_oferta_dia = day_data["Oferta (Manhã)"] + day_data["Oferta (Noite)"]
-        
         rows.append({
             "Data": d,
             "Dízimo (Manhã)": day_data["Dízimo (Manhã)"],
             "Oferta (Manhã)": day_data["Oferta (Manhã)"],
             "Dízimo (Noite)": day_data["Dízimo (Noite)"],
             "Oferta (Noite)": day_data["Oferta (Noite)"],
-            "Dízimo (Total Dia)": dizimo_final_dia,
-            "Oferta (Total Dia)": total_oferta_dia,
-            "Total Dia": dizimo_final_dia + total_oferta_dia
         })
 
     df = pd.DataFrame(rows).sort_values("Data").reset_index(drop=True)
     return df
 
 def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
-    # Base queries
-    tithes_q = select(Tithe.date, func.sum(Tithe.amount)).where(
-        Tithe.congregation_id == cong_id, Tithe.date >= start, Tithe.date < end
-    )
-    diz_trans_q = select(Transaction.date, func.sum(Transaction.amount)).join(Category).where(
-        Transaction.congregation_id == cong_id, Transaction.date >= start, Transaction.date < end,
-        Transaction.type.in_((TYPE_IN, "RECEITA")), func.lower(Category.name).in_(("dízimo","dizimo"))
-    )
-    oferta_trans_q = select(Transaction.date, func.sum(Transaction.amount)).join(Category).where(
-        Transaction.congregation_id == cong_id, Transaction.date >= start, Transaction.date < end,
-        Transaction.type.in_((TYPE_IN, "RECEITA")), func.lower(Category.name) == "oferta"
-    )
+        # Base queries
+        tithes_q = select(Tithe.date, func.sum(Tithe.amount)).where(
+            Tithe.congregation_id == cong_id, Tithe.date >= start, Tithe.date < end
+        )
+        diz_trans_q = select(Transaction.date, func.sum(Transaction.amount)).join(Category).where(
+            Transaction.congregation_id == cong_id, Transaction.date >= start, Transaction.date < end,
+            Transaction.type.in_((TYPE_IN, "RECEITA")), func.lower(Category.name).in_(("dízimo","dizimo"))
+        )
+        oferta_trans_q = select(Transaction.date, func.sum(Transaction.amount)).join(Category).where(
+            Transaction.congregation_id == cong_id, Transaction.date >= start, Transaction.date < end,
+            Transaction.type.in_((TYPE_IN, "RECEITA")), func.lower(Category.name) == "oferta"
+        )
 
-    # --- LÓGICA DE FILTRO CORRIGIDA ---
-    if sub_cong_id is not None:
-        # Filtra por uma sub-congregação específica
-        tithes_q = tithes_q.where(Tithe.sub_congregation_id == sub_cong_id)
-        diz_trans_q = diz_trans_q.where(Transaction.sub_congregation_id == sub_cong_id)
-        oferta_trans_q = oferta_trans_q.where(Transaction.sub_congregation_id == sub_cong_id)
-    else:
-        # Filtra APENAS para a congregação principal (onde não há sub_congregation_id)
-        tithes_q = tithes_q.where(Tithe.sub_congregation_id.is_(None))
-        diz_trans_q = diz_trans_q.where(Transaction.sub_congregation_id.is_(None))
-        oferta_trans_q = oferta_trans_q.where(Transaction.sub_congregation_id.is_(None))
+        # --- LÓGICA DE FILTRO CORRIGIDA ---
+        if sub_cong_id is not None:
+            # Filtra por uma sub-congregação específica
+            tithes_q = tithes_q.where(Tithe.sub_congregation_id == sub_cong_id)
+            diz_trans_q = diz_trans_q.where(Transaction.sub_congregation_id == sub_cong_id)
+            oferta_trans_q = oferta_trans_q.where(Transaction.sub_congregation_id == sub_cong_id)
+        else:
+            # Filtra APENAS para a congregação principal (onde não há sub_congregation_id)
+            tithes_q = tithes_q.where(Tithe.sub_congregation_id.is_(None))
+            diz_trans_q = diz_trans_q.where(Transaction.sub_congregation_id.is_(None))
+            oferta_trans_q = oferta_trans_q.where(Transaction.sub_congregation_id.is_(None))
 
-    # Executa queries
-    tithes = db.execute(tithes_q.group_by(Tithe.date)).all()
-    diz_trans = db.execute(diz_trans_q.group_by(Transaction.date)).all()
-    oferta_trans = db.execute(oferta_trans_q.group_by(Transaction.date)).all()
+        # Executa queries
+        tithes = db.execute(tithes_q.group_by(Tithe.date)).all()
+        diz_trans = db.execute(diz_trans_q.group_by(Transaction.date)).all()
+        oferta_trans = db.execute(oferta_trans_q.group_by(Transaction.date)).all()
 
-    by_date_diz_tit = defaultdict(float)
-    for d, s in tithes: by_date_diz_tit[d] += float(s or 0.0)
-    by_date_diz_tx = defaultdict(float)
-    for d, s in diz_trans: by_date_diz_tx[d] += float(s or 0.0)
-    by_date_ofe = defaultdict(float)
-    for d, s in oferta_trans: by_date_ofe[d] += float(s or 0.0)
+        by_date_diz_tit = defaultdict(float)
+        for d, s in tithes: by_date_diz_tit[d] += float(s or 0.0)
+        by_date_diz_tx = defaultdict(float)
+        for d, s in diz_trans: by_date_diz_tx[d] += float(s or 0.0)
+        by_date_ofe = defaultdict(float)
+        for d, s in oferta_trans: by_date_ofe[d] += float(s or 0.0)
 
-    all_dates = sorted(set(list(by_date_diz_tit.keys()) + list(by_date_diz_tx.keys()) + list(by_date_ofe.keys())))
-    rows = []
-    for d in all_dates:
-        dz = max(float(by_date_diz_tit.get(d, 0.0)), float(by_date_diz_tx.get(d, 0.0)))
-        ofe = float(by_date_ofe.get(d, 0.0))
-        rows.append({"Data do Culto": d, "Dízimo": dz, "Oferta": ofe, "Total": dz + ofe})
-    
-    return pd.DataFrame(rows)
+        all_dates = sorted(set(list(by_date_diz_tit.keys()) + list(by_date_diz_tx.keys()) + list(by_date_ofe.keys())))
+        rows = []
+        for d in all_dates:
+            dz = max(float(by_date_diz_tit.get(d, 0.0)), float(by_date_diz_tx.get(d, 0.0)))
+            ofe = float(by_date_ofe.get(d, 0.0))
+            rows.append({"Data do Culto": d, "Dízimo": dz, "Oferta": ofe, "Total": dz + ofe})
+        
+        return pd.DataFrame(rows)
 
 def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None):
     with SessionLocal() as db:
