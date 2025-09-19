@@ -1704,6 +1704,8 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 
 # SUBSTITUA SUA page_lancamentos INTEIRA POR ESTA VERSÃO CORRIGIDA
 
+# SUBSTITUA SUA page_lancamentos INTEIRA POR ESTA VERSÃO FINAL
+
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1798,12 +1800,10 @@ def page_lancamentos(user: "User"):
 
             tipos_de_culto = ["Culto da Noite (Padrão)", "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)", "Evento Especial", "Outro"]
             
-            # ===== CORREÇÃO PARA A TABELA VAZIA =====
             if df_logs.empty:
                 df_logs = pd.DataFrame(
                     [{"Data do Culto": today_bahia(), "Tipo de Culto": tipos_de_culto[0], "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0, "ID": None}]
                 )
-            # ===== FIM DA CORREÇÃO =====
 
             edited_df = st.data_editor(
                 df_logs,
@@ -1812,7 +1812,7 @@ def page_lancamentos(user: "User"):
                 num_rows="dynamic",
                 key=f"editor_service_logs_{parent_cong_obj.id}_{target_sub_cong_id}",
                 column_config={
-                    "ID": None, # Oculta a coluna ID
+                    "ID": None,
                     "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
                     "Tipo de Culto": st.column_config.SelectboxColumn("Tipo de Culto", options=tipos_de_culto, required=True),
                     "Dízimo": st.column_config.NumberColumn("Dízimo", format="R$ %.2f", required=True),
@@ -1821,6 +1821,24 @@ def page_lancamentos(user: "User"):
                 },
                 column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
             )
+
+            # ===== NOVO BLOCO DE TOTAIS =====
+            st.divider()
+            try:
+                # Calcula os totais a partir da tabela editada
+                total_dizimo = _to_float_brl(edited_df["Dízimo"].sum())
+                total_oferta = _to_float_brl(edited_df["Oferta"].sum())
+                total_geral = total_dizimo + total_oferta
+
+                # Exibe as métricas
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total Dízimos (mês)", format_currency(total_dizimo))
+                col2.metric("Total Ofertas (mês)", format_currency(total_oferta))
+                col3.metric("Total Geral (mês)", format_currency(total_geral))
+            except Exception:
+                # Caso ocorra algum erro no cálculo (ex: tabela vazia momentaneamente)
+                st.caption("Calculando totais...")
+            # ===== FIM DO NOVO BLOCO =====
 
             def on_save_click():
                 _apply_service_log_changes(df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id)
