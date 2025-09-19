@@ -1706,6 +1706,8 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 
 # SUBSTITUA SUA page_lancamentos INTEIRA POR ESTA VERSÃO FINAL
 
+# SUBSTITUA SUA page_lancamentos INTEIRA POR ESTA VERSÃO FINAL
+
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1733,6 +1735,7 @@ def page_lancamentos(user: "User"):
         st.divider()
 
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
+        tipos_de_culto = ["Culto da Noite (Padrão)", "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)", "Evento Especial", "Outro"]
 
         if modo == "Formulário único":
             target_cong_obj = parent_cong_obj
@@ -1749,8 +1752,54 @@ def page_lancamentos(user: "User"):
             st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
             st.divider()
 
+            # ===== FORMULÁRIO DE ENTRADA RESTAURADO E MELHORADO =====
+            with st.expander("➕ Lançar ENTRADA (Resumo do Culto)", expanded=True):
+                with st.form("form_entrada_resumo"):
+                    ent_data = st.date_input("Data do Culto", value=today_bahia(), key="ent_data_form")
+                    ent_tipo = st.selectbox("Tipo de Culto", options=tipos_de_culto, key="ent_tipo_form")
+                    
+                    c1, c2 = st.columns(2)
+                    ent_dizimo = c1.number_input("Valor do Dízimo", min_value=0.0, value=0.0, format="%.2f", key="ent_dizimo_form")
+                    ent_oferta = c2.number_input("Valor da Oferta", min_value=0.0, value=0.0, format="%.2f", key="ent_oferta_form")
+
+                    if st.form_submit_button("Salvar Entrada do Culto"):
+                        if ent_dizimo > 0 or ent_oferta > 0:
+                            # Procura se já existe um registro para este culto específico
+                            log_existente = db.scalar(
+                                select(ServiceLog).where(
+                                    ServiceLog.date == ent_data,
+                                    ServiceLog.service_type == ent_tipo,
+                                    ServiceLog.congregation_id == target_cong_obj.id,
+                                    ServiceLog.sub_congregation_id == target_sub_cong_id
+                                )
+                            )
+
+                            if log_existente:
+                                # Se existe, soma os valores
+                                log_existente.dizimo += ent_dizimo
+                                log_existente.oferta += ent_oferta
+                                st.success("Valores adicionados ao registro do culto existente!")
+                            else:
+                                # Se não existe, cria um novo
+                                novo_log = ServiceLog(
+                                    date=ent_data,
+                                    service_type=ent_tipo,
+                                    dizimo=ent_dizimo,
+                                    oferta=ent_oferta,
+                                    congregation_id=target_cong_obj.id,
+                                    sub_congregation_id=target_sub_cong_id
+                                )
+                                db.add(novo_log)
+                                st.success("Novo registro de culto salvo com sucesso!")
+                            
+                            db.commit()
+                            st.rerun()
+                        else:
+                            st.warning("Nenhum valor foi inserido.")
+
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
                 with st.form("form_dizimo"):
+                    # (Esta parte não mudou)
                     dz_data = st.date_input("Data do Dízimo", value=today_bahia(), key="dz_data")
                     dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
                     dz_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="dz_valor")
@@ -1765,6 +1814,7 @@ def page_lancamentos(user: "User"):
 
             with st.expander("➖ Lançar SAÍDA"):
                 with st.form("form_saida"):
+                    # (Esta parte não mudou)
                     cats_out = categories_for_type(db, TYPE_OUT)
                     c1, c2 = st.columns(2)
                     with c1: sai_data = st.date_input("Data da Saída", value=today_bahia(), key="sai_data")
@@ -1798,8 +1848,6 @@ def page_lancamentos(user: "User"):
             
             df_logs = _load_service_logs(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
 
-            tipos_de_culto = ["Culto da Noite (Padrão)", "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)", "Evento Especial", "Outro"]
-            
             if df_logs.empty:
                 df_logs = pd.DataFrame(
                     [{"Data do Culto": today_bahia(), "Tipo de Culto": tipos_de_culto[0], "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0, "ID": None}]
@@ -1821,24 +1869,19 @@ def page_lancamentos(user: "User"):
                 },
                 column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
             )
-
-            # ===== NOVO BLOCO DE TOTAIS =====
+            
             st.divider()
             try:
-                # Calcula os totais a partir da tabela editada
                 total_dizimo = _to_float_brl(edited_df["Dízimo"].sum())
                 total_oferta = _to_float_brl(edited_df["Oferta"].sum())
                 total_geral = total_dizimo + total_oferta
 
-                # Exibe as métricas
                 col1, col2, col3 = st.columns(3)
-                col1.metric("Total Dízimos (mês)", format_currency(total_dizimo))
-                col2.metric("Total Ofertas (mês)", format_currency(total_oferta))
-                col3.metric("Total Geral (mês)", format_currency(total_geral))
+                col1.metric("Total Dízimos (na tabela)", format_currency(total_dizimo))
+                col2.metric("Total Ofertas (na tabela)", format_currency(total_oferta))
+                col3.metric("Total Geral (na tabela)", format_currency(total_geral))
             except Exception:
-                # Caso ocorra algum erro no cálculo (ex: tabela vazia momentaneamente)
                 st.caption("Calculando totais...")
-            # ===== FIM DO NOVO BLOCO =====
 
             def on_save_click():
                 _apply_service_log_changes(df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id)
