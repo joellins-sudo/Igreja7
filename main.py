@@ -215,93 +215,51 @@ hr{ opacity: .6; }
 
 # === Cores dos botões por formulário (compat com chamada antiga BUTTONS_CSS) ===
 # SUBSTITUA SEU CSS DE BOTÕES ANTIGO POR ESTE
+# SUBSTITUA SEU CSS DE BOTÕES POR ESTA VERSÃO UNIVERSAL
+
 FORM_BUTTONS_CSS = """
 <style>
 /* --- ENTRADAS (VERDE) --- */
-.adrf-entrada [data-testid="stFormSubmitButton"] button {
+.adrf-entrada [data-testid="stFormSubmitButton"] button,
+.adrf-entrada [data-testid="stButton"] button {
     background-color: #16a34a !important;
     border-color: #16a34a !important;
     color: white !important;
 }
-.adrf-entrada [data-testid="stFormSubmitButton"] button:hover {
+.adrf-entrada [data-testid="stFormSubmitButton"] button:hover,
+.adrf-entrada [data-testid="stButton"] button:hover {
     background-color: #15803d !important;
     border-color: #15803d !important;
 }
 
 /* --- DIZIMISTAS (AZUL) --- */
-.adrf-dizimo [data-testid="stFormSubmitButton"] button {
-    background-color: #1d4ed8 !important;
-    border-color: #1d4ed8 !important;
-    color: white !important;
-}
-.adrf-dizimo [data-testid="stFormSubmitButton"] button:hover {
-    background-color: #1e40af !important;
-    border-color: #1e40af !important;
-}
-
-/* --- SAÍDAS (VERMELHO) --- */
-.adrf-saida [data-testid="stFormSubmitButton"] button {
-    background-color: #dc2626 !important;
-    border-color: #dc2626 !important;
-    color: white !important;
-}
-.adrf-saida [data-testid="stFormSubmitButton"] button:hover {
-    background-color: #b91c1c !important;
-    border-color: #b91c1c !important;
-}
-</style>
-"""# SUBSTITUA SEU CSS DE BOTÕES ANTIGO POR ESTE BLOCO NO TOPO DO CÓDIGO
-
-FORM_BUTTONS_CSS = """
-<style>
-/* --- ENTRADAS (VERDE) --- */
-.adrf-entrada [data-testid="stFormSubmitButton"] button {
-    background-color: #16a34a !important;
-    border-color: #16a34a !important;
-    color: white !important;
-}
-.adrf-entrada [data-testid="stFormSubmitButton"] button:hover {
-    background-color: #15803d !important;
-    border-color: #15803d !important;
-}
-.adrf-entrada [data-testid="stFormSubmitButton"] button:active {
-    background-color: #14532d !important;
-    border-color: #14532d !important;
-}
-
-/* --- DIZIMISTAS (AZUL) --- */
-.adrf-dizimo [data-testid="stFormSubmitButton"] button {
+.adrf-dizimo [data-testid="stFormSubmitButton"] button,
+.adrf-dizimo [data-testid="stButton"] button {
     background-color: #2563eb !important;
     border-color: #2563eb !important;
     color: white !important;
 }
-.adrf-dizimo [data-testid="stFormSubmitButton"] button:hover {
+.adrf-dizimo [data-testid="stFormSubmitButton"] button:hover,
+.adrf-dizimo [data-testid="stButton"] button:hover {
     background-color: #1d4ed8 !important;
     border-color: #1d4ed8 !important;
 }
-.adrf-dizimo [data-testid="stFormSubmitButton"] button:active {
-    background-color: #1e40af !important;
-    border-color: #1e40af !important;
-}
 
 /* --- SAÍDAS (VERMELHO) --- */
-.adrf-saida [data-testid="stFormSubmitButton"] button {
+.adrf-saida [data-testid="stFormSubmitButton"] button,
+.adrf-saida [data-testid="stButton"] button {
     background-color: #dc2626 !important;
     border-color: #dc2626 !important;
     color: white !important;
 }
-.adrf-saida [data-testid="stFormSubmitButton"] button:hover {
+.adrf-saida [data-testid="stFormSubmitButton"] button:hover,
+.adrf-saida [data-testid="stButton"] button:hover {
     background-color: #b91c1c !important;
     border-color: #b91c1c !important;
 }
-.adrf-saida [data-testid="stFormSubmitButton"] button:active {
-    background-color: #991b1b !important;
-    border-color: #991b1b !important;
-}
 </style>
 """
-# Garanta que esta linha continue no seu código, logo após a definição acima
-st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)
+st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)# SUBSTITUA SEU CSS DE BOTÕES ANTIGO POR ESTE BLOCO NO TOPO DO CÓDIGO
 
 # Alias para manter compatibilidade com a linha 256
 BUTTONS_CSS = FORM_BUTTONS_CSS
@@ -1136,6 +1094,8 @@ def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFram
 # ===================== EDITORES INLINE REUTILIZÁVEIS (com botão Salvar) =====================
 # ===== EDITOR DE LANÇAMENTOS (com force_cong_id e linha vazia) =====
 # ===== EDITOR DE LANÇAMENTOS (com total abaixo da tabela) =====
+# SUBSTITUA AS DUAS FUNÇÕES ABAIXO NO SEU CÓDIGO
+
 def _editor_lancamentos(
     transactions: List["Transaction"],
     titulo: str,
@@ -1180,13 +1140,10 @@ def _editor_lancamentos(
     )
 
     try:
-        _total_val = 0.0
-        if isinstance(edited_view, pd.DataFrame) and not edited_view.empty and ("Valor" in edited_view.columns):
-            _ev = edited_view.copy()
-            _ev["Valor"] = _ev["Valor"].map(_to_float_brl)
-            _total_val = float(_ev["Valor"].sum())
+        _total_val = _to_float_brl(edited_view["Valor"].sum())
     except Exception:
         _total_val = 0.0
+    
     _label_total = "Total de Saídas (tabela)" if tx_type == TYPE_OUT else "Total de Entradas (tabela)"
     st.metric(_label_total, format_currency(_total_val))
 
@@ -1195,7 +1152,58 @@ def _editor_lancamentos(
         st.toast("💾 Alterações salvas.", icon="✅")
         st.rerun()
 
-    _save_btn(_save, f"tx_{titulo.replace(' ', '_')}_{force_cong_id}_{force_sub_cong_id}", theme=("saida" if tx_type == TYPE_OUT else "entrada"))
+    # Botão de salvar com a nova marcação de cor
+    theme_color_class = "adrf-saida" if tx_type == TYPE_OUT else "adrf-entrada"
+    st.markdown(f'<div class="{theme_color_class}">', unsafe_allow_html=True)
+    st.button(
+        f"Salvar alterações em {titulo}", 
+        key=f"save_tx_{titulo.replace(' ', '_')}",
+        on_click=_save
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+def _editor_dizimos(tithes: List["Tithe"], titulo: str, force_cong_id: Optional[int] = None, force_sub_cong_id: Optional[int] = None):
+    rows = []
+    if tithes:
+        rows = [{"ID": t.id, "Data": t.date, "Dizimista": t.tither_name, "Valor": float(t.amount), "Forma de Pagamento": t.payment_method or ""} for t in tithes]
+    else:
+        rows = [{"ID": None, "Data": today_bahia(), "Dizimista": "", "Valor": 0.0, "Forma de Pagamento": ""}]
+
+    df_full = pd.DataFrame(rows)
+    
+    st.markdown(f"**{titulo}**")
+    edited_view = st.data_editor(
+        df_full, use_container_width=True, hide_index=True, num_rows="dynamic",
+        column_config={
+            "ID": st.column_config.Column("ID", disabled=True),
+            "Data": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
+            "Dizimista": st.column_config.TextColumn("Dizimista", max_chars=120, required=True),
+            "Valor": st.column_config.NumberColumn("Valor (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
+            "Forma de Pagamento": st.column_config.SelectboxColumn("Forma de Pagamento", options=["Dinheiro", "PIX", "Cartão", "Transferência", ""], required=False),
+        },
+        key=f"tithe_editor_{titulo.replace(' ', '_')}_{force_cong_id}_{force_sub_cong_id}",
+    )
+
+    try:
+        _total_val = _to_float_brl(edited_view["Valor"].sum())
+    except Exception:
+        _total_val = 0.0
+    st.metric("Total de DÍZIMOS (tabela)", format_currency(_total_val))
+
+    def _save():
+        _apply_tithe_changes(df_full, edited_view, force_cong_id, force_sub_cong_id)
+        st.toast("💾 Alterações salvas.", icon="✅")
+        st.rerun()
+
+    # Botão de salvar com a nova marcação de cor
+    st.markdown('<div class="adrf-dizimo">', unsafe_allow_html=True)
+    st.button(
+        f"Salvar alterações em {titulo}",
+        key=f"save_tithe_{titulo.replace(' ', '_')}",
+        on_click=_save
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # ===== EDITOR DE DÍZIMOS (com force_cong_id e linha vazia) =====
 # ===== EDITOR DE DÍZIMOS (com total abaixo da tabela) =====
@@ -1656,6 +1664,8 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 
 # SUBSTITUA SUA page_lancamentos INTEIRA PELA VERSÃO FINAL ABAIXO
 
+# SUBSTITUA SUA page_lancamentos PELA VERSÃO ATUALIZADA
+
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1814,9 +1824,13 @@ def page_lancamentos(user: "User"):
             except Exception:
                 st.caption("Calculando totais...")
             
-            if st.button("Salvar alterações na tabela", key=f"save_table_{parent_cong_obj.id}"):
+            def on_save_click():
                 _apply_service_log_changes(df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id)
                 st.rerun()
+
+            st.markdown('<div class="adrf-entrada">', unsafe_allow_html=True)
+            st.button("Salvar alterações na tabela", on_click=on_save_click, key=f"save_table_{parent_cong_obj.id}")
+            st.markdown('</div>', unsafe_allow_html=True)
 
             st.markdown("---")
             tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id == target_sub_cong_id)
