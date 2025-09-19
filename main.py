@@ -1599,8 +1599,10 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, sub_cong_id: O
 
 # APAGUE AS FUNÇÕES _load_multi_service_data e _apply_multi_service_changes E SUBSTITUA POR ESTAS
 
+# SUBSTITUA SUA FUNÇÃO _load_service_logs INTEIRA POR ESTA VERSÃO CORRIGIDA
+
 def _load_service_logs(db: Session, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
-    """Carrega os resumos de culto para a tabela de edição."""
+    """Carrega os resumos de culto para a tabela de edição, com ordenação customizada."""
     
     log_filter = and_(
         ServiceLog.congregation_id == cong_id,
@@ -1609,7 +1611,20 @@ def _load_service_logs(db: Session, cong_id: int, start: date, end: date, sub_co
         ServiceLog.sub_congregation_id == sub_cong_id
     )
     
-    query = select(ServiceLog).where(log_filter).order_by(ServiceLog.date)
+    # ===== NOVA LÓGICA DE ORDENAÇÃO =====
+    # Cria uma regra de "ranking" para o tipo de culto
+    from sqlalchemy import case
+    custom_sort_order = case(
+        (ServiceLog.service_type == "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)", 1),
+        (ServiceLog.service_type == "Culto da Noite (Padrão)", 2),
+        (ServiceLog.service_type == "Evento Especial", 3),
+        else_=4  # Garante que "Outro" e tipos futuros fiquem por último
+    )
+
+    # Aplica a ordenação primária por data e a secundária pela regra customizada
+    query = select(ServiceLog).where(log_filter).order_by(ServiceLog.date, custom_sort_order)
+    # ===== FIM DA NOVA LÓGICA =====
+    
     logs = db.scalars(query).all()
 
     if not logs:
