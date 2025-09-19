@@ -484,6 +484,28 @@ class Transaction(Base):
     category: Mapped["Category"] = relationship(back_populates="transactions", lazy="joined")
     congregation: Mapped["Congregation"] = relationship(back_populates="transactions")
 
+    # COLE ESTA NOVA CLASSE JUNTO COM SEUS OUTROS MODELOS (User, Transaction, etc.)
+
+class ServiceLog(Base):
+    __tablename__ = "service_logs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    date: Mapped[date] = mapped_column(Date)
+    service_type: Mapped[str] = mapped_column(String)
+    dizimo: Mapped[float] = mapped_column(Float, default=0.0)
+    oferta: Mapped[float] = mapped_column(Float, default=0.0)
+    
+    congregation_id: Mapped[int] = mapped_column(ForeignKey("congregations.id"))
+    sub_congregation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sub_congregations.id"))
+
+    # Relações para facilitar o acesso (opcional, mas boa prática)
+    congregation: Mapped["Congregation"] = relationship()
+    sub_congregation: Mapped[Optional["SubCongregation"]] = relationship()
+
+    # Regra para evitar lançamentos duplicados (mesma data, tipo e congregação)
+    __table_args__ = (
+        UniqueConstraint('date', 'service_type', 'congregation_id', 'sub_congregation_id', name='_service_uc'),
+    )
+
 class Tithe(Base):
     __tablename__ = "tithes"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -1575,123 +1597,86 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, sub_cong_id: O
 
 # COLE ESTAS DUAS FUNÇÕES NO SEU CÓDIGO, ANTES DA "page_lancamentos"
 
-def _load_multi_service_data(db: Session, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
-    """
-    Carrega os dados de entrada, tratando "Noite" como padrão e "Manhã" como exceção.
-    """
-    tx_sub_filter = Transaction.sub_congregation_id.is_(None) if sub_cong_id is None else Transaction.sub_congregation_id == sub_cong_id
+# APAGUE AS FUNÇÕES _load_multi_service_data e _apply_multi_service_changes E SUBSTITUA POR ESTAS
 
-    q = select(Transaction).options(joinedload(Transaction.category)).where(
-        Transaction.congregation_id == cong_id,
-        Transaction.date >= start, Transaction.date < end,
-        tx_sub_filter,
-        Transaction.category.has(func.lower(Category.name).in_(("dízimo", "dizimo", "oferta")))
+def _load_service_logs(db: Session, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
+    """Carrega os resumos de culto para a tabela de edição."""
+    
+    log_filter = and_(
+        ServiceLog.congregation_id == cong_id,
+        ServiceLog.date >= start,
+        ServiceLog.date < end,
+        ServiceLog.sub_congregation_id == sub_cong_id
     )
-    transactions = db.scalars(q).all()
+    
+    query = select(ServiceLog).where(log_filter).order_by(ServiceLog.date)
+    logs = db.scalars(query).all()
 
-    tithe_sub_filter = Tithe.sub_congregation_id.is_(None) if sub_cong_id is None else Tithe.sub_congregation_id == sub_cong_id
-    tithes_total_by_date = db.execute(
-        select(Tithe.date, func.sum(Tithe.amount))
-        .where(Tithe.congregation_id == cong_id, Tithe.date >= start, Tithe.date < end, tithe_sub_filter)
-        .group_by(Tithe.date)
-    ).all()
-    tithe_map = {d: v for d, v in tithes_total_by_date}
-
-    data_by_day = defaultdict(lambda: {
-        "Dízimo (Manhã)": 0.0, "Oferta (Manhã)": 0.0,
-        "Dízimo (Noite)": 0.0, "Oferta (Noite)": 0.0,
-    })
-
-    for t in transactions:
-        desc = (t.description or "").lower()
-        is_dizimo = "dízimo" in t.category.name.lower() or "dizimo" in t.category.name.lower()
-        
-        if "manhã" in desc:
-            if is_dizimo: data_by_day[t.date]["Dízimo (Manhã)"] += t.amount
-            else: data_by_day[t.date]["Oferta (Manhã)"] += t.amount
-        else: 
-            if is_dizimo: data_by_day[t.date]["Dízimo (Noite)"] += t.amount
-            else: data_by_day[t.date]["Oferta (Noite)"] += t.amount
-
-    all_dates_with_data = set(data_by_day.keys())
-    for d, total in tithe_map.items():
-        all_dates_with_data.add(d)
-
-    if not all_dates_with_data:
+    if not logs:
         return pd.DataFrame()
 
-    rows = []
-    for d in sorted(list(all_dates_with_data)):
-        day_data = data_by_day[d]
-        rows.append({
-            "Data": d,
-            "Dízimo (Manhã)": day_data["Dízimo (Manhã)"],
-            "Oferta (Manhã)": day_data["Oferta (Manhã)"],
-            "Dízimo (Noite)": day_data["Dízimo (Noite)"],
-            "Oferta (Noite)": day_data["Oferta (Noite)"],
+    data = []
+    for log in logs:
+        total = log.dizimo + log.oferta
+        data.append({
+            "ID": log.id,
+            "Data do Culto": log.date,
+            "Tipo de Culto": log.service_type,
+            "Dízimo": log.dizimo,
+            "Oferta": log.oferta,
+            "Total": total
         })
+    
+    return pd.DataFrame(data)
 
-    df = pd.DataFrame(rows).sort_values("Data").reset_index(drop=True)
-    return df
+def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, cong_id: int, sub_cong_id: Optional[int] = None):
+    """Aplica as mudanças (cria, atualiza, deleta) na tabela service_logs."""
+    
+    orig_ids = set(orig_df['ID'].dropna())
+    edited_ids = set(edited_df['ID'].dropna())
 
-def _apply_multi_service_changes(edited_df: pd.DataFrame, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None):
-    """
-    Salva as alterações da tabela multi-culto em DUAS TRANSAÇÕES SEPARADAS para máxima robustez.
-    1. Primeiro, deleta todos os lançamentos antigos e confirma (commit).
-    2. Segundo, insere os novos lançamentos do zero e confirma (commit).
-    """
+    to_delete = orig_ids - edited_ids
+    to_update = orig_ids.intersection(edited_ids)
+    
     with SessionLocal() as db:
-        cats_in = categories_for_type(db, TYPE_IN)
-        cat_diz_id = next((c.id for c in cats_in if _norm(c.name) in ("dizimo", "dízimo")), None)
-        cat_ofe_id = next((c.id for c in cats_in if _norm(c.name) == "oferta"), None)
+        # Deletar logs que foram removidos
+        if to_delete:
+            db.query(ServiceLog).filter(ServiceLog.id.in_(to_delete)).delete(synchronize_session=False)
+
+        # Atualizar logs existentes
+        for log_id in to_update:
+            log = db.get(ServiceLog, int(log_id))
+            if log:
+                row = edited_df[edited_df['ID'] == log_id].iloc[0]
+                log.date = _to_date(row["Data do Culto"])
+                log.service_type = str(row["Tipo de Culto"])
+                log.dizimo = _to_float_brl(row["Dízimo"])
+                log.oferta = _to_float_brl(row["Oferta"])
+
+        # Inserir novos logs
+        new_rows = edited_df[edited_df['ID'].isna()]
+        for _, row in new_rows.iterrows():
+            # Evita adicionar linhas vazias
+            if _to_float_brl(row["Dízimo"]) > 0 or _to_float_brl(row["Oferta"]) > 0:
+                new_log = ServiceLog(
+                    date=_to_date(row["Data do Culto"]),
+                    service_type=str(row["Tipo de Culto"]),
+                    dizimo=_to_float_brl(row["Dízimo"]),
+                    oferta=_to_float_brl(row["Oferta"]),
+                    congregation_id=cong_id,
+                    sub_congregation_id=sub_cong_id
+                )
+                db.add(new_log)
         
-        if not (cat_diz_id and cat_ofe_id):
-            st.error("Categorias 'Dízimo' e/ou 'Oferta' não encontradas."); return
-
-        tx_sub_filter = Transaction.sub_congregation_id.is_(None) if sub_cong_id is None else Transaction.sub_congregation_id == sub_cong_id
-        
-        db.query(Transaction).filter(
-            Transaction.congregation_id == cong_id,
-            Transaction.date >= start,
-            Transaction.date < end,
-            Transaction.category_id.in_([cat_diz_id, cat_ofe_id]),
-            tx_sub_filter
-        ).delete(synchronize_session=False)
-        
-        db.commit()
-
-    if edited_df.empty or "Data" not in edited_df.columns:
-        st.toast("Alterações salvas (dados do mês removidos).", icon="✅")
-        st.rerun()
-        return
-
-    with SessionLocal() as db:
-        cats_in = categories_for_type(db, TYPE_IN)
-        cat_diz = next((c for c in cats_in if _norm(c.name) in ("dizimo", "dízimo")), None)
-        cat_ofe = next((c for c in cats_in if _norm(c.name) == "oferta"), None)
-
-        edited_df.dropna(subset=["Data"], inplace=True)
-        edited_df["Data"] = pd.to_datetime(edited_df["Data"]).dt.date
-
-        for _, row in edited_df.iterrows():
-            d = row["Data"]
-            diz_m = _to_float_brl(row.get("Dízimo (Manhã)"))
-            ofe_m = _to_float_brl(row.get("Oferta (Manhã)"))
-            diz_n = _to_float_brl(row.get("Dízimo (Noite)"))
-            ofe_n = _to_float_brl(row.get("Oferta (Noite)"))
-            
-            if diz_m > 0:
-                db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id, amount=diz_m, description="[Lançamento Manhã]", congregation_id=cong_id, sub_congregation_id=sub_cong_id))
-            if ofe_m > 0:
-                db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=ofe_m, description="[Lançamento Manhã]", congregation_id=cong_id, sub_congregation_id=sub_cong_id))
-            if diz_n > 0:
-                db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id, amount=diz_n, description="[Lançamento Noite]", congregation_id=cong_id, sub_congregation_id=sub_cong_id))
-            if ofe_n > 0:
-                db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=ofe_n, description="[Lançamento Noite]", congregation_id=cong_id, sub_congregation_id=sub_cong_id))
-        
-        db.commit()
-        st.toast("Alterações salvas com sucesso!", icon="✅")
-        st.rerun()
+        try:
+            db.commit()
+            st.toast("Alterações salvas com sucesso!", icon="✅")
+        except IntegrityError:
+            db.rollback()
+            st.error("Erro: Tentativa de criar um lançamento duplicado (mesma data, tipo e congregação). Por favor, verifique os dados.")
+        except Exception as e:
+            db.rollback()
+            st.error(f"Ocorreu um erro ao salvar: {e}")
 
 # ===================== PAGE: LANÇAMENTOS (com modo Tabela fora do form) =====================
 # APAGUE SUA FUNÇÃO page_lancamentos ANTIGA E SUBSTITUA POR ESTA VERSÃO FINAL
@@ -1699,6 +1684,8 @@ def _apply_multi_service_changes(edited_df: pd.DataFrame, cong_id: int, start: d
 # SUBSTITUA SUA page_lancamentos PELA VERSÃO FINAL ABAIXO
 
 # SUBSTITUA SUA page_lancamentos PELA VERSÃO FINAL ABAIXO
+
+# APAGUE SUA page_lancamentos ANTIGA E SUBSTITUA POR ESTA VERSÃO FINAL
 
 def page_lancamentos(user: "User"):
     ensure_seed()
@@ -1729,6 +1716,7 @@ def page_lancamentos(user: "User"):
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
 
         if modo == "Formulário único":
+            # (Esta parte se mantém para lançamentos de SAÍDAS e DÍZIMOS NOMINAIS)
             target_cong_obj = parent_cong_obj
             contexto_selecionado = f"{parent_cong_obj.name} (Principal)"
             target_sub_cong_id = None
@@ -1742,26 +1730,10 @@ def page_lancamentos(user: "User"):
             
             st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
             st.divider()
-            
-            with st.expander("➕ Lançar ENTRADA", expanded=True):
-                with st.form("form_entrada"):
-                    cats_in = [c for c in categories_for_type(db, TYPE_IN) if "ajuste" not in _norm(c.name)]
-                    c1, c2 = st.columns(2)
-                    with c1: ent_data = st.date_input("Data da Entrada", value=today_bahia(), key="ent_data")
-                    with c2: ent_cat_name = st.selectbox("Categoria", [c.name for c in cats_in] or ["—"], key="ent_cat")
-                    ent_desc = st.text_input("Descrição (opcional)", key="ent_desc", help="Para o culto da manhã, especifique na descrição (ex: 'Oferta da manhã'). Deixe em branco para o culto da noite.")
-                    ent_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="ent_valor")
-                    
-                    if _submit_btn("Salvar ENTRADA", "form_entrada_btn", theme="entrada"):
-                        cat_obj = next((c for c in cats_in if c.name == ent_cat_name), None)
-                        if ent_valor > 0 and cat_obj:
-                            db.add(Transaction(date=ent_data, type=TYPE_IN, category_id=cat_obj.id, amount=ent_valor, description=(ent_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
-                            db.commit()
-                            st.success("Entrada registrada!")
-                            st.rerun()
 
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
                 with st.form("form_dizimo"):
+                    # (Formulário de dízimo continua igual)
                     dz_data = st.date_input("Data do Dízimo", value=today_bahia(), key="dz_data")
                     dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
                     dz_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="dz_valor")
@@ -1776,6 +1748,7 @@ def page_lancamentos(user: "User"):
 
             with st.expander("➖ Lançar SAÍDA"):
                 with st.form("form_saida"):
+                    # (Formulário de saída continua igual)
                     cats_out = categories_for_type(db, TYPE_OUT)
                     c1, c2 = st.columns(2)
                     with c1: sai_data = st.date_input("Data da Saída", value=today_bahia(), key="sai_data")
@@ -1805,68 +1778,34 @@ def page_lancamentos(user: "User"):
             ref_tab = get_month_selector("Mês de referência da tabela")
             start_tab, end_tab = month_bounds(ref_tab)
             
-            st.markdown("##### Entradas (Dízimo e Oferta)")
+            st.markdown("##### Resumo de Entradas por Culto")
             
-            show_morning_service = st.checkbox("Trabalhos pela manhã (EBD, CO, FESTIVIDADES)", key=f"cb_manha_{parent_cong_obj.id}_{target_sub_cong_id}")
-            
-            df_full = _load_multi_service_data(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
+            df_logs = _load_service_logs(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
 
-            if show_morning_service:
-                # VISÃO EXPANDIDA (Manhã + Noite)
-                if not df_full.empty:
-                    df_full['Total do Dia'] = df_full[['Dízimo (Manhã)', 'Oferta (Manhã)', 'Dízimo (Noite)', 'Oferta (Noite)']].sum(axis=1)
-                
-                cols_to_display = ["Data", "Dízimo (Manhã)", "Oferta (Manhã)", "Dízimo (Noite)", "Oferta (Noite)", "Total do Dia"]
-                column_config = {
-                    "Data": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"), # <-- MUDANÇA AQUI
-                    "Dízimo (Manhã)": st.column_config.NumberColumn("Dízimo (Manhã)", min_value=0.0, step=1.0, format="R$ %.2f"),
-                    "Oferta (Manhã)": st.column_config.NumberColumn("Oferta (Manhã)", min_value=0.0, step=1.0, format="R$ %.2f"),
-                    "Dízimo (Noite)": st.column_config.NumberColumn("Dízimo (Noite)", min_value=0.0, step=1.0, format="R$ %.2f"),
-                    "Oferta (Noite)": st.column_config.NumberColumn("Oferta (Noite)", min_value=0.0, step=1.0, format="R$ %.2f"),
-                    "Total do Dia": st.column_config.NumberColumn("Total do Dia", help="Soma de todas as entradas do dia. Atualizado após salvar.", format="R$ %.2f", disabled=True),
-                }
-                df_to_edit = df_full[cols_to_display] if not df_full.empty else pd.DataFrame(columns=cols_to_display)
-            else:
-                # VISÃO SIMPLES (Apenas Noite, com nomes simples)
-                df_simple = df_full.copy()
-                if not df_simple.empty:
-                    df_simple = df_simple[["Data", "Dízimo (Noite)", "Oferta (Noite)"]]
-                    df_simple = df_simple.rename(columns={"Dízimo (Noite)": "Dízimo", "Oferta (Noite)": "Oferta"})
-                    df_simple['Total'] = df_simple[['Dízimo', 'Oferta']].sum(axis=1)
-                
-                cols_to_display = ["Data", "Dízimo", "Oferta", "Total"]
-                column_config = {
-                    "Data": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"), # <-- MUDANÇA AQUI
-                    "Dízimo": st.column_config.NumberColumn("Dízimo", min_value=0.0, step=1.0, format="R$ %.2f"), # <-- MUDANÇA AQUI
-                    "Oferta": st.column_config.NumberColumn("Oferta", min_value=0.0, step=1.0, format="R$ %.2f"), # <-- MUDANÇA AQUI
-                    "Total": st.column_config.NumberColumn("Total", help="Soma do Dízimo e Oferta do dia. Atualizado após salvar.", format="R$ %.2f", disabled=True),
-                }
-                df_to_edit = df_simple[cols_to_display] if not df_simple.empty else pd.DataFrame(columns=cols_to_display)
+            tipos_de_culto = ["Culto da Noite (Padrão)", "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)", "Evento Especial", "Outro"]
 
             edited_df = st.data_editor(
-                df_to_edit,
+                df_logs,
                 use_container_width=True, 
                 hide_index=True, 
-                num_rows="dynamic", 
-                key=f"editor_entradas_dinamico_{parent_cong_obj.id}_{target_sub_cong_id}",
-                column_config=column_config
+                num_rows="dynamic",
+                key=f"editor_service_logs_{parent_cong_obj.id}_{target_sub_cong_id}",
+                column_config={
+                    "ID": None, # Oculta a coluna ID
+                    "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
+                    "Tipo de Culto": st.column_config.SelectboxColumn("Tipo de Culto", options=tipos_de_culto, required=True),
+                    "Dízimo": st.column_config.NumberColumn("Dízimo", format="R$ %.2f", required=True),
+                    "Oferta": st.column_config.NumberColumn("Oferta", format="R$ %.2f", required=True),
+                    "Total": st.column_config.NumberColumn("Total", help="Soma do Dízimo e Oferta. Atualiza após salvar.", format="R$ %.2f", disabled=True),
+                },
+                column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
             )
 
             def on_save_click():
-                # Remove colunas de total antes de salvar, pois são calculadas
-                df_to_process = edited_df.drop(columns=[col for col in ['Total', 'Total do Dia'] if col in edited_df.columns])
+                _apply_service_log_changes(df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id)
+                st.rerun()
 
-                if 'Dízimo (Manhã)' not in df_to_process.columns:
-                    # Converte da visão simples para o formato completo para salvar
-                    df_to_save = df_to_process.rename(columns={"Dízimo": "Dízimo (Noite)", "Oferta": "Oferta (Noite)"})
-                    df_to_save["Dízimo (Manhã)"] = 0.0
-                    df_to_save["Oferta (Manhã)"] = 0.0
-                else:
-                    df_to_save = df_to_process
-                
-                _apply_multi_service_changes(df_to_save, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
-
-            _save_btn(on_save_click, f"lan_tab_dinamico_{parent_cong_obj.id}_{target_sub_cong_id}", "entrada")
+            _save_btn(on_save_click, f"lan_tab_logs_{parent_cong_obj.id}_{target_sub_cong_id}", "entrada")
 
             # Os outros editores (Dizimistas e Saídas) continuam exatamente iguais
             st.markdown("---")
