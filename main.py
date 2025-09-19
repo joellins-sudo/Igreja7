@@ -1708,6 +1708,8 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 
 # SUBSTITUA SUA page_lancamentos INTEIRA POR ESTA VERSÃO FINAL
 
+# SUBSTITUA SUA page_lancamentos INTEIRA POR ESTA VERSÃO FINAL
+
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1752,7 +1754,6 @@ def page_lancamentos(user: "User"):
             st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
             st.divider()
 
-            # ===== FORMULÁRIO DE ENTRADA RESTAURADO E MELHORADO =====
             with st.expander("➕ Lançar ENTRADA (Resumo do Culto)", expanded=True):
                 with st.form("form_entrada_resumo"):
                     ent_data = st.date_input("Data do Culto", value=today_bahia(), key="ent_data_form")
@@ -1762,9 +1763,9 @@ def page_lancamentos(user: "User"):
                     ent_dizimo = c1.number_input("Valor do Dízimo", min_value=0.0, value=0.0, format="%.2f", key="ent_dizimo_form")
                     ent_oferta = c2.number_input("Valor da Oferta", min_value=0.0, value=0.0, format="%.2f", key="ent_oferta_form")
 
-                    if st.form_submit_button("Salvar Entrada do Culto"):
+                    # ===== MUDANÇA AQUI: Botão verde =====
+                    if _submit_btn("Salvar Entrada do Culto", "form_entrada_resumo_btn", theme="entrada"):
                         if ent_dizimo > 0 or ent_oferta > 0:
-                            # Procura se já existe um registro para este culto específico
                             log_existente = db.scalar(
                                 select(ServiceLog).where(
                                     ServiceLog.date == ent_data,
@@ -1775,12 +1776,10 @@ def page_lancamentos(user: "User"):
                             )
 
                             if log_existente:
-                                # Se existe, soma os valores
                                 log_existente.dizimo += ent_dizimo
                                 log_existente.oferta += ent_oferta
                                 st.success("Valores adicionados ao registro do culto existente!")
                             else:
-                                # Se não existe, cria um novo
                                 novo_log = ServiceLog(
                                     date=ent_data,
                                     service_type=ent_tipo,
@@ -1799,12 +1798,12 @@ def page_lancamentos(user: "User"):
 
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
                 with st.form("form_dizimo"):
-                    # (Esta parte não mudou)
                     dz_data = st.date_input("Data do Dízimo", value=today_bahia(), key="dz_data")
                     dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
                     dz_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="dz_valor")
                     dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência"], key="dz_pay")
                     
+                    # Botão azul (já estava correto)
                     if _submit_btn("Salvar DIZIMISTA", "form_dizimo_btn", theme="dizimista"):
                         if dz_valor > 0 and dz_nome.strip():
                             db.add(Tithe(date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor, congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id, payment_method=dz_payment))
@@ -1814,7 +1813,6 @@ def page_lancamentos(user: "User"):
 
             with st.expander("➖ Lançar SAÍDA"):
                 with st.form("form_saida"):
-                    # (Esta parte não mudou)
                     cats_out = categories_for_type(db, TYPE_OUT)
                     c1, c2 = st.columns(2)
                     with c1: sai_data = st.date_input("Data da Saída", value=today_bahia(), key="sai_data")
@@ -1822,6 +1820,7 @@ def page_lancamentos(user: "User"):
                     sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
                     sai_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="sai_valor")
 
+                    # Botão vermelho (já estava correto)
                     if _submit_btn("Salvar SAÍDA", "form_saida_btn", theme="saida"):
                         cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
                         if sai_valor > 0 and cat_obj:
