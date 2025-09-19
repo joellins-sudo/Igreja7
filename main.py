@@ -250,9 +250,57 @@ FORM_BUTTONS_CSS = """
     border-color: #b91c1c !important;
 }
 </style>
-"""
+"""# SUBSTITUA SEU CSS DE BOTÕES ANTIGO POR ESTE BLOCO NO TOPO DO CÓDIGO
 
-# Garanta que a linha abaixo esteja no seu código, após a definição acima
+FORM_BUTTONS_CSS = """
+<style>
+/* --- ENTRADAS (VERDE) --- */
+.adrf-entrada [data-testid="stFormSubmitButton"] button {
+    background-color: #16a34a !important;
+    border-color: #16a34a !important;
+    color: white !important;
+}
+.adrf-entrada [data-testid="stFormSubmitButton"] button:hover {
+    background-color: #15803d !important;
+    border-color: #15803d !important;
+}
+.adrf-entrada [data-testid="stFormSubmitButton"] button:active {
+    background-color: #14532d !important;
+    border-color: #14532d !important;
+}
+
+/* --- DIZIMISTAS (AZUL) --- */
+.adrf-dizimo [data-testid="stFormSubmitButton"] button {
+    background-color: #2563eb !important;
+    border-color: #2563eb !important;
+    color: white !important;
+}
+.adrf-dizimo [data-testid="stFormSubmitButton"] button:hover {
+    background-color: #1d4ed8 !important;
+    border-color: #1d4ed8 !important;
+}
+.adrf-dizimo [data-testid="stFormSubmitButton"] button:active {
+    background-color: #1e40af !important;
+    border-color: #1e40af !important;
+}
+
+/* --- SAÍDAS (VERMELHO) --- */
+.adrf-saida [data-testid="stFormSubmitButton"] button {
+    background-color: #dc2626 !important;
+    border-color: #dc2626 !important;
+    color: white !important;
+}
+.adrf-saida [data-testid="stFormSubmitButton"] button:hover {
+    background-color: #b91c1c !important;
+    border-color: #b91c1c !important;
+}
+.adrf-saida [data-testid="stFormSubmitButton"] button:active {
+    background-color: #991b1b !important;
+    border-color: #991b1b !important;
+}
+</style>
+"""
+# Garanta que esta linha continue no seu código, logo após a definição acima
 st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)
 
 # Alias para manter compatibilidade com a linha 256
@@ -817,63 +865,6 @@ BTN_COLORS = {
     "saida":    "#dc2626",  # vermelha
     "neutral":  "#1f6feb",  # fallback (azul padrão)
 }
-
-def _save_btn(on_click, key_suffix: str, theme: str = "neutral", label: str = "Salvar alterações"):
-    """
-    Botão 'Salvar alterações' com cor personalizada por tema:
-      - 'entrada'  -> verde
-      - 'dizimista'-> azul
-      - 'saida'    -> vermelho
-      - 'neutral'  -> cor padrão
-    """
-    color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
-    with st.container():
-        # marcador p/ escopar o CSS desse botão apenas
-        st.markdown(f'<div id="mark-{key_suffix}"></div>', unsafe_allow_html=True)
-        st.button(label, key=f"btn_save_{key_suffix}", type="primary", on_click=on_click)
-        st.markdown(
-            f"""
-            <style>
-              /* pinta SOMENTE o botão dentro deste bloco */
-              #mark-{key_suffix} ~ div[data-testid="stButton"] > button {{
-                background: {color} !important;
-                border-color: {color} !important;
-              }}
-              #mark-{key_suffix} ~ div[data-testid="stButton"] > button:hover {{
-                filter: brightness(0.93);
-              }}
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
-
-def _submit_btn(label: str, key_suffix: str, theme: str = "neutral") -> bool:
-    """
-    Versão colorida para st.form_submit_button (forms de ENTRADA, DIZIMISTA, SAÍDA).
-    Retorna True quando o usuário clica.
-    """
-    color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
-    with st.container():
-        st.markdown(f'<div id="mark-{key_suffix}"></div>', unsafe_allow_html=True)
-        clicked = st.form_submit_button(label, type="primary")
-        st.markdown(
-            f"""
-            <style>
-              /* cobre tanto submit de form quanto um fallback de stButton */
-              #mark-{key_suffix} ~ div[data-testid="stFormSubmitButton"] > button,
-              #mark-{key_suffix} ~ div[data-testid="stButton"] > button {{
-                background: {color} !important;
-                border-color: {color} !important
-              }}
-              #mark-{key_suffix} ~ div[data-testid="stFormSubmitButton"] > button:hover,
-              #mark-{key_suffix} ~ div[data-testid="stButton"] > button:hover {{
-                filter: brightness(0.93);
-              }}
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
-    return clicked
 
 def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: str, default_cong_id: Optional[int], default_sub_cong_id: Optional[int] = None):
     def norm_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -1663,6 +1654,8 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 
 # SUBSTITUA SUA page_lancamentos INTEIRA POR ESTA VERSÃO FINAL
 
+# SUBSTITUA SUA page_lancamentos INTEIRA PELA VERSÃO FINAL ABAIXO
+
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1708,63 +1701,49 @@ def page_lancamentos(user: "User"):
             st.divider()
 
             with st.expander("➕ Lançar ENTRADA (Resumo do Culto)", expanded=True):
+                st.markdown('<div class="adrf-entrada">', unsafe_allow_html=True)
                 with st.form("form_entrada_resumo"):
                     ent_data = st.date_input("Data do Culto", value=today_bahia(), key="ent_data_form")
                     ent_tipo = st.selectbox("Tipo de Culto", options=tipos_de_culto, key="ent_tipo_form")
-                    
                     c1, c2 = st.columns(2)
                     ent_dizimo = c1.number_input("Valor do Dízimo", min_value=0.0, value=0.0, format="%.2f", key="ent_dizimo_form")
                     ent_oferta = c2.number_input("Valor da Oferta", min_value=0.0, value=0.0, format="%.2f", key="ent_oferta_form")
 
-                    # ===== MUDANÇA AQUI: Botão verde =====
-                    if _submit_btn("Salvar Entrada do Culto", "form_entrada_resumo_btn", theme="entrada"):
+                    if st.form_submit_button("Salvar Entrada do Culto"):
                         if ent_dizimo > 0 or ent_oferta > 0:
-                            log_existente = db.scalar(
-                                select(ServiceLog).where(
-                                    ServiceLog.date == ent_data,
-                                    ServiceLog.service_type == ent_tipo,
-                                    ServiceLog.congregation_id == target_cong_obj.id,
-                                    ServiceLog.sub_congregation_id == target_sub_cong_id
-                                )
-                            )
-
+                            log_existente = db.scalar(select(ServiceLog).where(ServiceLog.date == ent_data, ServiceLog.service_type == ent_tipo, ServiceLog.congregation_id == target_cong_obj.id, ServiceLog.sub_congregation_id == target_sub_cong_id))
                             if log_existente:
                                 log_existente.dizimo += ent_dizimo
                                 log_existente.oferta += ent_oferta
                                 st.success("Valores adicionados ao registro do culto existente!")
                             else:
-                                novo_log = ServiceLog(
-                                    date=ent_data,
-                                    service_type=ent_tipo,
-                                    dizimo=ent_dizimo,
-                                    oferta=ent_oferta,
-                                    congregation_id=target_cong_obj.id,
-                                    sub_congregation_id=target_sub_cong_id
-                                )
+                                novo_log = ServiceLog(date=ent_data, service_type=ent_tipo, dizimo=ent_dizimo, oferta=ent_oferta, congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id)
                                 db.add(novo_log)
                                 st.success("Novo registro de culto salvo com sucesso!")
-                            
                             db.commit()
                             st.rerun()
                         else:
                             st.warning("Nenhum valor foi inserido.")
+                st.markdown('</div>', unsafe_allow_html=True)
 
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
+                st.markdown('<div class="adrf-dizimo">', unsafe_allow_html=True)
                 with st.form("form_dizimo"):
                     dz_data = st.date_input("Data do Dízimo", value=today_bahia(), key="dz_data")
                     dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
                     dz_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="dz_valor")
                     dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência"], key="dz_pay")
                     
-                    # Botão azul (já estava correto)
-                    if _submit_btn("Salvar DIZIMISTA", "form_dizimo_btn", theme="dizimista"):
+                    if st.form_submit_button("Salvar DIZIMISTA"):
                         if dz_valor > 0 and dz_nome.strip():
                             db.add(Tithe(date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor, congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id, payment_method=dz_payment))
                             db.commit()
                             st.success("Dízimo registrado!")
                             st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
 
             with st.expander("➖ Lançar SAÍDA"):
+                st.markdown('<div class="adrf-saida">', unsafe_allow_html=True)
                 with st.form("form_saida"):
                     cats_out = categories_for_type(db, TYPE_OUT)
                     c1, c2 = st.columns(2)
@@ -1773,14 +1752,14 @@ def page_lancamentos(user: "User"):
                     sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
                     sai_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="sai_valor")
 
-                    # Botão vermelho (já estava correto)
-                    if _submit_btn("Salvar SAÍDA", "form_saida_btn", theme="saida"):
+                    if st.form_submit_button("Salvar SAÍDA"):
                         cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
                         if sai_valor > 0 and cat_obj:
                             db.add(Transaction(date=sai_data, type=TYPE_OUT, category_id=cat_obj.id, amount=sai_valor, description=(sai_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
                             db.commit()
                             st.success("Saída registrada!")
                             st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
         
         elif modo == "Editar direto na tabela":
             contexto_tabela = f"{parent_cong_obj.name} (Principal)"
@@ -1834,12 +1813,10 @@ def page_lancamentos(user: "User"):
                 col3.metric("Total Geral (na tabela)", format_currency(total_geral))
             except Exception:
                 st.caption("Calculando totais...")
-
-            def on_save_click():
+            
+            if st.button("Salvar alterações na tabela", key=f"save_table_{parent_cong_obj.id}"):
                 _apply_service_log_changes(df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id)
                 st.rerun()
-
-            _save_btn(on_save_click, f"lan_tab_logs_{parent_cong_obj.id}_{target_sub_cong_id}", "entrada")
 
             st.markdown("---")
             tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id == target_sub_cong_id)
