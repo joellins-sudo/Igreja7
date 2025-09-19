@@ -1248,64 +1248,53 @@ def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFram
 
 # VERSÃO OTIMIZADA E CORRIGIDA - USE ESTA
 # VERSÃO DEFINITIVA - USE ESTA
+# VERSÃO DE DIAGNÓSTICO - USE TEMPORARIAMENTE
 def _apply_multi_service_changes(edited_df: pd.DataFrame, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None):
-    """
-    Salva as alterações da tabela multi-culto em DUAS TRANSAÇÕES SEPARADAS para máxima robustez.
-    1. Primeiro, deleta todos os lançamentos antigos e confirma (commit).
-    2. Segundo, insere os novos lançamentos do zero e confirma (commit).
-    """
-    # === PASSO 1: DELETAR OS DADOS ANTIGOS EM UMA TRANSAÇÃO ISOLADA ===
-    with SessionLocal() as db:
-        cats_in = categories_for_type(db, TYPE_IN)
-        cat_diz_id = next((c.id for c in cats_in if _norm(c.name) in ("dizimo", "dízimo")), None)
-        cat_ofe_id = next((c.id for c in cats_in if _norm(c.name) == "oferta"), None)
-        
-        if not (cat_diz_id and cat_ofe_id):
-            st.error("Categorias 'Dízimo' e/ou 'Oferta' não encontradas."); return
-
-        tx_sub_filter = Transaction.sub_congregation_id.is_(None) if sub_cong_id is None else Transaction.sub_congregation_id == sub_cong_id
-        
-        db.query(Transaction).filter(
-            Transaction.congregation_id == cong_id,
-            Transaction.date >= start,
-            Transaction.date < end,
-            Transaction.category_id.in_([cat_diz_id, cat_ofe_id]),
-            tx_sub_filter
-        ).delete(synchronize_session=False)
-        
-        db.commit() # Confirma a exclusão antes de prosseguir
-
-    # === PASSO 2: INSERIR OS NOVOS DADOS EM UMA NOVA TRANSAÇÃO ===
-    # Verifica se há algo para inserir antes de abrir uma nova sessão
-    if edited_df.empty or "Data" not in edited_df.columns:
-        return # Se não há nada na tabela, já terminamos após o delete.
-
-    with SessionLocal() as db:
-        # Re-busca os IDs das categorias na nova sessão
-        cats_in = categories_for_type(db, TYPE_IN)
-        cat_diz = next((c for c in cats_in if _norm(c.name) in ("dizimo", "dízimo")), None)
-        cat_ofe = next((c for c in cats_in if _norm(c.name) == "oferta"), None)
-
-        edited_df.dropna(subset=["Data"], inplace=True)
-        edited_df["Data"] = pd.to_datetime(edited_df["Data"]).dt.date
-
-        for _, row in edited_df.iterrows():
-            d = row["Data"]
-            diz_m = _to_float_brl(row.get("Dízimo (Manhã)"))
-            ofe_m = _to_float_brl(row.get("Oferta (Manhã)"))
-            diz_n = _to_float_brl(row.get("Dízimo (Noite)"))
-            ofe_n = _to_float_brl(row.get("Oferta (Noite)"))
+    st.info("Iniciando o processo de salvamento (modo de diagnóstico)...")
+    
+    try:
+        with SessionLocal() as db:
+            st.info("Sessão com o banco de dados aberta.")
             
-            if diz_m > 0:
-                db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id, amount=diz_m, description="[Lançamento Manhã]", congregation_id=cong_id, sub_congregation_id=sub_cong_id))
-            if ofe_m > 0:
-                db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=ofe_m, description="[Lançamento Manhã]", congregation_id=cong_id, sub_congregation_id=sub_cong_id))
-            if diz_n > 0:
-                db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id, amount=diz_n, description="[Lançamento Noite]", congregation_id=cong_id, sub_congregation_id=sub_cong_id))
-            if ofe_n > 0:
-                db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=ofe_n, description="[Lançamento Noite]", congregation_id=cong_id, sub_congregation_id=sub_cong_id))
+            cats_in = categories_for_type(db, TYPE_IN)
+            cat_diz_id = next((c.id for c in cats_in if _norm(c.name) in ("dizimo", "dízimo")), None)
+            cat_ofe_id = next((c.id for c in cats_in if _norm(c.name) == "oferta"), None)
+            
+            if not (cat_diz_id and cat_ofe_id):
+                st.error("Diagnóstico: Categorias 'Dízimo' e/ou 'Oferta' não encontradas.")
+                return
+
+            st.info(f"IDs das categorias a serem deletadas: Dízimo={cat_diz_id}, Oferta={cat_ofe_id}")
+            
+            tx_sub_filter = Transaction.sub_congregation_id.is_(None) if sub_cong_id is None else Transaction.sub_congregation_id == sub_cong_id
+            
+            st.warning("Tentando executar o comando DELETE agora...")
+            
+            # O ponto exato do erro
+            query_to_delete = db.query(Transaction).filter(
+                Transaction.congregation_id == cong_id,
+                Transaction.date >= start,
+                Transaction.date < end,
+                Transaction.category_id.in_([cat_diz_id, cat_ofe_id]),
+                tx_sub_filter
+            )
+            
+            # Executando a exclusão
+            deleted_count = query_to_delete.delete(synchronize_session=False)
+            
+            st.success(f"Comando DELETE executado com sucesso. {deleted_count} linhas foram marcadas para exclusão.")
+            
+            st.info("Tentando fazer o commit da exclusão...")
+            db.commit()
+            st.success("Commit da exclusão realizado com sucesso!")
+            st.info("O erro não ocorreu na etapa de exclusão.")
+
+    except Exception as e:
+        st.error("Ocorreu uma exceção durante a etapa de exclusão!")
+        st.error("Abaixo está o erro completo e sem censura:")
+        st.exception(e) 
         
-        db.commit() 
+        # <-- ISSO VAI MOSTRAR O ERRO REAL 
         # Confirma a inserção dos novos dados
 # ===================== EDITORES INLINE REUTILIZÁVEIS (com botão Salvar) =====================
 # ===== EDITOR DE LANÇAMENTOS (com force_cong_id e linha vazia) =====
