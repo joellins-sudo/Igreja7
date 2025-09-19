@@ -501,25 +501,12 @@ class Tithe(Base):
     congregation: Mapped["Congregation"] = relationship(back_populates="tithes")
 
 # ===================== ENGINE / SESSION =====================
-# VERSÃO CORRIGIDA - USE ESTA
 @st.cache_resource
 def get_engine():
     db_url = st.secrets.get("DATABASE_URL", os.environ.get("DATABASE_URL"))
-    is_sqlite = "sqlite" in (db_url or "")
-
     if not db_url:
         db_url = "sqlite:///database.db"
-        is_sqlite = True
-
-    # Se for SQLite, adicione o argumento para evitar o erro "database is locked"
-    if is_sqlite:
-        return create_engine(
-            db_url, 
-            pool_pre_ping=True, 
-            connect_args={"check_same_thread": False} # <-- A MÁGICA ACONTECE AQUI
-        )
-    else:
-        return create_engine(db_url, pool_pre_ping=True)
+    return create_engine(db_url, pool_pre_ping=True)
 
 @st.cache_resource
 def get_sessionmaker():
@@ -1035,117 +1022,52 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
 
 # ===================== RELATÓRIO DE ENTRADA — TABELA ÚNICA (EDIT SUMÁRIO) =====================
 # ===================== RELATÓRIO DE ENTRADA — TABELA ÚNICA (EDIT SUMÁRIO) =====================
-# Coloque esta nova função junto com as outras helpers, como _entrada_summary_df
-
-def _load_multi_service_data(db: Session, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
-    """
-    Carrega os dados de entrada, separando-os por turnos (Manhã/Noite)
-    baseado na descrição dos lançamentos.
-    """
-    # A CORREÇÃO ESTÁ AQUI:
-    tx_sub_filter = Transaction.sub_congregation_id.is_(None) if sub_cong_id is None else Transaction.sub_congregation_id == sub_cong_id
-
-    q = select(Transaction).options(joinedload(Transaction.category)).where(
-        Transaction.congregation_id == cong_id,
-        Transaction.date >= start, Transaction.date < end,
-        tx_sub_filter,
-        Transaction.category.has(func.lower(Category.name).in_(("dízimo", "dizimo", "oferta")))
-    )
-    transactions = db.scalars(q).all()
-
-    tithe_sub_filter = Tithe.sub_congregation_id.is_(None) if sub_cong_id is None else Tithe.sub_congregation_id == sub_cong_id
-    tithes_total_by_date = db.execute(
-        select(Tithe.date, func.sum(Tithe.amount))
-        .where(Tithe.congregation_id == cong_id, Tithe.date >= start, Tithe.date < end, tithe_sub_filter)
-        .group_by(Tithe.date)
-    ).all()
-    tithe_map = {d: v for d, v in tithes_total_by_date}
-
-    data_by_day = defaultdict(lambda: {
-        "Dízimo (Manhã)": 0.0, "Oferta (Manhã)": 0.0,
-        "Dízimo (Noite)": 0.0, "Oferta (Noite)": 0.0,
-        "Total Dízimo Nominal": 0.0
-    })
-
-    for t in transactions:
-        desc = (t.description or "").lower()
-        is_dizimo = "dízimo" in t.category.name.lower() or "dizimo" in t.category.name.lower()
-        
-        if "noite" in desc:
-            if is_dizimo: data_by_day[t.date]["Dízimo (Noite)"] += t.amount
-            else: data_by_day[t.date]["Oferta (Noite)"] += t.amount
-        else:
-            # Tudo que não for "Noite" cai como "Manhã" por padrão
-            if is_dizimo: data_by_day[t.date]["Dízimo (Manhã)"] += t.amount
-            else: data_by_day[t.date]["Oferta (Manhã)"] += t.amount
-
-    for d, total in tithe_map.items():
-        data_by_day[d]["Total Dízimo Nominal"] = total
-
-    if not data_by_day and not tithe_map:
-        return pd.DataFrame()
-
-    rows = []
-    all_dates = sorted(data_by_day.keys() | tithe_map.keys())
-    for d in all_dates:
-        day_data = data_by_day[d]
-        rows.append({
-            "Data": d,
-            "Dízimo (Manhã)": day_data["Dízimo (Manhã)"],
-            "Oferta (Manhã)": day_data["Oferta (Manhã)"],
-            "Dízimo (Noite)": day_data["Dízimo (Noite)"],
-            "Oferta (Noite)": day_data["Oferta (Noite)"],
-        })
-
-    df = pd.DataFrame(rows).sort_values("Data").reset_index(drop=True)
-    return df
-
 def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
-        # Base queries
-        tithes_q = select(Tithe.date, func.sum(Tithe.amount)).where(
-            Tithe.congregation_id == cong_id, Tithe.date >= start, Tithe.date < end
-        )
-        diz_trans_q = select(Transaction.date, func.sum(Transaction.amount)).join(Category).where(
-            Transaction.congregation_id == cong_id, Transaction.date >= start, Transaction.date < end,
-            Transaction.type.in_((TYPE_IN, "RECEITA")), func.lower(Category.name).in_(("dízimo","dizimo"))
-        )
-        oferta_trans_q = select(Transaction.date, func.sum(Transaction.amount)).join(Category).where(
-            Transaction.congregation_id == cong_id, Transaction.date >= start, Transaction.date < end,
-            Transaction.type.in_((TYPE_IN, "RECEITA")), func.lower(Category.name) == "oferta"
-        )
+    # Base queries
+    tithes_q = select(Tithe.date, func.sum(Tithe.amount)).where(
+        Tithe.congregation_id == cong_id, Tithe.date >= start, Tithe.date < end
+    )
+    diz_trans_q = select(Transaction.date, func.sum(Transaction.amount)).join(Category).where(
+        Transaction.congregation_id == cong_id, Transaction.date >= start, Transaction.date < end,
+        Transaction.type.in_((TYPE_IN, "RECEITA")), func.lower(Category.name).in_(("dízimo","dizimo"))
+    )
+    oferta_trans_q = select(Transaction.date, func.sum(Transaction.amount)).join(Category).where(
+        Transaction.congregation_id == cong_id, Transaction.date >= start, Transaction.date < end,
+        Transaction.type.in_((TYPE_IN, "RECEITA")), func.lower(Category.name) == "oferta"
+    )
 
-        # --- LÓGICA DE FILTRO CORRIGIDA ---
-        if sub_cong_id is not None:
-            # Filtra por uma sub-congregação específica
-            tithes_q = tithes_q.where(Tithe.sub_congregation_id == sub_cong_id)
-            diz_trans_q = diz_trans_q.where(Transaction.sub_congregation_id == sub_cong_id)
-            oferta_trans_q = oferta_trans_q.where(Transaction.sub_congregation_id == sub_cong_id)
-        else:
-            # Filtra APENAS para a congregação principal (onde não há sub_congregation_id)
-            tithes_q = tithes_q.where(Tithe.sub_congregation_id.is_(None))
-            diz_trans_q = diz_trans_q.where(Transaction.sub_congregation_id.is_(None))
-            oferta_trans_q = oferta_trans_q.where(Transaction.sub_congregation_id.is_(None))
+    # --- LÓGICA DE FILTRO CORRIGIDA ---
+    if sub_cong_id is not None:
+        # Filtra por uma sub-congregação específica
+        tithes_q = tithes_q.where(Tithe.sub_congregation_id == sub_cong_id)
+        diz_trans_q = diz_trans_q.where(Transaction.sub_congregation_id == sub_cong_id)
+        oferta_trans_q = oferta_trans_q.where(Transaction.sub_congregation_id == sub_cong_id)
+    else:
+        # Filtra APENAS para a congregação principal (onde não há sub_congregation_id)
+        tithes_q = tithes_q.where(Tithe.sub_congregation_id.is_(None))
+        diz_trans_q = diz_trans_q.where(Transaction.sub_congregation_id.is_(None))
+        oferta_trans_q = oferta_trans_q.where(Transaction.sub_congregation_id.is_(None))
 
-        # Executa queries
-        tithes = db.execute(tithes_q.group_by(Tithe.date)).all()
-        diz_trans = db.execute(diz_trans_q.group_by(Transaction.date)).all()
-        oferta_trans = db.execute(oferta_trans_q.group_by(Transaction.date)).all()
+    # Executa queries
+    tithes = db.execute(tithes_q.group_by(Tithe.date)).all()
+    diz_trans = db.execute(diz_trans_q.group_by(Transaction.date)).all()
+    oferta_trans = db.execute(oferta_trans_q.group_by(Transaction.date)).all()
 
-        by_date_diz_tit = defaultdict(float)
-        for d, s in tithes: by_date_diz_tit[d] += float(s or 0.0)
-        by_date_diz_tx = defaultdict(float)
-        for d, s in diz_trans: by_date_diz_tx[d] += float(s or 0.0)
-        by_date_ofe = defaultdict(float)
-        for d, s in oferta_trans: by_date_ofe[d] += float(s or 0.0)
+    by_date_diz_tit = defaultdict(float)
+    for d, s in tithes: by_date_diz_tit[d] += float(s or 0.0)
+    by_date_diz_tx = defaultdict(float)
+    for d, s in diz_trans: by_date_diz_tx[d] += float(s or 0.0)
+    by_date_ofe = defaultdict(float)
+    for d, s in oferta_trans: by_date_ofe[d] += float(s or 0.0)
 
-        all_dates = sorted(set(list(by_date_diz_tit.keys()) + list(by_date_diz_tx.keys()) + list(by_date_ofe.keys())))
-        rows = []
-        for d in all_dates:
-            dz = max(float(by_date_diz_tit.get(d, 0.0)), float(by_date_diz_tx.get(d, 0.0)))
-            ofe = float(by_date_ofe.get(d, 0.0))
-            rows.append({"Data do Culto": d, "Dízimo": dz, "Oferta": ofe, "Total": dz + ofe})
-        
-        return pd.DataFrame(rows)
+    all_dates = sorted(set(list(by_date_diz_tit.keys()) + list(by_date_diz_tx.keys()) + list(by_date_ofe.keys())))
+    rows = []
+    for d in all_dates:
+        dz = max(float(by_date_diz_tit.get(d, 0.0)), float(by_date_diz_tx.get(d, 0.0)))
+        ofe = float(by_date_ofe.get(d, 0.0))
+        rows.append({"Data do Culto": d, "Dízimo": dz, "Oferta": ofe, "Total": dz + ofe})
+    
+    return pd.DataFrame(rows)
 
 def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None):
     with SessionLocal() as db:
@@ -1244,58 +1166,7 @@ def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFram
                     db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=float(adj_of_new), description=ADJ_ENTRY_DESC, congregation_id=cong_id, sub_congregation_id=sub_cong_id))
         
         db.commit()
-# Coloque esta função perto da _apply_entrada_summary_changes
 
-# VERSÃO OTIMIZADA E CORRIGIDA - USE ESTA
-# VERSÃO DEFINITIVA - USE ESTA
-# VERSÃO DE DIAGNÓSTICO - USE TEMPORARIAMENTE
-def _apply_multi_service_changes(edited_df: pd.DataFrame, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None):
-    st.info("Iniciando o processo de salvamento (modo de diagnóstico)...")
-    
-    try:
-        with SessionLocal() as db:
-            st.info("Sessão com o banco de dados aberta.")
-            
-            cats_in = categories_for_type(db, TYPE_IN)
-            cat_diz_id = next((c.id for c in cats_in if _norm(c.name) in ("dizimo", "dízimo")), None)
-            cat_ofe_id = next((c.id for c in cats_in if _norm(c.name) == "oferta"), None)
-            
-            if not (cat_diz_id and cat_ofe_id):
-                st.error("Diagnóstico: Categorias 'Dízimo' e/ou 'Oferta' não encontradas.")
-                return
-
-            st.info(f"IDs das categorias a serem deletadas: Dízimo={cat_diz_id}, Oferta={cat_ofe_id}")
-            
-            tx_sub_filter = Transaction.sub_congregation_id.is_(None) if sub_cong_id is None else Transaction.sub_congregation_id == sub_cong_id
-            
-            st.warning("Tentando executar o comando DELETE agora...")
-            
-            # O ponto exato do erro
-            query_to_delete = db.query(Transaction).filter(
-                Transaction.congregation_id == cong_id,
-                Transaction.date >= start,
-                Transaction.date < end,
-                Transaction.category_id.in_([cat_diz_id, cat_ofe_id]),
-                tx_sub_filter
-            )
-            
-            # Executando a exclusão
-            deleted_count = query_to_delete.delete(synchronize_session=False)
-            
-            st.success(f"Comando DELETE executado com sucesso. {deleted_count} linhas foram marcadas para exclusão.")
-            
-            st.info("Tentando fazer o commit da exclusão...")
-            db.commit()
-            st.success("Commit da exclusão realizado com sucesso!")
-            st.info("O erro não ocorreu na etapa de exclusão.")
-
-    except Exception as e:
-        st.error("Ocorreu uma exceção durante a etapa de exclusão!")
-        st.error("Abaixo está o erro completo e sem censura:")
-        st.exception(e) 
-        
-        # <-- ISSO VAI MOSTRAR O ERRO REAL 
-        # Confirma a inserção dos novos dados
 # ===================== EDITORES INLINE REUTILIZÁVEIS (com botão Salvar) =====================
 # ===== EDITOR DE LANÇAMENTOS (com force_cong_id e linha vazia) =====
 # ===== EDITOR DE LANÇAMENTOS (com total abaixo da tabela) =====
@@ -1752,7 +1623,7 @@ def page_lancamentos(user: "User"):
                     c1, c2 = st.columns(2)
                     with c1: ent_data = st.date_input("Data da Entrada", value=today_bahia(), key="ent_data")
                     with c2: ent_cat_name = st.selectbox("Categoria", [c.name for c in cats_in] or ["—"], key="ent_cat")
-                    ent_desc = st.text_input("Descrição (opcional)", key="ent_desc", help="Para cultos de manhã/noite no formulário, use descrições como 'Oferta da manhã' ou 'Dízimo do culto da noite'.")
+                    ent_desc = st.text_input("Descrição (opcional)", key="ent_desc")
                     ent_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="ent_valor")
                     
                     if _submit_btn("Salvar ENTRADA", "form_entrada_btn", theme="entrada"):
@@ -1802,62 +1673,24 @@ def page_lancamentos(user: "User"):
             ref_tab = get_month_selector("Mês de referência da tabela")
             start_tab, end_tab = month_bounds(ref_tab)
             
-            # ===== Bloco de Entradas (Dízimo e Oferta) MODIFICADO =====
             st.markdown("##### Entradas (Dízimo e Oferta)")
-            
-            df_entradas = _load_multi_service_data(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
-            
-            cols_to_edit = ["Data", "Dízimo (Manhã)", "Oferta (Manhã)", "Dízimo (Noite)", "Oferta (Noite)"]
-            
-            edited_entradas = st.data_editor(
-                df_entradas[cols_to_edit] if not df_entradas.empty else pd.DataFrame(columns=cols_to_edit),
-                use_container_width=True, 
-                hide_index=True, 
-                num_rows="dynamic", 
-                key=f"editor_entradas_multi_{parent_cong_obj.id}_{target_sub_cong_id}",
-                column_config={
-                    "Data": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
-                    "Dízimo (Manhã)": st.column_config.NumberColumn("Dízimo (Manhã)", min_value=0.0, step=1.0, format="R$ %.2f"),
-                    "Oferta (Manhã)": st.column_config.NumberColumn("Oferta (Manhã)", min_value=0.0, step=1.0, format="R$ %.2f"),
-                    "Dízimo (Noite)": st.column_config.NumberColumn("Dízimo (Noite)", min_value=0.0, step=1.0, format="R$ %.2f"),
-                    "Oferta (Noite)": st.column_config.NumberColumn("Oferta (Noite)", min_value=0.0, step=1.0, format="R$ %.2f"),
-                }
-            )
+            df_entradas = _entrada_summary_df(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
+            if df_entradas.empty:
+                df_entradas = pd.DataFrame([{"Data do Culto": today_bahia(), "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0}])
+            edited_entradas = st.data_editor(df_entradas, use_container_width=True, hide_index=True, num_rows="dynamic", key=f"editor_entradas_{parent_cong_obj.id}_{target_sub_cong_id}")
             
             try:
-                total_dizimo_final, total_oferta_final, total_geral = 0.0, 0.0, 0.0
-                if not edited_entradas.empty:
-                    df_calc = edited_entradas.copy()
-                    diz_m = df_calc["Dízimo (Manhã)"].map(_to_float_brl).sum()
-                    ofe_m = df_calc["Oferta (Manhã)"].map(_to_float_brl).sum()
-                    diz_n = df_calc["Dízimo (Noite)"].map(_to_float_brl).sum()
-                    ofe_n = df_calc["Oferta (Noite)"].map(_to_float_brl).sum()
-                    
-                    tithe_sub_filter = Tithe.sub_congregation_id.is_(None) if target_sub_cong_id is None else Tithe.sub_congregation_id == target_sub_cong_id
-                    total_dizimo_nominal_mes = db.scalar(select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
-                        Tithe.congregation_id == parent_cong_obj.id,
-                        Tithe.date >= start_tab, Tithe.date < end_tab,
-                        tithe_sub_filter
-                    )) or 0.0
-
-                    total_dizimo_final = max(total_dizimo_nominal_mes, diz_m + diz_n)
-                    total_oferta_final = ofe_m + ofe_n
-                    total_geral = total_dizimo_final + total_oferta_final
-            except Exception: 
-                pass
+                total_dizimo, total_oferta, total_geral = 0.0, 0.0, 0.0
+                if isinstance(edited_entradas, pd.DataFrame) and not edited_entradas.empty:
+                    df_calc = edited_entradas.copy(); df_calc["Dízimo"] = df_calc["Dízimo"].map(_to_float_brl); df_calc["Oferta"] = df_calc["Oferta"].map(_to_float_brl)
+                    total_dizimo = df_calc["Dízimo"].sum(); total_oferta = df_calc["Oferta"].sum(); total_geral = total_dizimo + total_oferta
+            except Exception: pass
             
             col1, col2, col3 = st.columns(3)
-            col1.metric("Total Dízimos (mês)", format_currency(total_dizimo_final))
-            col2.metric("Total Ofertas (mês)", format_currency(total_oferta_final))
-            col3.metric("Total Geral Entradas (mês)", format_currency(total_geral))
-            
-            _save_btn(
-                lambda: _apply_multi_service_changes(edited_entradas, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id), 
-                f"lan_tab_multi_{parent_cong_obj.id}_{target_sub_cong_id}", 
-                "entrada"
-            )
-
-            # ===== Fim do Bloco Modificado =====
+            col1.metric("Total Dízimos (tabela)", format_currency(total_dizimo))
+            col2.metric("Total Ofertas (tabela)", format_currency(total_oferta))
+            col3.metric("Total Geral (tabela)", format_currency(total_geral))
+            _save_btn(lambda: _apply_entrada_summary_changes(df_entradas, edited_entradas, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id), f"lan_tab_{parent_cong_obj.id}_{target_sub_cong_id}", "entrada")
 
             st.markdown("---")
             tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id == target_sub_cong_id)
