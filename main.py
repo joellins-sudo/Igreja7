@@ -501,12 +501,25 @@ class Tithe(Base):
     congregation: Mapped["Congregation"] = relationship(back_populates="tithes")
 
 # ===================== ENGINE / SESSION =====================
+# VERSÃO CORRIGIDA - USE ESTA
 @st.cache_resource
 def get_engine():
     db_url = st.secrets.get("DATABASE_URL", os.environ.get("DATABASE_URL"))
+    is_sqlite = "sqlite" in (db_url or "")
+
     if not db_url:
         db_url = "sqlite:///database.db"
-    return create_engine(db_url, pool_pre_ping=True)
+        is_sqlite = True
+
+    # Se for SQLite, adicione o argumento para evitar o erro "database is locked"
+    if is_sqlite:
+        return create_engine(
+            db_url, 
+            pool_pre_ping=True, 
+            connect_args={"check_same_thread": False} # <-- A MÁGICA ACONTECE AQUI
+        )
+    else:
+        return create_engine(db_url, pool_pre_ping=True)
 
 @st.cache_resource
 def get_sessionmaker():
@@ -1233,6 +1246,7 @@ def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFram
         db.commit()
 # Coloque esta função perto da _apply_entrada_summary_changes
 
+# VERSÃO OTIMIZADA E CORRIGIDA - USE ESTA
 def _apply_multi_service_changes(edited_df: pd.DataFrame, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None):
     """
     Salva as alterações da tabela multi-culto.
@@ -1245,34 +1259,39 @@ def _apply_multi_service_changes(edited_df: pd.DataFrame, cong_id: int, start: d
         cat_ofe = next((c for c in cats_in if _norm(c.name) == "oferta"), None)
         if not (cat_diz and cat_ofe):
             st.error("Categorias 'Dízimo' e/ou 'Oferta' não encontradas."); return
-        
-        edited_df.dropna(subset=["Data"], inplace=True)
-        edited_df["Data"] = pd.to_datetime(edited_df["Data"]).dt.date
 
-        # Deleta todos os lançamentos de dízimo e oferta (NÃO nominais) no mês inteiro para esta unidade
-        # Isso simplifica a lógica, evitando ter que checar dia a dia o que mudou
+        # Primeiro, apaga TODOS os lançamentos de Dízimo e Oferta do MÊS INTEIRO para esta unidade.
+        # Isso é mais simples e seguro do que tentar apagar apenas de dias específicos.
         tx_sub_filter = Transaction.sub_congregation_id.is_(None) if sub_cong_id is None else Transaction.sub_congregation_id == sub_cong_id
+        
         db.query(Transaction).filter(
             Transaction.congregation_id == cong_id,
-            Transaction.date >= start, Transaction.date < end,
+            Transaction.date >= start,
+            Transaction.date < end,
             Transaction.category_id.in_([cat_diz.id, cat_ofe.id]),
             tx_sub_filter
         ).delete(synchronize_session=False)
 
-        # Agora, recria os lançamentos a partir do dataframe editado
-        for _, row in edited_df.iterrows():
-            d = row["Data"]
-            # Lançamentos da Manhã
-            if row.get("Dízimo (Manhã)", 0.0) > 0:
-                db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id, amount=float(row["Dízimo (Manhã)"]), description="[Lançamento Manhã]", congregation_id=cong_id, sub_congregation_id=sub_cong_id))
-            if row.get("Oferta (Manhã)", 0.0) > 0:
-                db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=float(row["Oferta (Manhã)"]), description="[Lançamento Manhã]", congregation_id=cong_id, sub_congregation_id=sub_cong_id))
-            
-            # Lançamentos da Noite
-            if row.get("Dízimo (Noite)", 0.0) > 0:
-                db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id, amount=float(row["Dízimo (Noite)"]), description="[Lançamento Noite]", congregation_id=cong_id, sub_congregation_id=sub_cong_id))
-            if row.get("Oferta (Noite)", 0.0) > 0:
-                db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=float(row["Oferta (Noite)"]), description="[Lançamento Noite]", congregation_id=cong_id, sub_congregation_id=sub_cong_id))
+        # Se o dataframe editado não estiver vazio, recria os lançamentos
+        if not edited_df.empty and "Data" in edited_df.columns:
+            edited_df.dropna(subset=["Data"], inplace=True)
+            edited_df["Data"] = pd.to_datetime(edited_df["Data"]).dt.date
+
+            for _, row in edited_df.iterrows():
+                d = row["Data"]
+                diz_m = _to_float_brl(row.get("Dízimo (Manhã)"))
+                ofe_m = _to_float_brl(row.get("Oferta (Manhã)"))
+                diz_n = _to_float_brl(row.get("Dízimo (Noite)"))
+                ofe_n = _to_float_brl(row.get("Oferta (Noite)"))
+                
+                if diz_m > 0:
+                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id, amount=diz_m, description="[Lançamento Manhã]", congregation_id=cong_id, sub_congregation_id=sub_cong_id))
+                if ofe_m > 0:
+                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=ofe_m, description="[Lançamento Manhã]", congregation_id=cong_id, sub_congregation_id=sub_cong_id))
+                if diz_n > 0:
+                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id, amount=diz_n, description="[Lançamento Noite]", congregation_id=cong_id, sub_congregation_id=sub_cong_id))
+                if ofe_n > 0:
+                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=ofe_n, description="[Lançamento Noite]", congregation_id=cong_id, sub_congregation_id=sub_cong_id))
         
         db.commit()
 # ===================== EDITORES INLINE REUTILIZÁVEIS (com botão Salvar) =====================
