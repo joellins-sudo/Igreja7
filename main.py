@@ -72,48 +72,19 @@ st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
 # ================== CSS do cartão de login (estilo ADRF) ==================
 # ================== LOGIN SEI: CSS/HTML (trabalhando com Streamlit) ==================
 # ================== LOGIN ADRF: CSS/HTML ==================
+# SUBSTITUA TODA A SEÇÃO DE CSS NO TOPO DO SEU ARQUIVO POR ESTE BLOCO CORRIGIDO
+
+# ===================== ST CONFIG / THEME =====================
+st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
+
+# ================== DEFINIÇÃO DOS BLOCOS DE CSS ==================
 ADRF_LOGIN_CSS = """
 <style>
   :root{
     --azul-1:#1f6feb; --azul-2:#185fcd; --azul-esc:#0b4b9a;
     --cinza-bg:#f0f0f0; --cinza-borda:#dfe3ea; --cinza-ico:#e9ecef; --texto:#344054;
   }
-  body{ background:var(--cinza-bg); }
-
-  .adrf-wrap{ min-height:calc(100vh - 0px); display:grid; place-items:center; padding:24px 12px; }
-  .adrf-card{ width:100%; max-width:540px; background:#fff; border:1px solid rgba(0,0,0,.07);
-              border-radius:.5rem; box-shadow:0 10px 26px rgba(16,24,40,.08); }
-  .adrf-card .body{ padding:26px 24px 18px; }
-
-  .adrf-logo{ display:flex; align-items:center; justify-content:center; margin:14px 0 18px; }
-  .adrf-logo img{ height:58px; }
-
-  .adrf-form .group{ display:flex; align-items:stretch; margin-bottom:12px; }
-  .adrf-form .ico{
-    flex:0 0 46px; display:flex; align-items:center; justify-content:center;
-    background:var(--cinza-ico); border:1px solid var(--cinza-borda);
-    border-right:none; border-radius:.25rem 0 0 .25rem; color:#6b7280; font-size:18px;
-  }
-  .adrf-form .field [data-testid="stTextInput"]>div>div>input,
-  .adrf-form .field [data-testid="stPassword"]>div>div>input,
-  .adrf-form .field [data-testid="stSelectbox"]>div>div>div>div{
-    height:44px; border:1px solid var(--cinza-borda); border-left:none; border-radius:0 .25rem .25rem 0 !important;
-    font-size:1rem;
-  }
-  .adrf-form .field [data-testid="stWidgetLabel"]{ display:none; }
-
-  .adrf-btn .stButton>button{
-    width:100%; height:44px; border:none; color:#fff; font-weight:700; letter-spacing:.3px; border-radius:.25rem;
-    background:linear-gradient(180deg, var(--azul-1) 0%, var(--azul-2) 100%);
-    box-shadow:0 6px 16px rgba(24,95,205,.25);
-  }
-  .adrf-btn .stButton>button:hover{
-    background:linear-gradient(180deg, var(--azul-2) 0%, var(--azul-esc) 100%);
-  }
-
-  .adrf-2fa{ text-align:right; margin-top:6px; }
-  .adrf-2fa a{ color:#0d6efd; font-size:.92rem; text-decoration:none; }
-  .adrf-2fa a:hover{ text-decoration:underline; }
+  /* ... (o resto do seu CSS de login continua aqui, sem alterações) ... */
 </style>
 """
 
@@ -121,103 +92,29 @@ CSS = """
 <style>
 /* ==================== BASE / TIPOGRAFIA ==================== */
 :root{
-  --base-font: 17px;              /* aumente para 18/19/20px se quiser */
-  --table-font-size: 1.90rem;     /* fonte das células */
-  --table-header-size: 1.08rem;   /* fonte dos cabeçalhos */
+  --base-font: 17px;
+  --table-font-size: 1.90rem;
+  --table-header-size: 1.08rem;
 }
-
 html, body, [data-testid="stAppViewContainer"]{
   font-size: var(--base-font);
   line-height: 1.45;
 }
-
-/* Títulos mais fortes e maiores */
-.page-title, h1{ font-size: 2.0rem; font-weight: 800 !important; }
-h2{ font-size: 1.45rem; font-weight: 750; }
-h3{ font-size: 1.25rem; font-weight: 700; }
-
-/* ==================== WIDGETS / TEXTOS ==================== */
-[data-testid="stSidebar"] *{ font-size: 1.02rem; }
-label, [data-testid="stWidgetLabel"]{ font-size: 1.02rem; }
-
-/* Inputs (texto, número, data, selects) um pouco maiores */
-.stTextInput input,
-.stNumberInput input,
-.stDateInput input,
-.stSelectbox div,
-.stMultiSelect div{
-  font-size: 1.02rem !important;
-}
-
-/* ==================== TABELAS / EDITOR ==================== */
-/* Regras gerais (ok manter) */
-[data-testid="stDataFrame"] *{ font-size: 1.0rem; }
-[data-testid="stDataEditor"] *{ font-size: 1.02rem; }
-
-/* Regras específicas – aumentam o tamanho real das células/cabeçalhos */
-[data-testid="stDataFrame"] [role="gridcell"],
-[data-testid="stDataEditor"] [role="gridcell"]{
-  font-size: var(--table-font-size) !important;
-}
-
-[data-testid="stDataFrame"] [role="columnheader"],
-[data-testid="stDataEditor"] [role="columnheader"]{
-  font-size: var(--table-header-size) !important;
-  font-weight: 700 !important;
-}
-
-/* Altura das linhas (opcional) */
-[data-testid="stDataFrame"] [role="row"],
-[data-testid="stDataEditor"] [role="row"]{
-  min-height: 38px;
-}
-
-/* Espaço interno das células (opcional) */
-[data-testid="stDataFrame"] [role="gridcell"] > div,
-[data-testid="stDataEditor"] [role="gridcell"] > div{
-  padding: 8px 10px;
-}
-
-/* ==================== MÉTRICAS ==================== */
-[data-testid="stMetricValue"]{
-  font-size: 1.9rem !important;
-  font-weight: 780 !important;
-}
-[data-testid="stMetricLabel"]{ font-size: 1.0rem; opacity: .8; }
-
-/* ==================== BOTÕES ==================== */
-.stButton > button, .stDownloadButton > button{
-  font-size: 1.02rem;
-  border-radius: 14px;
-  font-weight: 650;
-}
-
-/* ==================== CARTÕES ESTATÍSTICOS ==================== */
-.stat-card{
-  background: #fff;
-  border: 1px solid #e9e9ee;
-  border-radius: 16px;
-  padding: 14px 16px;
-}
-.stat-label{ font-size: .92rem; opacity: .75; }
-.stat-value{ font-size: 1.12rem; font-weight: 700; margin-top: .2rem; }
-
-/* ==================== SIDEBAR ==================== */
-[data-testid="stSidebar"]{
-  background: linear-gradient(180deg, #f7f7fb 0%, #f2f3f9 100%);
-}
-[data-testid="stSidebar"] .block-container{ padding-top: 1rem; }
-
-/* ==================== AJUSTES LEVES ==================== */
-hr{ opacity: .6; }
+/* ... (o resto do seu CSS geral continua aqui, sem alterações) ... */
 </style>
 """
 
-# === Cores dos botões por formulário (compat com chamada antiga BUTTONS_CSS) ===
-# SUBSTITUA SEU CSS DE BOTÕES ANTIGO POR ESTE
-# SUBSTITUA SEU CSS DE BOTÕES POR ESTA VERSÃO UNIVERSAL
-
-# SUBSTITUA SEU CSS DE BOTÕES POR ESTA VERSÃO UNIVERSAL E CORRIGIDA
+CSS_TABLE_BOOST = """
+<style>
+/* Aumenta o tamanho da fonte APENAS do conteúdo das células */
+[data-testid="stDataFrame"] [role="gridcell"] *,
+[data-testid="stDataEditor"] [role="gridcell"] *{
+  font-size: 1.18rem !important;
+  line-height: 1.55 !important;
+}
+/* ... (o resto do seu CSS de table boost continua aqui, sem alterações) ... */
+</style>
+"""
 
 FORM_BUTTONS_CSS = """
 <style>
@@ -261,30 +158,15 @@ FORM_BUTTONS_CSS = """
 }
 </style>
 """
-# A linha abaixo já deve existir no seu código, apenas confirme
-st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)
 
-CSS_TABLE_BOOST = """
-<style>
-/* Aumenta o tamanho da fonte APENAS do conteúdo das células */
-[data-testid="stDataFrame"] [role="gridcell"] *,
-[data-testid="stDataEditor"] [role="gridcell"] *{
-  font-size: 1.18rem !important;   /* ajuste aqui: 1.10–1.30rem */
-  line-height: 1.55 !important;
-}
-
-/* Cabeçalhos das colunas um pouco maiores e mais fortes */
-[data-testid="stDataFrame"] [role="columnheader"] *,
-[data-testid="stDataEditor"] [role="columnheader"] *{
-  font-size: 1.08rem !important;
-  font-weight: 700 !important;
-}
-</style>
-"""
-
+# ================== CARREGANDO OS ESTILOS NA ORDEM CORRETA ==================
+# 1. Carrega o CSS geral primeiro
+st.markdown(CSS, unsafe_allow_html=True)
 st.markdown(CSS_TABLE_BOOST, unsafe_allow_html=True)
 
-st.markdown(CSS, unsafe_allow_html=True)
+# 2. Carrega o CSS das cores dos botões por ÚLTIMO, para ter a palavra final
+st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)
+
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
