@@ -1698,6 +1698,8 @@ def _apply_multi_service_changes(edited_df: pd.DataFrame, cong_id: int, start: d
 
 # SUBSTITUA SUA page_lancamentos PELA VERSÃO FINAL ABAIXO
 
+# SUBSTITUA SUA page_lancamentos PELA VERSÃO FINAL ABAIXO
+
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1727,7 +1729,6 @@ def page_lancamentos(user: "User"):
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
 
         if modo == "Formulário único":
-            # (Esta parte não foi alterada)
             target_cong_obj = parent_cong_obj
             contexto_selecionado = f"{parent_cong_obj.name} (Principal)"
             target_sub_cong_id = None
@@ -1806,19 +1807,18 @@ def page_lancamentos(user: "User"):
             
             st.markdown("##### Entradas (Dízimo e Oferta)")
             
-            # ===== CHECKBOX COM O NOVO TEXTO =====
             show_morning_service = st.checkbox("Trabalhos pela manhã (EBD, CO, FESTIVIDADES)", key=f"cb_manha_{parent_cong_obj.id}_{target_sub_cong_id}")
             
             df_full = _load_multi_service_data(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
 
             if show_morning_service:
-                # ===== VISÃO EXPANDIDA COM TOTAL DO DIA =====
+                # VISÃO EXPANDIDA (Manhã + Noite)
                 if not df_full.empty:
                     df_full['Total do Dia'] = df_full[['Dízimo (Manhã)', 'Oferta (Manhã)', 'Dízimo (Noite)', 'Oferta (Noite)']].sum(axis=1)
                 
                 cols_to_display = ["Data", "Dízimo (Manhã)", "Oferta (Manhã)", "Dízimo (Noite)", "Oferta (Noite)", "Total do Dia"]
                 column_config = {
-                    "Data": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
+                    "Data": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"), # <-- MUDANÇA AQUI
                     "Dízimo (Manhã)": st.column_config.NumberColumn("Dízimo (Manhã)", min_value=0.0, step=1.0, format="R$ %.2f"),
                     "Oferta (Manhã)": st.column_config.NumberColumn("Oferta (Manhã)", min_value=0.0, step=1.0, format="R$ %.2f"),
                     "Dízimo (Noite)": st.column_config.NumberColumn("Dízimo (Noite)", min_value=0.0, step=1.0, format="R$ %.2f"),
@@ -1827,7 +1827,7 @@ def page_lancamentos(user: "User"):
                 }
                 df_to_edit = df_full[cols_to_display] if not df_full.empty else pd.DataFrame(columns=cols_to_display)
             else:
-                # ===== VISÃO SIMPLES COM TOTAL =====
+                # VISÃO SIMPLES (Apenas Noite, com nomes simples)
                 df_simple = df_full.copy()
                 if not df_simple.empty:
                     df_simple = df_simple[["Data", "Dízimo (Noite)", "Oferta (Noite)"]]
@@ -1836,9 +1836,9 @@ def page_lancamentos(user: "User"):
                 
                 cols_to_display = ["Data", "Dízimo", "Oferta", "Total"]
                 column_config = {
-                    "Data": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
-                    "Dízimo": st.column_config.NumberColumn("Dízimo (Noite)", min_value=0.0, step=1.0, format="R$ %.2f"),
-                    "Oferta": st.column_config.NumberColumn("Oferta (Noite)", min_value=0.0, step=1.0, format="R$ %.2f"),
+                    "Data": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"), # <-- MUDANÇA AQUI
+                    "Dízimo": st.column_config.NumberColumn("Dízimo", min_value=0.0, step=1.0, format="R$ %.2f"), # <-- MUDANÇA AQUI
+                    "Oferta": st.column_config.NumberColumn("Oferta", min_value=0.0, step=1.0, format="R$ %.2f"), # <-- MUDANÇA AQUI
                     "Total": st.column_config.NumberColumn("Total", help="Soma do Dízimo e Oferta do dia. Atualizado após salvar.", format="R$ %.2f", disabled=True),
                 }
                 df_to_edit = df_simple[cols_to_display] if not df_simple.empty else pd.DataFrame(columns=cols_to_display)
@@ -1852,13 +1852,12 @@ def page_lancamentos(user: "User"):
                 column_config=column_config
             )
 
-            # A seção de métricas e o botão de salvar continuam como antes
-            # ... (código de métricas omitido para brevidade, pode manter o que já tem ou remover)
-
             def on_save_click():
+                # Remove colunas de total antes de salvar, pois são calculadas
                 df_to_process = edited_df.drop(columns=[col for col in ['Total', 'Total do Dia'] if col in edited_df.columns])
 
                 if 'Dízimo (Manhã)' not in df_to_process.columns:
+                    # Converte da visão simples para o formato completo para salvar
                     df_to_save = df_to_process.rename(columns={"Dízimo": "Dízimo (Noite)", "Oferta": "Oferta (Noite)"})
                     df_to_save["Dízimo (Manhã)"] = 0.0
                     df_to_save["Oferta (Manhã)"] = 0.0
