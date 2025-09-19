@@ -1,8 +1,10 @@
 # main.py — AD Relatório Financeiro — VERSÃO COMPLETA E CORRIGIDA
 
+# SUBSTITUA SEUS IMPORTS INICIAIS POR ESTE BLOCO CORRIGIDO
+
 from __future__ import annotations
 import hashlib
-from sqlalchemy import select, func, String, Date, Float, ForeignKey, create_engine, and_, case
+from sqlalchemy import select, func, String, Date, Float, ForeignKey, create_engine, and_, case, UniqueConstraint
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import relationship, Mapped, mapped_column, sessionmaker, joinedload, Session
 import os
