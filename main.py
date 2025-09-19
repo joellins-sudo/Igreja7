@@ -1687,6 +1687,8 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 
 # APAGUE SUA page_lancamentos ANTIGA E SUBSTITUA POR ESTA VERSÃO FINAL
 
+# SUBSTITUA SUA page_lancamentos INTEIRA POR ESTA VERSÃO CORRIGIDA
+
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1716,7 +1718,6 @@ def page_lancamentos(user: "User"):
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
 
         if modo == "Formulário único":
-            # (Esta parte se mantém para lançamentos de SAÍDAS e DÍZIMOS NOMINAIS)
             target_cong_obj = parent_cong_obj
             contexto_selecionado = f"{parent_cong_obj.name} (Principal)"
             target_sub_cong_id = None
@@ -1733,7 +1734,6 @@ def page_lancamentos(user: "User"):
 
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
                 with st.form("form_dizimo"):
-                    # (Formulário de dízimo continua igual)
                     dz_data = st.date_input("Data do Dízimo", value=today_bahia(), key="dz_data")
                     dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
                     dz_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="dz_valor")
@@ -1748,7 +1748,6 @@ def page_lancamentos(user: "User"):
 
             with st.expander("➖ Lançar SAÍDA"):
                 with st.form("form_saida"):
-                    # (Formulário de saída continua igual)
                     cats_out = categories_for_type(db, TYPE_OUT)
                     c1, c2 = st.columns(2)
                     with c1: sai_data = st.date_input("Data da Saída", value=today_bahia(), key="sai_data")
@@ -1783,6 +1782,13 @@ def page_lancamentos(user: "User"):
             df_logs = _load_service_logs(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
 
             tipos_de_culto = ["Culto da Noite (Padrão)", "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)", "Evento Especial", "Outro"]
+            
+            # ===== CORREÇÃO PARA A TABELA VAZIA =====
+            if df_logs.empty:
+                df_logs = pd.DataFrame(
+                    [{"Data do Culto": today_bahia(), "Tipo de Culto": tipos_de_culto[0], "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0, "ID": None}]
+                )
+            # ===== FIM DA CORREÇÃO =====
 
             edited_df = st.data_editor(
                 df_logs,
@@ -1807,7 +1813,6 @@ def page_lancamentos(user: "User"):
 
             _save_btn(on_save_click, f"lan_tab_logs_{parent_cong_obj.id}_{target_sub_cong_id}", "entrada")
 
-            # Os outros editores (Dizimistas e Saídas) continuam exatamente iguais
             st.markdown("---")
             tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id == target_sub_cong_id)
             tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
