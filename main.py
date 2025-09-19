@@ -11,37 +11,25 @@
 # Obs.: Todo o restante do seu código foi preservado. Itens que você pediu antes
 # (ex.: esconder "ajuste" na ENTRADA, relatórios agregados editáveis da SEDE, etc.) continuam iguais.
 
+# COLE ESTE BLOCO INTEIRO NO LUGAR DO CABEÇALHO DO SEU ARQUIVO
+
 from __future__ import annotations
-# ===== UI extra (menu bonito com fallback) =====
-try:
-    import streamlit_antd_components as sac  # pip install streamlit-antd-components
-except Exception:
-    sac = None  # fallback p/ radio padrão
 import hashlib
-from sqlalchemy import select
-# ... outras importações ...
-from sqlalchemy import select, func, String, Date, Float, ForeignKey, create_engine, and_
-from sqlalchemy.exc import IntegrityError  # <-- ADICIONE ESTA LINHA
+from sqlalchemy import select, func, String, Date, Float, ForeignKey, create_engine, and_, case
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import relationship, Mapped, mapped_column, sessionmaker, joinedload, Session
-# ...
 import os
 from datetime import date, timedelta, datetime
 from typing import Optional, List, Tuple, Dict, Any
-from collections import defaultdict, Counter
+from collections import defaultdict
 import locale as _locale
 import pandas as pd
 import streamlit as st
-
-from sqlalchemy import select, func, String, Date, Float, ForeignKey, create_engine, and_
-from sqlalchemy.orm import relationship, Mapped, mapped_column, sessionmaker, joinedload, Session
 from sqlalchemy.orm import DeclarativeBase
 import unicodedata as ud
-import hashlib
 import json, base64, hmac, time
-
-# PDF
 from io import BytesIO
-from reportlab.lib.pagesizes import A4, portrait
+from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.units import cm
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -64,55 +52,51 @@ ADJ_HIER_ENTRY_DESC = "[Ajuste via Relatório Hierárquico (Entrada)]"
 ADJ_HIER_OUT_DESC = "[Ajuste via Relatório Hierárquico (Saída)]"
 
 # ===================== ST CONFIG / THEME =====================
-# ===================== ST CONFIG / THEME =====================
-
-st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
-
-# ================== CSS do cartão de login (estilo SEI) ==================
-# ================== CSS do cartão de login (estilo ADRF) ==================
-# ================== LOGIN SEI: CSS/HTML (trabalhando com Streamlit) ==================
-# ================== LOGIN ADRF: CSS/HTML ==================
-# SUBSTITUA TODA A SEÇÃO DE CSS NO TOPO DO SEU ARQUIVO POR ESTE BLOCO CORRIGIDO
-
-# ===================== ST CONFIG / THEME =====================
 st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
 
 # ================== DEFINIÇÃO DOS BLOCOS DE CSS ==================
-ADRF_LOGIN_CSS = """
-<style>
-  :root{
-    --azul-1:#1f6feb; --azul-2:#185fcd; --azul-esc:#0b4b9a;
-    --cinza-bg:#f0f0f0; --cinza-borda:#dfe3ea; --cinza-ico:#e9ecef; --texto:#344054;
-  }
-  /* ... (o resto do seu CSS de login continua aqui, sem alterações) ... */
-</style>
-"""
 
 CSS = """
 <style>
 /* ==================== BASE / TIPOGRAFIA ==================== */
 :root{
   --base-font: 17px;
-  --table-font-size: 1.90rem;
+  --table-font-size: 1.18rem;
   --table-header-size: 1.08rem;
 }
 html, body, [data-testid="stAppViewContainer"]{
   font-size: var(--base-font);
   line-height: 1.45;
 }
-/* ... (o resto do seu CSS geral continua aqui, sem alterações) ... */
-</style>
-"""
-
-CSS_TABLE_BOOST = """
-<style>
-/* Aumenta o tamanho da fonte APENAS do conteúdo das células */
-[data-testid="stDataFrame"] [role="gridcell"] *,
-[data-testid="stDataEditor"] [role="gridcell"] *{
-  font-size: 1.18rem !important;
-  line-height: 1.55 !important;
+.page-title, h1{ font-size: 2.0rem; font-weight: 800 !important; }
+h2{ font-size: 1.45rem; font-weight: 750; }
+h3{ font-size: 1.25rem; font-weight: 700; }
+/* ... (outros estilos gerais podem ser adicionados aqui) ... */
+[data-testid="stSidebar"] *{ font-size: 1.02rem; }
+label, [data-testid="stWidgetLabel"]{ font-size: 1.02rem; }
+.stTextInput input, .stNumberInput input, .stDateInput input, .stSelectbox div, .stMultiSelect div {
+  font-size: 1.02rem !important;
 }
-/* ... (o resto do seu CSS de table boost continua aqui, sem alterações) ... */
+[data-testid="stDataFrame"] [role="gridcell"], [data-testid="stDataEditor"] [role="gridcell"]{
+  font-size: var(--table-font-size) !important;
+}
+[data-testid="stDataFrame"] [role="columnheader"], [data-testid="stDataEditor"] [role="columnheader"]{
+  font-size: var(--table-header-size) !important;
+  font-weight: 700 !important;
+}
+[data-testid="stMetricValue"]{
+  font-size: 1.9rem !important;
+  font-weight: 780 !important;
+}
+[data-testid="stMetricLabel"]{ font-size: 1.0rem; opacity: .8; }
+.stButton > button, .stDownloadButton > button{
+  font-size: 1.02rem;
+  border-radius: 14px;
+  font-weight: 650;
+}
+[data-testid="stSidebar"]{
+  background: linear-gradient(180deg, #f7f7fb 0%, #f2f3f9 100%);
+}
 </style>
 """
 
@@ -162,7 +146,6 @@ FORM_BUTTONS_CSS = """
 # ================== CARREGANDO OS ESTILOS NA ORDEM CORRETA ==================
 # 1. Carrega o CSS geral primeiro
 st.markdown(CSS, unsafe_allow_html=True)
-st.markdown(CSS_TABLE_BOOST, unsafe_allow_html=True)
 
 # 2. Carrega o CSS das cores dos botões por ÚLTIMO, para ter a palavra final
 st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)
@@ -170,6 +153,8 @@ st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
+
+# O resto do seu código (def _set_locale_ptbr():, etc.) continua normalmente...
 
 # ===================== LOCALE (fallback) =====================
 def _set_locale_ptbr():
