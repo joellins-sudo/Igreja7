@@ -264,12 +264,6 @@ FORM_BUTTONS_CSS = """
 # A linha abaixo já deve existir no seu código, apenas confirme
 st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)
 
-# Alias para manter compatibilidade com a linha 256
-BUTTONS_CSS = FORM_BUTTONS_CSS
-
-
-st.markdown(BUTTONS_CSS, unsafe_allow_html=True)
-
 CSS_TABLE_BOOST = """
 <style>
 /* Aumenta o tamanho da fonte APENAS do conteúdo das células */
@@ -1628,6 +1622,8 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 
 # SUBSTITUA SUA page_lancamentos PELA VERSÃO ATUALIZADA
 
+# SUBSTITUA SUA page_lancamentos INTEIRA PELA VERSÃO CORRIGIDA ABAIXO
+
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1790,6 +1786,7 @@ def page_lancamentos(user: "User"):
                 _apply_service_log_changes(df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id)
                 st.rerun()
 
+            # ===== BOTÃO CORRIGIDO COM A CLASSE CSS =====
             st.markdown('<div class="adrf-entrada">', unsafe_allow_html=True)
             st.button("Salvar alterações na tabela", on_click=on_save_click, key=f"save_table_{parent_cong_obj.id}")
             st.markdown('</div>', unsafe_allow_html=True)
