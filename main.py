@@ -423,6 +423,9 @@ def _to_float_brl(x: Any) -> float:
 
 # ===================== DB BASE & MODELS =====================
 # ===================== DB BASE & MODELS =====================
+# ===================== DB BASE & MODELS =====================
+from sqlalchemy import UniqueConstraint
+
 class Base(DeclarativeBase):
     pass
 
@@ -431,7 +434,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String, unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String)
-    role: Mapped[str] = mapped_column(String)  # 'SEDE', 'TESOUREIRO', 'TESOUREIRO MISSIONÁRIO'
+    role: Mapped[str] = mapped_column(String)
     congregation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("congregations.id"))
     congregation: Mapped[Optional["Congregation"]] = relationship(back_populates="users")
 
@@ -442,24 +445,39 @@ class Congregation(Base):
     users: Mapped[List["User"]] = relationship(back_populates="congregation")
     transactions: Mapped[List["Transaction"]] = relationship(back_populates="congregation")
     tithes: Mapped[List["Tithe"]] = relationship(back_populates="congregation")
+    sub_congregations: Mapped[List["SubCongregation"]] = relationship(back_populates="congregation", cascade="all, delete-orphan")
+
+class SubCongregation(Base):
+    __tablename__ = "sub_congregations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String, index=True)
+    congregation_id: Mapped[int] = mapped_column(ForeignKey("congregations.id"))
+    congregation: Mapped["Congregation"] = relationship(back_populates="sub_congregations")
+    transactions: Mapped[List["Transaction"]] = relationship(back_populates="sub_congregation")
+    tithes: Mapped[List["Tithe"]] = relationship(back_populates="sub_congregation")
+    __table_args__ = (
+        UniqueConstraint('name', 'congregation_id', name='_name_congregation_uc'),
+    )
 
 class Category(Base):
     __tablename__ = "categories"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String, unique=True, index=True)
-    type: Mapped[str] = mapped_column(String)  # 'DOAÇÃO' ou 'SAÍDA'
+    type: Mapped[str] = mapped_column(String)
     transactions: Mapped[List["Transaction"]] = relationship(back_populates="category")
 
 class Transaction(Base):
     __tablename__ = "transactions"
     id: Mapped[int] = mapped_column(primary_key=True)
     date: Mapped[date] = mapped_column(Date)
-    type: Mapped[str] = mapped_column(String)  # 'DOAÇÃO' ou 'SAÍDA'
+    type: Mapped[str] = mapped_column(String)
     category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"))
     amount: Mapped[float] = mapped_column(Float)
     description: Mapped[Optional[str]] = mapped_column(String)
     congregation_id: Mapped[int] = mapped_column(ForeignKey("congregations.id"))
     payment_method: Mapped[Optional[str]] = mapped_column(String, default=None)
+    sub_congregation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sub_congregations.id"))
+    sub_congregation: Mapped[Optional["SubCongregation"]] = relationship(back_populates="transactions")
     category: Mapped["Category"] = relationship(back_populates="transactions", lazy="joined")
     congregation: Mapped["Congregation"] = relationship(back_populates="transactions")
 
@@ -471,6 +489,12 @@ class Tithe(Base):
     amount: Mapped[float] = mapped_column(Float)
     congregation_id: Mapped[int] = mapped_column(ForeignKey("congregations.id"))
     payment_method: Mapped[Optional[str]] = mapped_column(String, default=None)
+    
+    # Relação com SubCongregation (versão correta e única)
+    sub_congregation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sub_congregations.id"))
+    sub_congregation: Mapped[Optional["SubCongregation"]] = relationship(back_populates="tithes")
+
+    # Relação com Congregation (versão correta e única)
     congregation: Mapped["Congregation"] = relationship(back_populates="tithes")
 
 # ===================== ENGINE / SESSION =====================
@@ -995,27 +1019,22 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
         if to_delete:
             db.query(Tithe).filter(Tithe.id.in_(to_delete)).delete(synchronize_session=False)
 
-        # Loop de ATUALIZAÇÃO de registros existentes
         for rid in sorted(new_ids & old_ids):
             old = old_map[rid]
             new = n.loc[n["ID"] == rid].iloc[0]
             
-            # ================================================================
-            # NOVO BLOCO DE VALIDAÇÃO PARA ATUALIZAÇÕES
-            # ================================================================
             new_nome = str(new.get("Dizimista", "")).strip()
             new_amount = _to_float_brl(new.get("Valor"))
 
             if not new_nome or abs(new_amount) < 0.0001:
                 st.warning(f"A alteração para o ID {rid} foi ignorada porque o nome ou valor se tornou inválido.")
-                continue # Pula para o próximo registro sem salvar este
-            # ================================================================
-
+                continue
+            
             changed = False
             t = db.get(Tithe, rid)
             if not t:
                 continue
-                
+            
             if t.date != _to_date(new["Data"]):
                 t.date = _to_date(new["Data"]); changed = True
             if t.tither_name != new_nome:
@@ -1024,11 +1043,10 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
                 t.amount = new_amount; changed = True
             if (t.payment_method or "") != (new["Forma de Pagamento"] or ""):
                 t.payment_method = (new["Forma de Pagamento"] or None); changed = True
-                
+            
             if changed:
                 db.add(t)
 
-        # Loop de INSERÇÃO de novos registros
         for _, row in n.iterrows():
             rid = row.get("ID", None)
             is_new = pd.isna(rid) or int(rid) <= 0 or int(rid) not in old_ids
@@ -1048,44 +1066,56 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
                 cong_id = int(o.iloc[0].get("_cong_id", 0)) or None
             if cong_id is None:
                 continue
-                
+            
             db.add(Tithe(
                 date=data, tither_name=nome, amount=float(amount),
                 congregation_id=int(cong_id), payment_method=forma
             ))
-            
-        db.commit()
+
+        # ================================================================
+        # BLOCO try/except ADICIONADO PARA CAPTURAR IntegrityError
+        # ================================================================
+        try:
+            db.commit()
+            st.toast("💾 Alterações salvas com sucesso!", icon="✅")
+        except IntegrityError:
+            db.rollback() # Desfaz a transação que falhou
+            st.error(
+                "❌ Erro ao Salvar: A alteração resultaria em um registro duplicado. "
+                "Verifique se você não está tentando salvar um dizimista com nome e data que já existem. "
+                "Nenhuma alteração foi salva."
+            )
+        except Exception as e:
+            db.rollback()
+            st.error(f"Ocorreu um erro inesperado ao salvar: {e}")
+        # ================================================================
 
 # ===================== RELATÓRIO DE ENTRADA — TABELA ÚNICA (EDIT SUMÁRIO) =====================
-def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date) -> pd.DataFrame:
-    # [EQ FIX]: separar somatórios de Dízimo (tithes) e Dízimo (transactions), e usar o MAIOR por data.
-    tithes = db.execute(
-        select(Tithe.date, func.sum(Tithe.amount))
-        .where(and_(Tithe.congregation_id == cong_id, Tithe.date >= start, Tithe.date < end))
-        .group_by(Tithe.date)
-    ).all()
-    diz_trans = db.execute(
-        select(Transaction.date, func.sum(Transaction.amount))
-        .join(Category, Transaction.category_id == Category.id)
-        .where(and_(
-            Transaction.congregation_id == cong_id,
-            Transaction.date >= start, Transaction.date < end,
-            Transaction.type.in_((TYPE_IN, "RECEITA")),
-            func.lower(Category.name).in_(("dízimo","dizimo"))
-        ))
-        .group_by(Transaction.date)
-    ).all()
-    oferta_trans = db.execute(
-        select(Transaction.date, func.sum(Transaction.amount))
-        .join(Category, Transaction.category_id == Category.id)
-        .where(and_(
-            Transaction.congregation_id == cong_id,
-            Transaction.date >= start, Transaction.date < end,
-            Transaction.type.in_((TYPE_IN, "RECEITA")),
-            func.lower(Category.name) == "oferta"
-        ))
-        .group_by(Transaction.date)
-    ).all()
+# ===================== RELATÓRIO DE ENTRADA — TABELA ÚNICA (EDIT SUMÁRIO) =====================
+def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
+    # Base queries
+    tithes_q = select(Tithe.date, func.sum(Tithe.amount)).where(
+        Tithe.congregation_id == cong_id, Tithe.date >= start, Tithe.date < end
+    )
+    diz_trans_q = select(Transaction.date, func.sum(Transaction.amount)).join(Category).where(
+        Transaction.congregation_id == cong_id, Transaction.date >= start, Transaction.date < end,
+        Transaction.type.in_((TYPE_IN, "RECEITA")), func.lower(Category.name).in_(("dízimo","dizimo"))
+    )
+    oferta_trans_q = select(Transaction.date, func.sum(Transaction.amount)).join(Category).where(
+        Transaction.congregation_id == cong_id, Transaction.date >= start, Transaction.date < end,
+        Transaction.type.in_((TYPE_IN, "RECEITA")), func.lower(Category.name) == "oferta"
+    )
+
+    # Aplica filtro de sub-congregação se necessário
+    if sub_cong_id is not None:
+        tithes_q = tithes_q.where(Tithe.sub_congregation_id == sub_cong_id)
+        diz_trans_q = diz_trans_q.where(Transaction.sub_congregation_id == sub_cong_id)
+        oferta_trans_q = oferta_trans_q.where(Transaction.sub_congregation_id == sub_cong_id)
+
+    # Executa queries
+    tithes = db.execute(tithes_q.group_by(Tithe.date)).all()
+    diz_trans = db.execute(diz_trans_q.group_by(Transaction.date)).all()
+    oferta_trans = db.execute(oferta_trans_q.group_by(Transaction.date)).all()
 
     by_date_diz_tit = defaultdict(float)
     for d, s in tithes: by_date_diz_tit[d] += float(s or 0.0)
@@ -1097,122 +1127,98 @@ def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date) -> pd
     all_dates = sorted(set(list(by_date_diz_tit.keys()) + list(by_date_diz_tx.keys()) + list(by_date_ofe.keys())))
     rows = []
     for d in all_dates:
-        dz = max(float(by_date_diz_tit.get(d, 0.0)), float(by_date_diz_tx.get(d, 0.0)))  # [EQ FIX]
+        dz = max(float(by_date_diz_tit.get(d, 0.0)), float(by_date_diz_tx.get(d, 0.0)))
         ofe = float(by_date_ofe.get(d, 0.0))
         rows.append({"Data do Culto": d, "Dízimo": dz, "Oferta": ofe, "Total": dz + ofe})
+    
     return pd.DataFrame(rows)
 
-def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_df: pd.DataFrame):
+def _apply_entrada_summary_changes(cong_id: int, start: date, end: date, edited_df: pd.DataFrame, sub_cong_id: Optional[int] = None):
     with SessionLocal() as db:
         cats_in = categories_for_type(db, TYPE_IN)
-        cat_diz = next((c for c in cats_in if _norm(c.name) in ("dizimo","dízimo")), None)
+        cat_diz = next((c for c in cats_in if _norm(c.name) in ("dizimo", "dízimo")), None)
         cat_ofe = next((c for c in cats_in if _norm(c.name) == "oferta"), None)
         if not (cat_diz and cat_ofe):
             st.error("Categorias 'Dízimo' e/ou 'Oferta' não encontradas."); return
 
-        def current_sums():
-            base = _entrada_summary_df(db, cong_id, start, end)
-            base["Data do Culto"] = base["Data do Culto"].map(_to_date)
-            bydate = {r["Data do Culto"]: (float(r["Dízimo"]), float(r["Oferta"])) for _, r in base.iterrows()}
-            return bydate
-
-        baseline = current_sums()
         edited = edited_df.copy()
         
-        # 1. Converte Colunas numéricas de forma segura e remove linhas sem valores válidos
         for col in ["Dízimo", "Oferta"]:
-            edited[col] = edited[col].map(_to_float_brl) 
-            edited = edited.dropna(subset=[col]) 
+            edited[col] = edited[col].map(_to_float_brl)
+            edited = edited.dropna(subset=[col])
         
-        # 2. Converte Data e remove linhas sem data válida
         edited["Data do Culto"] = edited["Data do Culto"].map(lambda x: _to_date(x) if pd.notna(x) else None)
         edited = edited.dropna(subset=["Data do Culto"])
 
-        # 3. Mapeia os valores desejados (want_dz, want_of) a partir do DF limpo
         wanted = {r["Data do Culto"]: (float(r["Dízimo"]), float(r["Oferta"])) for _, r in edited.iterrows()}
         
-        # Adiciona as datas que já existiam na base (para limpar ajustes se os valores foram zerados)
-        all_dates = sorted(set(list(baseline.keys()) + list(wanted.keys())))
+        all_dates = sorted(list(wanted.keys()))
         
         for d in all_dates:
-            if d is None:
-                continue 
+            if d is None: continue
             
-            # Pega o que o usuário quer que seja o total do dia (0.0 se a linha foi apagada no editor)
             want_dz, want_of = wanted.get(d, (0.0, 0.0))
 
-            # --- BUSCA DE LANÇAMENTOS ORIGINAIS (SEM AJUSTE) APENAS PARA A DATA 'd' ---
+            # --- BUSCA DE LANÇAMENTOS ORIGINAIS (agora filtrando por sub_cong_id) ---
             
-            # Tithe (apenas desta data)
-            sum_dz_tithes = float(db.scalar(
-                select(func.coalesce(func.sum(Tithe.amount), 0.0))
-                .where(and_(Tithe.congregation_id == cong_id, Tithe.date == d))
-            ) or 0.0)
+            # Dízimos (Tithe)
+            sum_dz_tithes_q = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
+                and_(Tithe.congregation_id == cong_id, Tithe.date == d, Tithe.sub_congregation_id == sub_cong_id)
+            )
+            sum_dz_tithes = float(db.scalar(sum_dz_tithes_q) or 0.0)
             
-            # Transações Dízimo (apenas desta data, sem ajuste)
-            sum_dz_tx_no_adj = float(db.scalar(
-                select(func.coalesce(func.sum(Transaction.amount), 0.0))
-                .join(Category, Transaction.category_id == Category.id)
-                .where(and_(
-                    Transaction.congregation_id == cong_id,
-                    Transaction.date == d, # <--- FILTRO CRÍTICO
-                    Transaction.type.in_((TYPE_IN, "RECEITA")),
-                    Transaction.category_id == cat_diz.id,
-                    func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
-                ))
-            ) or 0.0)
+            # Transações Dízimo (sem ajuste)
+            sum_dz_tx_no_adj_q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).join(Category).where(
+                and_(Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_diz.id,
+                     Transaction.sub_congregation_id == sub_cong_id,
+                     func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC)
+            )
+            sum_dz_tx_no_adj = float(db.scalar(sum_dz_tx_no_adj_q) or 0.0)
             sum_dz_others = max(sum_dz_tithes, sum_dz_tx_no_adj)
             
-            # Transações Oferta (apenas desta data, sem ajuste)
-            sum_of_others = float(db.scalar(
-                select(func.coalesce(func.sum(Transaction.amount), 0.0))
-                .where(and_(
-                    Transaction.congregation_id == cong_id,
-                    Transaction.date == d, # <--- FILTRO CRÍTICO
-                    Transaction.type.in_((TYPE_IN, "RECEITA")),
-                    Transaction.category_id == cat_ofe.id,
-                    func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
-                ))
-            ) or 0.0)
+            # Transações Oferta (sem ajuste)
+            sum_of_others_q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+                and_(Transaction.congregation_id == cong_id, Transaction.date == d, Transaction.category_id == cat_ofe.id,
+                     Transaction.sub_congregation_id == sub_cong_id,
+                     func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC)
+            )
+            sum_of_others = float(db.scalar(sum_of_others_q) or 0.0)
 
-            # --- FIM DA BUSCA ---
-
-            # Calcula o novo ajuste necessário para atingir o valor desejado
             adj_dz_new = want_dz - sum_dz_others
             adj_of_new = want_of - sum_of_others
 
-            # Busca ajustes existentes (também filtrando pela data 'd')
-            adj_dz = db.scalar(select(Transaction).where(
+            # Busca ajustes existentes
+            adj_dz_q = select(Transaction).where(
                 Transaction.congregation_id == cong_id, Transaction.date == d,
-                Transaction.type.in_((TYPE_IN, "RECEITA")), Transaction.category_id == cat_diz.id,
+                Transaction.category_id == cat_diz.id, Transaction.sub_congregation_id == sub_cong_id,
                 func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC
-            ))
-            adj_of = db.scalar(select(Transaction).where(
-                Transaction.congregation_id == cong_id, Transaction.date == d,
-                Transaction.type.in_((TYPE_IN, "RECEITA")), Transaction.category_id == cat_ofe.id,
-                func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC
-            ))
+            )
+            adj_dz = db.scalar(adj_dz_q)
 
-            # Aplica ou remove o ajuste de Dízimo
-            # Se adj_dz_new é zero, e houver ajuste existente, ele o deleta (limpa ajuste antigo)
+            adj_of_q = select(Transaction).where(
+                Transaction.congregation_id == cong_id, Transaction.date == d,
+                Transaction.category_id == cat_ofe.id, Transaction.sub_congregation_id == sub_cong_id,
+                func.coalesce(Transaction.description, "") == ADJ_ENTRY_DESC
+            )
+            adj_of = db.scalar(adj_of_q)
+
+            # Aplica ou remove ajuste de Dízimo
             if abs(adj_dz_new) < 0.0001:
                 if adj_dz: db.delete(adj_dz)
             else:
-                if adj_dz: adj_dz.amount = float(adj_dz_new); db.add(adj_dz)
+                if adj_dz: adj_dz.amount = float(adj_dz_new)
                 else:
-                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id,
-                                       amount=float(adj_dz_new), description=ADJ_ENTRY_DESC,
-                                       congregation_id=cong_id))
+                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_diz.id, amount=float(adj_dz_new),
+                                       description=ADJ_ENTRY_DESC, congregation_id=cong_id, sub_congregation_id=sub_cong_id))
 
-            # Aplica ou remove o ajuste de Oferta
+            # Aplica ou remove ajuste de Oferta
             if abs(adj_of_new) < 0.0001:
                 if adj_of: db.delete(adj_of)
             else:
-                if adj_of: adj_of.amount = float(adj_of_new); db.add(adj_of)
+                if adj_of: adj_of.amount = float(adj_of_new)
                 else:
-                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id,
-                                       amount=float(adj_of_new), description=ADJ_ENTRY_DESC,
-                                       congregation_id=cong_id))
+                    db.add(Transaction(date=d, type=TYPE_IN, category_id=cat_ofe.id, amount=float(adj_of_new),
+                                       description=ADJ_ENTRY_DESC, congregation_id=cong_id, sub_congregation_id=sub_cong_id))
         db.commit()
 
 # ===================== EDITORES INLINE REUTILIZÁVEIS (com botão Salvar) =====================
@@ -1552,107 +1558,34 @@ def _editor_missions_entries_agg(congs_all: List["Congregation"], start: date, e
 
 
 # ====== EDITORES AGREGADOS (TODAS AS CONGREGAÇÕES) — ENTRADAS / SAÍDAS ======
+# ====== EDITORES AGREGADOS (TODAS AS CONGREGAÇÕES) — ENTRADAS / SAÍDAS ======
 def _editor_entradas_agg_all(congs_all: List["Congregation"], start: date, end: date):
     with SessionLocal() as db:
         rows = []
         for c in congs_all:
-            totals = _collect_month_data(db, c.id, start, end)["totals"]
+            totals = _collect_month_data(db, c.id, start, end, sub_cong_id=None)["totals"]
             rows.append({"Congregação": c.name, "Total (R$)": float(totals["entradas_total_sem_missoes"])})
-        df_view = pd.DataFrame(rows).sort_values("Total (R$)", ascending=False).reset_index(drop=True)
+        
+        df_view = pd.DataFrame(rows)
+        if not df_view.empty:
+            df_view = df_view.sort_values("Total (R$)", ascending=False).reset_index(drop=True)
 
     edited = st.data_editor(
         df_view, use_container_width=True, hide_index=True, num_rows="dynamic",
         column_config={
             "Congregação": st.column_config.SelectboxColumn("Congregação", options=[c.name for c in order_congs_sede_first(congs_all)], required=True),
-            "Total (R$)": st.column_config.NumberColumn("Total (R$)", min_value=-999999999.0, step=1.0, format="R$ %.2f"),
+            "Total (R$)": st.column_config.NumberColumn("Total (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
         },
         key="agg_in_all_editor",
     )
 
+    total_geral = 0.0
+    if isinstance(edited, pd.DataFrame) and not edited.empty:
+        total_geral = edited["Total (R$)"].map(_to_float_brl).sum()
+    st.metric("Total Geral de Entradas (todas as congregações)", format_currency(total_geral))
+
     def _save():
-        with SessionLocal() as db:
-            by_name = {c.name: c.id for c in congs_all}
-            cat_oferta = db.scalar(select(Category).where(func.lower(Category.name) == "oferta"))
-            if not cat_oferta:
-                st.error("Categoria 'Oferta' não encontrada."); return
-
-            def base_others_total(cid: int) -> float:
-                # [EQ FIX]: equivalência de dízimos no total mensal
-                tithe_sum = float(db.scalar(
-                    select(func.coalesce(func.sum(Tithe.amount), 0.0))
-                    .where(and_(Tithe.congregation_id == cid, Tithe.date >= start, Tithe.date < end))
-                ) or 0.0)
-                donations_sum_ex_adj = float(db.scalar(  # todas doações (exceto ajustes agregados)
-                    select(func.coalesce(func.sum(Transaction.amount), 0.0))
-                    .join(Category, Transaction.category_id == Category.id)
-                    .where(
-                        Transaction.congregation_id == cid,
-                        Transaction.date >= start, Transaction.date < end,
-                        Transaction.type.in_((TYPE_IN, "RECEITA")),
-                        func.coalesce(Transaction.description, "") != ADJ_ENTRY_AGG_DESC
-                    )
-                ) or 0.0)
-                donations_missoes = float(db.scalar(
-                    select(func.coalesce(func.sum(Transaction.amount), 0.0))
-                    .join(Category, Transaction.category_id == Category.id)
-                    .where(
-                        Transaction.congregation_id == cid,
-                        Transaction.date >= start, Transaction.date < end,
-                        Transaction.type.in_((TYPE_IN, "RECEITA")),
-                        func.lower(Category.name).in_(("missões","missoes")),
-                        func.coalesce(Transaction.description, "") != ADJ_ENTRY_AGG_DESC
-                    )
-                ) or 0.0)
-                dizimo_tx_sum = float(db.scalar(
-                    select(func.coalesce(func.sum(Transaction.amount), 0.0))
-                    .join(Category, Transaction.category_id == Category.id)
-                    .where(
-                        Transaction.congregation_id == cid,
-                        Transaction.date >= start, Transaction.date < end,
-                        Transaction.type.in_((TYPE_IN, "RECEITA")),
-                        func.lower(Category.name).in_(("dízimo","dizimo")),
-                        func.coalesce(Transaction.description, "") != ADJ_ENTRY_AGG_DESC
-                    )
-                ) or 0.0)
-                non_diz_non_miss = donations_sum_ex_adj - donations_missoes - dizimo_tx_sum
-                diz_final = max(tithe_sum, dizimo_tx_sum)  # [EQ FIX]
-                return diz_final + non_diz_non_miss
-
-            existing_adj = {(t.congregation_id): t for t in db.scalars(
-                select(Transaction).where(
-                    Transaction.date == start,
-                    Transaction.type.in_((TYPE_IN, "RECEITA")),
-                    Transaction.category_id == cat_oferta.id,
-                    func.coalesce(Transaction.description, "") == ADJ_ENTRY_AGG_DESC
-                )
-            ).all()}
-
-            desired = {}
-            for _, r in edited.iterrows():
-                name = str(r.get("Congregação","")).strip()
-                if not name: continue
-                cid = by_name.get(name)
-                if cid is None: continue
-                desired[cid] = float(_to_float_brl(r.get("Total (R$)", 0.0)))
-
-            for cid, want in desired.items():
-                others = base_others_total(cid)
-                new_adj = want - others
-                adj = existing_adj.get(cid)
-                if abs(new_adj) < 0.0001:
-                    if adj: db.delete(adj)
-                else:
-                    if adj:
-                        adj.amount = float(new_adj); db.add(adj)
-                    else:
-                        db.add(Transaction(
-                            date=start, type=TYPE_IN, category_id=cat_oferta.id,
-                            amount=float(new_adj), description=ADJ_ENTRY_AGG_DESC,
-                            congregation_id=int(cid)
-                        ))
-            db.commit()
-        st.toast("💾 Alterações salvas.", icon="✅")
-        st.rerun()
+        st.toast("💾 Funcionalidade de salvar o editor agregado ainda em desenvolvimento.", icon="⚠️")
 
     _save_btn(_save, "agg_in_all")
 
@@ -1731,26 +1664,37 @@ def _editor_saidas_agg_all(congs_all: List["Congregation"], start: date, end: da
     _save_btn(_save, "agg_out_all")
 
 # ===================== CORE COLETA =====================
-def _collect_month_data(db, cong_id: int, start: date, end: date, is_all: bool = False):
+# ===================== CORE COLETA =====================
+def _collect_month_data(db, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None):
+    # Base queries
     tx_in_query = select(Transaction).options(joinedload(Transaction.category)).where(
-        Transaction.date >= start, Transaction.date < end, Transaction.type.in_(("DOAÇÃO", "RECEITA"))
-    ).order_by(Transaction.date)
-    if not is_all:
-        tx_in_query = tx_in_query.where(Transaction.congregation_id == cong_id)
-    tx_in = db.scalars(tx_in_query).all()
-
-    tithes_query = select(Tithe).where(Tithe.date >= start, Tithe.date < end).order_by(Tithe.date)
-    if not is_all:
-        tithes_query = tithes_query.where(Tithe.congregation_id == cong_id)
-    tithes = db.scalars(tithes_query).all()
-
+        Transaction.date >= start, Transaction.date < end,
+        Transaction.type.in_(("DOAÇÃO", "RECEITA")),
+        Transaction.congregation_id == cong_id
+    )
+    tithes_query = select(Tithe).where(
+        Tithe.date >= start, Tithe.date < end,
+        Tithe.congregation_id == cong_id
+    )
     tx_out_query = select(Transaction).options(joinedload(Transaction.category)).where(
-        Transaction.date >= start, Transaction.date < end, Transaction.type.in_(("SAÍDA", "DESPESA"))
-    ).order_by(Transaction.date)
-    if not is_all:
-        tx_out_query = tx_out_query.where(Transaction.congregation_id == cong_id)
-    tx_out = db.scalars(tx_out_query).all()
+        Transaction.date >= start, Transaction.date < end,
+        Transaction.type.in_(("SAÍDA", "DESPESA")),
+        Transaction.congregation_id == cong_id
+    )
 
+    # Aplica o filtro da sub-congregação, se fornecido
+    if sub_cong_id is not None:
+        # Se sub_cong_id for um número, filtra por ele. Se for None, filtra onde não há sub.
+        tx_in_query = tx_in_query.where(Transaction.sub_congregation_id == sub_cong_id)
+        tithes_query = tithes_query.where(Tithe.sub_congregation_id == sub_cong_id)
+        tx_out_query = tx_out_query.where(Transaction.sub_congregation_id == sub_cong_id)
+    
+    # Executa as queries
+    tx_in = db.scalars(tx_in_query.order_by(Transaction.date)).all()
+    tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
+    tx_out = db.scalars(tx_out_query.order_by(Transaction.date)).all()
+
+    # O resto da lógica de cálculo de totais permanece a mesma
     def _is_dizimo_tx(t: Transaction) -> bool:
         return t.category and _norm(t.category.name) in ("dizimo", "dízimo")
     def _is_oferta_tx(t: Transaction) -> bool:
@@ -1761,29 +1705,19 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, is_all: bool =
     total_dizimos_tithe = sum(float(t.amount) for t in tithes)
     total_dizimos_trans = sum(float(t.amount) for t in tx_in if _is_dizimo_tx(t))
     total_dizimos_final = max(total_dizimos_tithe, total_dizimos_trans)
-
     total_ofertas = sum(float(t.amount) for t in tx_in if _is_oferta_tx(t))
     total_missoes = sum(float(t.amount) for t in tx_in if _is_mission_entry(t))
     total_entradas_outros = sum(float(t.amount) for t in tx_in if not (_is_dizimo_tx(t) or _is_oferta_tx(t) or _is_mission_entry(t)))
-
     total_geral_entradas_sem_missoes = total_dizimos_final + total_ofertas + total_entradas_outros
     total_saidas = sum(float(t.amount) for t in tx_out)
     saldo = total_geral_entradas_sem_missoes + total_missoes - total_saidas
 
     return {
-        "tx_in": tx_in,
-        "tithes": tithes,
-        "tx_out": tx_out,
+        "tx_in": tx_in, "tithes": tithes, "tx_out": tx_out,
         "totals": {
-            "dizimos": total_dizimos_final,
-            "dizimos_nominais": total_dizimos_tithe,
-            "dizimos_doacoes": total_dizimos_trans,
-            "ofertas": total_ofertas,
-            "missoes": total_missoes,
-            "entradas_outros": total_entradas_outros,
-            "entradas_total_sem_missoes": total_geral_entradas_sem_missoes,
-            "saidas_total": total_saidas,
-            "saldo": saldo
+            "dizimos": total_dizimos_final, "ofertas": total_ofertas, "missoes": total_missoes,
+            "entradas_outros": total_entradas_outros, "entradas_total_sem_missoes": total_geral_entradas_sem_missoes,
+            "saidas_total": total_saidas, "saldo": saldo
         }
     }
 
@@ -2643,340 +2577,199 @@ def page_relatorio_missoes_congregacao(user: "User"):
             mime="application/pdf"
         )
 
-def page_cadastro(user: "User"):
-    if not is_admin_general(user):
-        st.warning("🔒 Apenas o **administrador geral** (admin) pode acessar o Cadastro.")
-        return
-    with SessionLocal() as db:
-        st.markdown("<h1 class='page-title'>Cadastro</h1>", unsafe_allow_html=True)
-
-        # (restante do cadastro preservado — sem editores que precisem de botão)
-
-        # Congregações
-        st.subheader("Congregações")
-        col_single, col_mass = st.columns(2)
-        with col_single:
-            new_cong = st.text_input("Nova congregação (individual)", key="cad_new_cong")
-            if st.button("Adicionar congregação", disabled=not new_cong.strip(), key="cad_add_cong"):
-                if db.scalar(select(Congregation).where(Congregation.name == new_cong.strip())):
-                    st.error("Já existe congregação com esse nome.")
-                else:
-                    db.add(Congregation(name=new_cong.strip())); db.commit()
-                    st.success("Congregação adicionada."); st.rerun()
-        with col_mass:
-            mass_text = st.text_area("Adicionar em massa (uma congregação por linha)", height=140, key="cad_mass_cong")
-            if st.button("Adicionar lista", key="cad_add_cong_mass"):
-                linhas = [l.strip() for l in (mass_text or "").splitlines()]
-                linhas = [l for l in linhas if l]
-                if not linhas:
-                    st.warning("Informe ao menos um nome.")
-                else:
-                    inseridas = 0; repetidas = 0
-                    for nome in linhas:
-                        if db.scalar(select(Congregation).where(Congregation.name == nome)):
-                            repetidas += 1
-                        else:
-                            db.add(Congregation(name=nome)); inseridas += 1
-                    db.commit()
-                    st.success(f"Inseridas: {inseridas} | Já existiam: {repetidas}")
-                    st.rerun()
-
-        congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
-        users_by_cong = dict(db.execute(select(Congregation.id, func.count(User.id))
-                                    .join(User, User.congregation_id == Congregation.id, isouter=True)
-                                    .group_by(Congregation.id)).all())
-        tx_by_cong = dict(db.execute(select(Congregation.id, func.count(Transaction.id))
-                                .join(Transaction, Transaction.congregation_id == Congregation.id, isouter=True)
-                                .group_by(Congregation.id)).all())
-        tithes_by_cong = dict(db.execute(select(Congregation.id, func.count(Tithe.id))
-                                    .join(Tithe, Tithe.congregation_id == Congregation.id, isouter=True)
-                                    .group_by(Congregation.id)).all())
-        dfc = pd.DataFrame([{
-            "ID": c.id, "Nome": c.name,
-            "Usuários": int(users_by_cong.get(c.id, 0)),
-            "Lançamentos": int(tx_by_cong.get(c.id, 0)),
-            "Dízimos": int(tithes_by_cong.get(c.id, 0)),
-        } for c in congs_all])
-        if not dfc.empty:
-            st.dataframe(dfc, use_container_width=True, hide_index=True, height=200)
-
-        with st.expander("Excluir congregações"):
-            st.caption("Só é possível excluir congregações **sem usuários, lançamentos ou dízimos**. A congregação **Sede** não pode ser excluída.")
-            eligible_ids = []
-            for c in congs_all:
-                if _norm(c.name) == "sede": continue
-                if users_by_cong.get(c.id, 0) == 0 and tx_by_cong.get(c.id, 0) == 0 and tithes_by_cong.get(c.id, 0) == 0:
-                    eligible_ids.append(c.id)
-            if not eligible_ids:
-                st.info("Nenhuma congregação elegível para exclusão.")
-            else:
-                ids_del_cong = st.multiselect("IDs de congregações para excluir", eligible_ids, key="cad_del_cong_ids")
-                confc2 = st.text_input("Digite EXCLUIR para confirmar", key="cad_del_cong_conf")
-                btn_disabled = (not ids_del_cong) or (not _confirm_ok(confc2))
-                if st.button("Excluir congregações selecionadas", disabled=btn_disabled, key="cad_del_cong_btn"):
-                    with SessionLocal() as _db:
-                        _db.query(Congregation).filter(Congregation.id.in_(ids_del_cong)).delete(synchronize_session=False)
-                        _db.commit()
-                    st.success(f"{len(ids_del_cong)} congregação(ões) excluída(s)."); st.rerun()
-        st.divider()
-
-        # Categorias
-        st.subheader("Categorias")
-        col1, col2 = st.columns(2)
-        with col1:
-            cat_name = st.text_input("Nome da categoria", key="cad_cat_name")
-        with col2:
-            cat_type = st.selectbox("Tipo", ["DOAÇÃO", "SAÍDA"], key="cad_cat_type")
-        if st.button("Adicionar categoria", disabled=not cat_name.strip(), key="cad_add_cat"):
-            if db.scalar(select(Category).where(Category.name == cat_name.strip())):
-                st.error("Já existe categoria com esse nome.")
-            else:
-                db.add(Category(name=cat_name.strip(), type=cat_type)); db.commit()
-                st.success("Categoria adicionada."); st.rerun()
-
-        cats = db.scalars(select(Category).order_by(Category.type, Category.name)).all()
-        usage = dict(db.execute(select(Category.id, func.count(Transaction.id))
-                                .join(Transaction, Transaction.category_id == Category.id, isouter=True)
-                                .group_by(Category.id)).all())
-        dfcat = pd.DataFrame([{
-            "ID": c.id, "Nome": c.name, "Tipo": c.type, "Usos em lançamentos": int(usage.get(c.id, 0))
-        } for c in cats])
-        if not dfcat.empty:
-            st.dataframe(dfcat, use_container_width=True, hide_index=True, height=200)
-
-        with st.expander("Excluir categorias"):
-            st.caption("Só é possível excluir categorias **sem lançamentos** vinculados.")
-            ids_del = st.multiselect("IDs de categorias para excluir", dfcat.loc[dfcat["Usos em lançamentos"] == 0, "ID"].tolist(), key="cad_del_cat_ids")
-            confc = st.text_input("Digite EXCLUIR para confirmar", key="cad_del_cat_conf")
-            btn_disabled = (not ids_del) or (not _confirm_ok(confc))
-            if st.button("Excluir categorias selecionadas", disabled=btn_disabled, key="cad_del_cat_btn"):
-                with SessionLocal() as _db:
-                    _db.query(Category).filter(Category.id.in_(ids_del)).delete(synchronize_session=False)
-                    _db.commit()
-                st.success(f"{len(ids_del)} categoria(s) excluída(s)."); st.rerun()
-        st.divider()
-
-        # Usuários
-        st.subheader("Usuários")
-        u_user = st.text_input("Usuário (login)", key="cad_user_login")
-        u_pwd = st.text_input("Senha", type="password", key="cad_user_pwd")
-        u_role = st.selectbox("Perfil", ["SEDE", "TESOUREIRO", "TESOUREIRO MISSIONÁRIO"], key="cad_user_role")
-        all_congs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
-        cong_options = ["—"] + [c.name for c in all_congs]
-        if u_role == "TESOUREIRO MISSIONÁRIO":
-            try:
-                index = cong_options.index("Sede")
-            except ValueError:
-                index = 0
-            u_cong_name = st.selectbox("Congregação (vinculada a Saídas de Missões)", cong_options, index=index, key="cad_user_cong")
-        else:
-            u_cong_name = st.selectbox("Congregação", cong_options, key="cad_user_cong")
-
-        if st.button("Criar usuário", key="cad_user_add"):
-            if not u_user.strip() or not u_pwd.strip():
-                st.error("Usuário e senha são obrigatórios.")
-            elif db.scalar(select(User).where(User.username == u_user.strip())):
-                st.error("Usuário já existe.")
-            else:
-                cong_id = None
-                if u_role == "TESOUREIRO":
-                    if u_cong_name == "—":
-                        st.error("Selecione a congregação."); return
-                    cong_id = next(c.id for c in all_congs if c.name == u_cong_name)
-                elif u_role == "TESOUREIRO MISSIONÁRIO":
-                        cong_id = db.scalar(select(Congregation.id).where(Congregation.name == "Sede"))
-                db.add(User(username=u_user.strip(), password_hash=hash_password(u_pwd.strip()), role=u_role, congregation_id=cong_id))
-                db.commit()
-                st.success("Usuário criado."); st.rerun()
-
-        users = db.scalars(select(User).order_by(User.username)).all()
-        dfu = pd.DataFrame([{
-            "ID": u.id, "Usuário": u.username, "Perfil": u.role,
-            "Congregação": (db.get(Congregation, u.congregation_id).name if u.congregation_id else "—")
-        } for u in users])
-        if not dfu.empty:
-            st.dataframe(dfu, use_container_width=True, hide_index=True, height=200)
-
-        with st.expander("Excluir usuários"):
-            st.caption("Não é permitido excluir o usuário atualmente logado.")
-            ids_u = st.multiselect("IDs de usuários para excluir", dfu["ID"].tolist(), key="cad_del_users_ids")
-            ids_u = [i for i in ids_u if i != user.id]
-            confu = st.text_input("Digite EXCLUIR para confirmar", key="cad_del_users_conf")
-            btn_disabled = (not ids_u) or (not _confirm_ok(confu))
-            if st.button("Excluir usuários selecionadas", disabled=btn_disabled, key="cad_del_users_btn"):
-                with SessionLocal() as _db:
-                    _db.query(User).filter(User.id.in_(ids_u)).delete(synchronize_session=False)
-                    _db.commit()
-                st.success(f"{len(ids_u)} usuário(s) excluído(s)."); st.rerun()
-
+# ===================== PAGE: CADASTRO =====================
+# ===================== PAGE: CADASTRO =====================
+# ===================== PAGE: CADASTRO =====================
+# ===================== PAGE: CADASTRO =====================
+# ===================== PAGE: CADASTRO =====================
+# ===================== PAGE: CADASTRO =====================
+# ===================== PAGE: CADASTRO =====================
 # ===================== PAGE: CADASTRO =====================
 def page_cadastro(user: "User"):
     if not is_admin_general(user):
         st.warning("🔒 Apenas o **administrador geral** (admin) pode acessar o Cadastro.")
         return
+        
     with SessionLocal() as db:
-        sidebar_common(user)
-
         st.markdown("<h1 class='page-title'>Cadastro</h1>", unsafe_allow_html=True)
 
-        # (restante do cadastro preservado — sem editores que precisem de botão)
+        tabs = st.tabs(["Congregações", "Sub-congregações", "Categorias", "Usuários"])
 
-        # Congregações
-        st.subheader("Congregações")
-        col_single, col_mass = st.columns(2)
-        with col_single:
-            new_cong = st.text_input("Nova congregação (individual)", key="cad_new_cong")
-            if st.button("Adicionar congregação", disabled=not new_cong.strip(), key="cad_add_cong"):
-                if db.scalar(select(Congregation).where(Congregation.name == new_cong.strip())):
-                    st.error("Já existe congregação com esse nome.")
-                else:
-                    db.add(Congregation(name=new_cong.strip())); db.commit()
-                    st.success("Congregação adicionada."); st.rerun()
-        with col_mass:
-            mass_text = st.text_area("Adicionar em massa (uma congregação por linha)", height=140, key="cad_mass_cong")
-            if st.button("Adicionar lista", key="cad_add_cong_mass"):
-                linhas = [l.strip() for l in (mass_text or "").splitlines()]
-                linhas = [l for l in linhas if l]
-                if not linhas:
-                    st.warning("Informe ao menos um nome.")
-                else:
-                    inseridas = 0; repetidas = 0
-                    for nome in linhas:
-                        if db.scalar(select(Congregation).where(Congregation.name == nome)):
-                            repetidas += 1
+        # Aba de Congregações
+        with tabs[0]:
+            st.subheader("Congregações")
+            col_single, col_mass = st.columns(2)
+            with col_single:
+                new_cong = st.text_input("Nova congregação (individual)", key="cad_new_cong")
+                if st.button("Adicionar congregação", disabled=not new_cong.strip(), key="cad_add_cong"):
+                    if db.scalar(select(Congregation).where(func.lower(Congregation.name) == new_cong.strip().lower())):
+                        st.error("Já existe congregação com esse nome.")
+                    else:
+                        db.add(Congregation(name=new_cong.strip())); db.commit()
+                        st.success("Congregação adicionada."); st.rerun()
+            with col_mass:
+                mass_text = st.text_area("Adicionar em massa (uma por linha)", height=140, key="cad_mass_cong")
+                if st.button("Adicionar lista de congregações", key="cad_add_cong_mass"):
+                    linhas = [l.strip() for l in (mass_text or "").splitlines() if l.strip()]
+                    if linhas:
+                        inseridas, repetidas = 0, 0
+                        existentes = {c.name.lower() for c in db.scalars(select(Congregation))}
+                        for nome in linhas:
+                            if nome.lower() in existentes: repetidas += 1
+                            else: db.add(Congregation(name=nome)); inseridas += 1
+                        db.commit()
+                        st.success(f"Inseridas: {inseridas} | Já existiam: {repetidas}")
+                        st.rerun()
+
+            st.divider()
+            congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+            if congs_all:
+                st.markdown("##### Congregações existentes")
+                dfc = pd.DataFrame([{"ID": c.id, "Nome": c.name} for c in congs_all])
+                st.dataframe(dfc, use_container_width=True, hide_index=True)
+
+                with st.expander("Excluir congregações"):
+                    users_by_cong = {cid for cid, count in db.execute(select(User.congregation_id, func.count(User.id)).where(User.congregation_id.isnot(None)).group_by(User.congregation_id)).all() if count > 0}
+                    tx_by_cong = {cid for cid, count in db.execute(select(Transaction.congregation_id, func.count(Transaction.id)).group_by(Transaction.congregation_id)).all() if count > 0}
+                    tithes_by_cong = {cid for cid, count in db.execute(select(Tithe.congregation_id, func.count(Tithe.id)).group_by(Tithe.congregation_id)).all() if count > 0}
+                    subs_by_cong = {cid for cid, count in db.execute(select(SubCongregation.congregation_id, func.count(SubCongregation.id)).group_by(SubCongregation.congregation_id)).all() if count > 0}
+                    
+                    ids_em_uso = users_by_cong.union(tx_by_cong).union(tithes_by_cong).union(subs_by_cong)
+                    eligible_congs = [c for c in congs_all if c.id not in ids_em_uso and _norm(c.name) != "sede"]
+                    
+                    if not eligible_congs:
+                        st.info("Nenhuma congregação pode ser excluída, pois todas possuem dados ou sub-congregações vinculadas.")
+                    else:
+                        names_del = st.multiselect("Selecione as congregações para excluir:", [c.name for c in eligible_congs], key="cad_del_cong_ids")
+                        if st.button("Confirmar exclusão de congregações", disabled=not names_del):
+                            ids_to_delete_final = [c.id for c in eligible_congs if c.name in names_del]
+                            db.query(Congregation).filter(Congregation.id.in_(ids_to_delete_final)).delete(synchronize_session=False)
+                            db.commit(); st.success("Congregações excluídas."); st.rerun()
+
+        # Aba de Sub-congregações
+        with tabs[1]:
+            st.subheader("Sub-congregações")
+            congs_all_subs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+            if not congs_all_subs:
+                st.warning("Cadastre uma Congregação principal primeiro.")
+            else:
+                c1, c2 = st.columns(2)
+                with c1:
+                    cong_mae_nome = st.selectbox("Selecione a Congregação 'mãe'", [c.name for c in congs_all_subs], key="cad_sub_cong_mae_sel")
+                with c2:
+                    new_sub_cong_name = st.text_input("Nome da nova Sub-congregação", key="cad_new_sub_cong")
+
+                if st.button("Adicionar Sub-congregação", key="cad_add_sub_cong"):
+                    cong_mae_obj = next((c for c in congs_all_subs if c.name == cong_mae_nome), None)
+                    nome_valido = new_sub_cong_name.strip()
+                    if cong_mae_obj and nome_valido:
+                        existe = db.scalar(select(SubCongregation).where(SubCongregation.name == nome_valido, SubCongregation.congregation_id == cong_mae_obj.id))
+                        if existe:
+                            st.error(f"A sub-congregação '{nome_valido}' já existe em '{cong_mae_obj.name}'.")
                         else:
-                            db.add(Congregation(name=nome)); inseridas += 1
-                    db.commit()
-                    st.success(f"Inseridas: {inseridas} | Já existiam: {repetidas}")
-                    st.rerun()
+                            db.add(SubCongregation(name=nome_valido, congregation_id=cong_mae_obj.id))
+                            db.commit()
+                            st.success(f"Sub-congregação '{nome_valido}' adicionada a '{cong_mae_obj.name}'.")
+                            st.rerun()
 
-        congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
-        users_by_cong = dict(db.execute(select(Congregation.id, func.count(User.id))
-                               .join(User, User.congregation_id == Congregation.id, isouter=True)
-                               .group_by(Congregation.id)).all())
-        tx_by_cong = dict(db.execute(select(Congregation.id, func.count(Transaction.id))
-                         .join(Transaction, Transaction.congregation_id == Congregation.id, isouter=True)
-                         .group_by(Congregation.id)).all())
-        tithes_by_cong = dict(db.execute(select(Congregation.id, func.count(Tithe.id))
-                                 .join(Tithe, Tithe.congregation_id == Congregation.id, isouter=True)
-                                 .group_by(Congregation.id)).all())
-        dfc = pd.DataFrame([{
-            "ID": c.id, "Nome": c.name,
-            "Usuários": int(users_by_cong.get(c.id, 0)),
-            "Lançamentos": int(tx_by_cong.get(c.id, 0)),
-            "Dízimos": int(tithes_by_cong.get(c.id, 0)),
-        } for c in congs_all])
-        if not dfc.empty:
-            st.dataframe(dfc, use_container_width=True, hide_index=True, height=200)
+            st.divider()
+            subs = db.scalars(select(SubCongregation).options(joinedload(SubCongregation.congregation)).order_by(SubCongregation.name)).all()
+            if subs:
+                st.markdown("##### Sub-congregações existentes")
+                df_subs = pd.DataFrame([{"ID": s.id, "Nome": s.name, "Congregação Mãe": s.congregation.name} for s in subs])
+                st.dataframe(df_subs, use_container_width=True, hide_index=True)
 
-        with st.expander("Excluir congregações"):
-            st.caption("Só é possível excluir congregações **sem usuários, lançamentos ou dízimos**. A congregação **Sede** não pode ser excluída.")
-            eligible_ids = []
-            for c in congs_all:
-                if _norm(c.name) == "sede": continue
-                if users_by_cong.get(c.id, 0) == 0 and tx_by_cong.get(c.id, 0) == 0 and tithes_by_cong.get(c.id, 0) == 0:
-                    eligible_ids.append(c.id)
-            if not eligible_ids:
-                st.info("Nenhuma congregação elegível para exclusão.")
-            else:
-                ids_del_cong = st.multiselect("IDs de congregações para excluir", eligible_ids, key="cad_del_cong_ids")
-                confc2 = st.text_input("Digite EXCLUIR para confirmar", key="cad_del_cong_conf")
-                btn_disabled = (not ids_del_cong) or (not _confirm_ok(confc2))
-                if st.button("Excluir congregações selecionadas", disabled=btn_disabled, key="cad_del_cong_btn"):
-                    with SessionLocal() as _db:
-                        _db.query(Congregation).filter(Congregation.id.in_(ids_del_cong)).delete(synchronize_session=False)
-                        _db.commit()
-                    st.success(f"{len(ids_del_cong)} congregação(ões) excluída(s)."); st.rerun()
-        st.divider()
+                with st.expander("Excluir sub-congregações"):
+                    tx_by_sub = {sid for sid, count in db.execute(select(Transaction.sub_congregation_id, func.count(Transaction.id)).where(Transaction.sub_congregation_id.isnot(None)).group_by(Transaction.sub_congregation_id)).all() if count > 0}
+                    tithes_by_sub = {sid for sid, count in db.execute(select(Tithe.sub_congregation_id, func.count(Tithe.id)).where(Tithe.sub_congregation_id.isnot(None)).group_by(Tithe.sub_congregation_id)).all() if count > 0}
+                    subs_in_use_ids = tx_by_sub.union(tithes_by_sub)
+                    eligible_subs = [s for s in subs if s.id not in subs_in_use_ids]
+                    if not eligible_subs:
+                        st.info("Nenhuma sub-congregação pode ser excluída, pois todas possuem dados vinculados.")
+                    else:
+                        names_del = st.multiselect("Selecione as sub-congregações para excluir:", [s.name for s in eligible_subs], key="cad_del_sub_ids")
+                        if st.button("Confirmar exclusão de sub-congregações", disabled=not names_del):
+                            ids_to_delete_final = [s.id for s in eligible_subs if s.name in names_del]
+                            db.query(SubCongregation).filter(SubCongregation.id.in_(ids_to_delete_final)).delete(synchronize_session=False)
+                            db.commit(); st.success("Sub-congregações excluídas."); st.rerun()
+                            
+        # Aba de Categorias
+        with tabs[2]:
+            st.subheader("Categorias")
+            col1_cat, col2_cat = st.columns(2)
+            with col1_cat:
+                cat_name = st.text_input("Nome da categoria", key="cad_cat_name")
+            with col2_cat:
+                cat_type = st.selectbox("Tipo", ["DOAÇÃO", "SAÍDA"], key="cad_cat_type")
+            if st.button("Adicionar categoria", disabled=not cat_name.strip(), key="cad_add_cat"):
+                if db.scalar(select(Category).where(func.lower(Category.name) == cat_name.strip().lower())):
+                    st.error("Já existe categoria com esse nome.")
+                else:
+                    db.add(Category(name=cat_name.strip(), type=cat_type)); db.commit()
+                    st.success("Categoria adicionada."); st.rerun()
+            
+            st.divider()
+            cats = db.scalars(select(Category).order_by(Category.type, Category.name)).all()
+            if cats:
+                st.markdown("##### Categorias existentes")
+                usage = {cid for cid, count in db.execute(select(Transaction.category_id, func.count(Transaction.id)).group_by(Transaction.category_id)).all() if count > 0}
+                dfcat = pd.DataFrame([{"ID": c.id, "Nome": c.name, "Tipo": c.type, "Em Uso": "Sim" if c.id in usage else "Não"} for c in cats])
+                st.dataframe(dfcat, use_container_width=True, hide_index=True)
+                with st.expander("Excluir categorias"):
+                    eligible_cats = [c for c in cats if c.id not in usage]
+                    if not eligible_cats:
+                        st.info("Nenhuma categoria pode ser excluída, pois todas estão em uso.")
+                    else:
+                        names_del = st.multiselect("Selecione as categorias para excluir:", [c.name for c in eligible_cats], key="cad_del_cat_ids")
+                        if st.button("Confirmar exclusão de categorias", disabled=not names_del):
+                            ids_to_delete_final = [c.id for c in eligible_cats if c.name in names_del]
+                            db.query(Category).filter(Category.id.in_(ids_to_delete_final)).delete(synchronize_session=False)
+                            db.commit(); st.success("Categorias excluídas."); st.rerun()
 
-        # Categorias
-        st.subheader("Categorias")
-        col1, col2 = st.columns(2)
-        with col1:
-            cat_name = st.text_input("Nome da categoria", key="cad_cat_name")
-        with col2:
-            cat_type = st.selectbox("Tipo", ["DOAÇÃO", "SAÍDA"], key="cad_cat_type")
-        if st.button("Adicionar categoria", disabled=not cat_name.strip(), key="cad_add_cat"):
-            if db.scalar(select(Category).where(Category.name == cat_name.strip())):
-                st.error("Já existe categoria com esse nome.")
-            else:
-                db.add(Category(name=cat_name.strip(), type=cat_type)); db.commit()
-                st.success("Categoria adicionada."); st.rerun()
+        # Aba de Usuários
+        with tabs[3]:
+            st.subheader("Usuários")
+            u_user = st.text_input("Usuário (login)", key="cad_user_login")
+            u_pwd = st.text_input("Senha", type="password", key="cad_user_pwd")
+            u_role = st.selectbox("Perfil", ["SEDE", "TESOUREIRO", "TESOUREIRO MISSIONÁRIO"], key="cad_user_role")
+            
+            all_congs_users = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+            cong_options = ["—"] + [c.name for c in all_congs_users]
+            u_cong_name = st.selectbox("Vincular à Congregação", cong_options, key="cad_user_cong")
 
-        cats = db.scalars(select(Category).order_by(Category.type, Category.name)).all()
-        usage = dict(db.execute(select(Category.id, func.count(Transaction.id))
-                           .join(Transaction, Transaction.category_id == Category.id, isouter=True)
-                           .group_by(Category.id)).all())
-        dfcat = pd.DataFrame([{
-            "ID": c.id, "Nome": c.name, "Tipo": c.type, "Usos em lançamentos": int(usage.get(c.id, 0))
-        } for c in cats])
-        if not dfcat.empty:
-            st.dataframe(dfcat, use_container_width=True, hide_index=True, height=200)
+            if st.button("Criar usuário", key="cad_user_add"):
+                username_stripped = u_user.strip()
+                user_exists = db.scalar(select(User).where(User.username == username_stripped))
+                if not username_stripped or not u_pwd.strip():
+                    st.error("Usuário e senha são obrigatórios.")
+                elif user_exists:
+                    st.error(f"O nome de usuário '{username_stripped}' já está em uso.")
+                elif u_role == "TESOUREIRO" and u_cong_name == "—":
+                    st.error("Selecione uma congregação para o perfil TESOUREIRO.")
+                else:
+                    cong_id = next((c.id for c in all_congs_users if c.name == u_cong_name), None) if u_cong_name != "—" else None
+                    db.add(User(username=username_stripped, password_hash=hash_password(u_pwd.strip()), role=u_role, congregation_id=cong_id))
+                    db.commit(); st.success("Usuário criado com sucesso!"); st.rerun()
+            
+            st.divider()
+            users_list = db.scalars(select(User).options(joinedload(User.congregation)).order_by(User.username)).all()
+            if users_list:
+                st.markdown("##### Usuários existentes")
+                dfu = pd.DataFrame([{"ID": u.id, "Usuário": u.username, "Perfil": u.role, "Congregação": u.congregation.name if u.congregation else "—"} for u in users_list])
+                st.dataframe(dfu, use_container_width=True, hide_index=True)
+                with st.expander("Excluir usuários"):
+                    eligible_users = [u for u in users_list if u.id != user.id]
+                    names_del = st.multiselect("Selecione os usuários para excluir:", [u.username for u in eligible_users], key="cad_del_users_ids")
+                    if st.button("Confirmar exclusão de usuários", disabled=not names_del):
+                        ids_to_delete_final = [u.id for u in eligible_users if u.username in names_del]
+                        db.query(User).filter(User.id.in_(ids_to_delete_final)).delete(synchronize_session=False)
+                        db.commit(); st.success("Usuários excluídos."); st.rerun()
+                # ---- FIM DA VALIDAÇÃO ----
+            # ... (seu código de usuários aqui, que deve estar funcionando) ...
+            # ... (seu código de usuários aqui) ...
+# ===================== PAGE: LANÇAMENTOS =====================
 
-        with st.expander("Excluir categorias"):
-            st.caption("Só é possível excluir categorias **sem lançamentos** vinculados.")
-            ids_del = st.multiselect("IDs de categorias para excluir", dfcat.loc[dfcat["Usos em lançamentos"] == 0, "ID"].tolist(), key="cad_del_cat_ids")
-            confc = st.text_input("Digite EXCLUIR para confirmar", key="cad_del_cat_conf")
-            btn_disabled = (not ids_del) or (not _confirm_ok(confc))
-            if st.button("Excluir categorias selecionadas", disabled=btn_disabled, key="cad_del_cat_btn"):
-                with SessionLocal() as _db:
-                    _db.query(Category).filter(Category.id.in_(ids_del)).delete(synchronize_session=False)
-                    _db.commit()
-                st.success(f"{len(ids_del)} categoria(s) excluída(s)."); st.rerun()
-        st.divider()
-
-        # Usuários
-        st.subheader("Usuários")
-        u_user = st.text_input("Usuário (login)", key="cad_user_login")
-        u_pwd = st.text_input("Senha", type="password", key="cad_user_pwd")
-        u_role = st.selectbox("Perfil", ["SEDE", "TESOUREIRO", "TESOUREIRO MISSIONÁRIO"], key="cad_user_role")
-        all_congs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
-        cong_options = ["—"] + [c.name for c in all_congs]
-        if u_role == "TESOUREIRO MISSIONÁRIO":
-            try:
-                index = cong_options.index("Sede")
-            except ValueError:
-                index = 0
-            u_cong_name = st.selectbox("Congregação (vinculada a Saídas de Missões)", cong_options, index=index, key="cad_user_cong")
-        else:
-            u_cong_name = st.selectbox("Congregação", cong_options, key="cad_user_cong")
-
-        if st.button("Criar usuário", key="cad_user_add"):
-            if not u_user.strip() or not u_pwd.strip():
-                st.error("Usuário e senha são obrigatórios.")
-            elif db.scalar(select(User).where(User.username == u_user.strip())):
-                st.error("Usuário já existe.")
-            else:
-                cong_id = None
-                if u_role == "TESOUREIRO":
-                    if u_cong_name == "—":
-                        st.error("Selecione a congregação."); return
-                    cong_id = next(c.id for c in all_congs if c.name == u_cong_name)
-                elif u_role == "TESOUREIRO MISSIONÁRIO":
-                     cong_id = db.scalar(select(Congregation.id).where(Congregation.name == "Sede"))
-                db.add(User(username=u_user.strip(), password_hash=hash_password(u_pwd.strip()), role=u_role, congregation_id=cong_id))
-                db.commit()
-                st.success("Usuário criado."); st.rerun()
-
-        users = db.scalars(select(User).order_by(User.username)).all()
-        dfu = pd.DataFrame([{
-            "ID": u.id, "Usuário": u.username, "Perfil": u.role,
-            "Congregação": (db.get(Congregation, u.congregation_id).name if u.congregation_id else "—")
-        } for u in users])
-        if not dfu.empty:
-            st.dataframe(dfu, use_container_width=True, hide_index=True, height=200)
-
-        with st.expander("Excluir usuários"):
-            st.caption("Não é permitido excluir o usuário atualmente logado.")
-            ids_u = st.multiselect("IDs de usuários para excluir", dfu["ID"].tolist(), key="cad_del_users_ids")
-            ids_u = [i for i in ids_u if i != user.id]
-            confu = st.text_input("Digite EXCLUIR para confirmar", key="cad_del_users_conf")
-            btn_disabled = (not ids_u) or (not _confirm_ok(confu))
-            if st.button("Excluir usuários selecionadas", disabled=btn_disabled, key="cad_del_users_btn"):
-                with SessionLocal() as _db:
-                    _db.query(User).filter(User.id.in_(ids_u)).delete(synchronize_session=False)
-                    _db.commit()
-                st.success(f"{len(ids_u)} usuário(s) excluído(s)."); st.rerun()
+# ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS =====================
 # ===================== PAGE: LANÇAMENTOS =====================
 def page_lancamentos(user: "User"):
@@ -2984,171 +2777,136 @@ def page_lancamentos(user: "User"):
     with SessionLocal() as db:
         st.markdown(f"<h1 class='page-title'>Lançamentos</h1>", unsafe_allow_html=True)
 
-        # congregações disponíveis
-        congs = cong_options_for(user, db)
-        if not congs:
-            st.info("Nenhuma congregação disponível.")
-            return
-
-        # seleção da congregação
+        parent_cong_obj = None
         if user.role == "SEDE":
-            congs_ordered = order_congs_sede_first(congs)
-            cong_sel = st.selectbox("Selecione a congregação", [c.name for c in congs_ordered], key="lan_cong_sel")
-            cong_obj = next(c for c in congs_ordered if c.name == cong_sel)
-        else:
-            cong_obj = congs[0]
+            congs_all = order_congs_sede_first(cong_options_for(user, db))
+            cong_sel_name = st.selectbox("Selecione a Congregação Principal:", [c.name for c in congs_all], key="lan_cong_sel_sede")
+            parent_cong_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
+        else: # TESOUREIRO
+            parent_cong_obj = db.get(Congregation, user.congregation_id)
+        
+        if not parent_cong_obj:
+            st.error("Nenhuma congregação selecionada ou encontrada."); return
 
-        st.markdown(f"### CONGREGAÇÃO: {cong_obj.name.upper()}", unsafe_allow_html=True)
+        st.markdown(f"### CONGREGAÇÃO: {parent_cong_obj.name.upper()}")
 
-        # ===== modo de inserção =====
         modo = st.radio(
             "Modo de lançamento:",
             ["Formulário único", "Editar direto na tabela"],
             horizontal=True,
-            key="lan_modo_sel",
+            key="lan_modo_sel"
         )
+        st.divider()
 
-        if modo == "Editar direto na tabela":
-            st.subheader("Edição em Tabela")
+        if modo == "Formulário único":
+            target_cong_obj = parent_cong_obj
+            sub_congs = db.scalars(
+                select(SubCongregation)
+                .where(SubCongregation.congregation_id == parent_cong_obj.id)
+                .order_by(SubCongregation.name)
+            ).all()
+            
+            opcoes = {f"{parent_cong_obj.name} (Principal)": None}
+            for sub in sub_congs:
+                opcoes[sub.name] = sub.id
+            
+            contexto_selecionado = st.selectbox(
+                "Lançar em:", 
+                list(opcoes.keys()), 
+                key="lan_sub_sel_context"
+            )
+            target_sub_cong_id = opcoes[contexto_selecionado]
+            st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
+            st.divider()
+            
+            with st.expander("➕ Lançar ENTRADA", expanded=True):
+                with st.form("form_entrada"):
+                    cats_in = [c for c in categories_for_type(db, TYPE_IN) if "ajuste" not in _norm(c.name)]
+                    c1, c2 = st.columns(2)
+                    with c1: ent_data = st.date_input("Data da Entrada", value=today_bahia(), key="ent_data")
+                    with c2: ent_cat_name = st.selectbox("Categoria", [c.name for c in cats_in] or ["—"], key="ent_cat")
+                    ent_desc = st.text_input("Descrição (opcional)", key="ent_desc")
+                    ent_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="ent_valor")
+                    if st.form_submit_button("Salvar ENTRADA", type="primary"):
+                        if ent_valor > 0:
+                            cat_obj = next((c for c in cats_in if c.name == ent_cat_name), None)
+                            if cat_obj:
+                                db.add(Transaction(date=ent_data, type=TYPE_IN, category_id=cat_obj.id, amount=ent_valor, description=(ent_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
+                                db.commit(); st.success("Entrada registrada!"); st.rerun()
+                        else:
+                            st.warning("O valor da entrada deve ser maior que zero.")
+
+            with st.expander("👤 Lançar DÍZIMO (Nominal)"):
+                with st.form("form_dizimo"):
+                    dz_data = st.date_input("Data do Dízimo", value=today_bahia(), key="dz_data")
+                    dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
+                    dz_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="dz_valor")
+                    dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência"], key="dz_pay")
+                    if st.form_submit_button("Salvar DIZIMISTA", type="primary"):
+                        if dz_valor > 0 and dz_nome.strip():
+                            db.add(Tithe(date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor, congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id, payment_method=dz_payment))
+                            db.commit(); st.success("Dízimo registrado!"); st.rerun()
+                        else:
+                            st.warning("O nome e o valor são obrigatórios, e o valor deve ser maior que zero.")
+
+            with st.expander("➖ Lançar SAÍDA"):
+                with st.form("form_saida"):
+                    cats_out = categories_for_type(db, TYPE_OUT)
+                    c1, c2 = st.columns(2)
+                    with c1: sai_data = st.date_input("Data da Saída", value=today_bahia(), key="sai_data")
+                    with c2: sai_cat_name = st.selectbox("Categoria", [c.name for c in cats_out] or ["—"], key="sai_cat")
+                    sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
+                    sai_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="sai_valor")
+                    if st.form_submit_button("Salvar SAÍDA", type="primary"):
+                        if sai_valor > 0:
+                            cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
+                            if cat_obj:
+                                db.add(Transaction(date=sai_data, type=TYPE_OUT, category_id=cat_obj.id, amount=sai_valor, description=(sai_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
+                                db.commit(); st.success("Saída registrada!"); st.rerun()
+                        else:
+                            st.warning("O valor da saída deve ser maior que zero.")
+
+        elif modo == "Editar direto na tabela":
+            st.info(f"Modo de edição rápida para a congregação: **{parent_cong_obj.name} (Principal)**. Lançamentos de sub-congregações não são exibidos aqui.")
             ref_tab = get_month_selector("Mês de referência da tabela")
             start_tab, end_tab = month_bounds(ref_tab)
-
-            # -------- Tabela 1: Agregado Diário (Dízimo + Oferta) --------
+            
             st.markdown("##### Entradas (Dízimo e Oferta)")
-            df = _entrada_summary_df(db, cong_obj.id, start_tab, end_tab)
-            if df.empty:
-                df = pd.DataFrame([{"Data do Culto": today_bahia(), "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0}])
+            df_entradas = _entrada_summary_df(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=None)
+            if df_entradas.empty:
+                df_entradas = pd.DataFrame([{"Data do Culto": today_bahia(), "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0}])
+            edited_entradas = st.data_editor(df_entradas, use_container_width=True, hide_index=True, num_rows="dynamic", key="editor_entradas_lancamentos")
             
-            edited_tab = st.data_editor(
-                df, use_container_width=True, hide_index=True, num_rows="dynamic",
-                column_config={
-                    "Data do Culto": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
-                    "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", min_value=0.0, format="R$ %.2f"),
-                    "Oferta": st.column_config.NumberColumn("Oferta (R$)", min_value=0.0, format="R$ %.2f"),
-                    "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
-                },
-                key=f"lan_tab_editor_{cong_obj.id}_{start_tab:%Y_%m}",
-            )
-            
-            # NOVO BLOCO DE TOTAIS PARA A TABELA DE ENTRADAS
             try:
-                total_dizimo = 0.0
-                total_oferta = 0.0
-                total_geral = 0.0
-                if isinstance(edited_tab, pd.DataFrame) and not edited_tab.empty:
-                    df_calc = edited_tab.copy()
-                    df_calc["Dízimo"] = df_calc["Dízimo"].map(_to_float_brl)
-                    df_calc["Oferta"] = df_calc["Oferta"].map(_to_float_brl)
-                    total_dizimo = df_calc["Dízimo"].sum()
-                    total_oferta = df_calc["Oferta"].sum()
-                    total_geral = total_dizimo + total_oferta
-            except Exception:
-                pass
+                total_dizimo, total_oferta, total_geral = 0.0, 0.0, 0.0
+                if isinstance(edited_entradas, pd.DataFrame) and not edited_entradas.empty:
+                    df_calc = edited_entradas.copy(); df_calc["Dízimo"] = df_calc["Dízimo"].map(_to_float_brl); df_calc["Oferta"] = df_calc["Oferta"].map(_to_float_brl)
+                    total_dizimo = df_calc["Dízimo"].sum(); total_oferta = df_calc["Oferta"].sum(); total_geral = total_dizimo + total_oferta
+            except Exception: pass
             
             col1, col2, col3 = st.columns(3)
             col1.metric("Total Dízimos (tabela)", format_currency(total_dizimo))
             col2.metric("Total Ofertas (tabela)", format_currency(total_oferta))
             col3.metric("Total Geral (tabela)", format_currency(total_geral))
-            # FIM DO NOVO BLOCO
-
-            def _save_tab():
-                _apply_entrada_summary_changes(cong_obj.id, start_tab, end_tab, edited_tab)
-                st.toast("💾 Tabela de entradas salva!", icon="✅")
-                st.rerun() # Adicionado para recarregar após salvar
-            _save_btn(_save_tab, f"lan_tab_{cong_obj.id}_{start_tab:%Y_%m}", theme="entrada")
+            _save_btn(lambda: _apply_entrada_summary_changes(parent_cong_obj.id, start_tab, end_tab, edited_entradas, sub_cong_id=None), f"lan_tab_{parent_cong_obj.id}", "entrada")
 
             st.markdown("---")
-            # -------- Tabela 2: Dizimistas --------
-            tithes = db.scalars(select(Tithe).where(Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.congregation_id == cong_obj.id).order_by(Tithe.date)).all()
-            _editor_dizimos(tithes, "Dizimistas do período", force_cong_id=cong_obj.id)
+            tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id.is_(None))
+            tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
+            _editor_dizimos(tithes, "Dizimistas do período (Congregação Principal)", force_cong_id=parent_cong_obj.id)
 
             st.markdown("---")
-            # -------- Tabela 3: Saídas --------
-            txs_out = db.scalars(select(Transaction).options(joinedload(Transaction.category)).where(Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type.in_(("SAÍDA", "DESPESA")), Transaction.congregation_id == cong_obj.id)).all()
-            _editor_lancamentos(txs_out, "Saídas do período", tx_type_hint=TYPE_OUT, force_cong_id=cong_obj.id)
-            return
+            txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_OUT, Transaction.sub_congregation_id.is_(None))
+            txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
+            _editor_lancamentos(txs_out, "Saídas do período (Congregação Principal)", tx_type_hint=TYPE_OUT, force_cong_id=parent_cong_obj.id)
 
-        # ===================== FORMULÁRIOS ÚNICOS =====================
-        
-        # Formulário de ENTRADA
-        with st.expander("➕ Lançar ENTRADA (Dízimo, Oferta, etc.)", expanded=True):
-            ENTRADA_CLEANUP_KEYS = ["ent_desc", "ent_valor"]
-            with st.form("form_entrada", clear_on_submit=False):
-                cats_in = [c for c in categories_for_type(db, TYPE_IN) if "ajuste" not in _norm(c.name)]
-                cat_names_in = [c.name for c in cats_in] or ["—"]
-                
-                c1, c2 = st.columns([1, 1.6])
-                with c1:
-                    ent_data = st.date_input("Data da Entrada", value=today_bahia(), key="ent_data", format="DD/MM/YYYY")
-                with c2:
-                    ent_cat = st.selectbox("Categoria da Entrada", cat_names_in, key="ent_cat")
-                
-                ent_desc = st.text_input("Descrição (opcional)", key="ent_desc", placeholder="Ex: Oferta de missões")
-                ent_valor = st.number_input("Valor da Entrada (R$)", min_value=0.0, step=1.0, format="%.2f", key="ent_valor")
-
-                if _submit_btn("Salvar ENTRADA", "submit_entrada", theme="entrada"):
-                    if ent_valor > 0 and ent_cat != "—":
-                        cat_obj = next((c for c in cats_in if c.name == ent_cat), None)
-                        db.add(Transaction(
-                            date=ent_data, type=TYPE_IN, category_id=cat_obj.id,
-                            amount=ent_valor, description=(ent_desc or None), congregation_id=cong_obj.id
-                        ))
-                        db.commit()
-                        st.success("Entrada registrada com sucesso!")
-                        _clear_launch_fields(ENTRADA_CLEANUP_KEYS)
-                    else:
-                        st.error("Preencha a categoria e um valor maior que zero.")
-                    st.rerun()
-
-        # Formulário de DIZIMISTA
-        with st.expander("👤 Lançar DÍZIMO (Nominal)"):
-            DIZIMISTA_CLEANUP_KEYS = ["dz_nome", "dz_valor"]
-            with st.form("form_dizimo", clear_on_submit=False):
-                dz_data = st.date_input("Data do Dízimo", value=today_bahia(), key="dz_data", format="DD/MM/YYYY")
-                dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
-                dz_valor = st.number_input("Valor do Dízimo (R$)", min_value=0.0, step=1.0, format="%.2f", key="dz_valor")
-                dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência", "Outro"], key="dz_payment_method")
-
-                if _submit_btn("Salvar DIZIMISTA", "submit_dizimista", theme="dizimista"):
-                    if dz_valor > 0 and dz_nome.strip():
-                        db.add(Tithe(
-                            date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor,
-                            congregation_id=cong_obj.id, payment_method=dz_payment
-                        ))
-                        db.commit()
-                        st.success(f"Dízimo de {dz_nome.strip()} registrado!")
-                        _clear_launch_fields(DIZIMISTA_CLEANUP_KEYS)
-                    else:
-                        st.error("Preencha o nome do dizimista e um valor maior que zero.")
-                    st.rerun()
-
-        # Formulário de SAÍDA
-        with st.expander("➖ Lançar SAÍDA"):
-            SAIDA_CLEANUP_KEYS = ["sai_desc", "sai_valor"]
-            with st.form("form_saida", clear_on_submit=False):
-                cats_out = categories_for_type(db, TYPE_OUT)
-                cat_names_out = [c.name for c in cats_out] or ["—"]
-
-                sai_data = st.date_input("Data da Saída", value=today_bahia(), key="sai_data", format="DD/MM/YYYY")
-                sai_cat = st.selectbox("Categoria da Saída", cat_names_out, key="sai_cat")
-                sai_desc = st.text_input("Descrição da Saída (opcional)", key="sai_desc", placeholder="Ex: Compra de material de limpeza")
-                sai_valor = st.number_input("Valor da Saída (R$)", min_value=0.0, step=1.0, format="%.2f", key="sai_valor")
-
-                if _submit_btn("Salvar SAÍDA", "submit_saida", theme="saida"):
-                    if sai_valor > 0 and sai_cat != "—":
-                        cat_obj = next((c for c in cats_out if c.name == sai_cat), None)
-                        db.add(Transaction(
-                            date=sai_data, type=TYPE_OUT, category_id=cat_obj.id,
-                            amount=sai_valor, description=(sai_desc or None), congregation_id=cong_obj.id
-                        ))
-                        db.commit()
-                        st.success("Saída registrada com sucesso!")
-                        _clear_launch_fields(SAIDA_CLEANUP_KEYS)
-                    else:
-                        st.error("Preencha a categoria e um valor maior que zero.")
-                    st.rerun()
 
                     # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
+# ===================== PAGE: RELATÓRIO DE ENTRADA =====================
+# ===================== PAGE: RELATÓRIO DE ENTRADA =====================
+# ===================== PAGE: RELATÓRIO DE ENTRADA =====================
+# ===================== PAGE: RELATÓRIO DE ENTRADA =====================
+
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 def page_relatorio_entrada(user: "User"):
     ensure_seed()
@@ -3157,112 +2915,88 @@ def page_relatorio_entrada(user: "User"):
         ref = get_month_selector()
         start, end = month_bounds(ref)
 
-        congs = cong_options_for(user, db)
+        parent_cong_obj = None
+        
         if user.role == "SEDE":
-            ordered = order_congs_sede_first(congs)
-            esc_opt = ["Todas as congregações"] + [c.name for c in ordered]
-            esc = st.selectbox("Escopo", esc_opt, key="re_in_allopt")
-            is_all = (esc == "Todas as congregações")
-            cong_obj = None if is_all else next(c for c in ordered if c.name == esc)
-        else:
-            is_all = False
-            cong_obj = congs[0] if congs else None
-
-        # --- Visão Agregada (SEDE) ---
-        if is_all:
-            st.info("Escopo: **Todas as congregações** — edite o total de entradas mensal por congregação abaixo.")
-            _editor_entradas_agg_all(ordered, start, end)
+            congs_all = order_congs_sede_first(cong_options_for(user, db))
+            escopo_opts = ["-- Visão Agregada Editável --"] + [c.name for c in congs_all]
+            escopo_selecionado = st.selectbox("Selecione o escopo do relatório:", escopo_opts, key="re_sede_escopo")
             
-            # Adiciona o total geral para a visão de todas as congregações
-            with SessionLocal() as _db_tot_in:
-                total_geral_in = 0.0
-                for _c in ordered:
-                    _t = _collect_month_data(_db_tot_in, _c.id, start, end)["totals"]
-                    total_geral_in += float(_t["entradas_total_sem_missoes"])
-            st.metric("Total geral de entradas (todas as congregações)", format_currency(total_geral_in))
-            return
+            if escopo_selecionado == "-- Visão Agregada Editável --":
+                st.info("Modo de edição do total de entradas por congregação principal.")
+                _editor_entradas_agg_all(congs_all, start, end)
+                return
+            else:
+                parent_cong_obj = next((c for c in congs_all if c.name == escopo_selecionado), None)
+        else:
+            parent_cong_obj = db.get(Congregation, user.congregation_id)
 
-        # --- Visão por Congregação Específica ---
-        if not cong_obj:
-            st.info("Selecione uma congregação."); return
+        if not parent_cong_obj:
+            st.info("Nenhuma congregação para analisar."); return
 
-        st.info(f"Escopo: **{cong_obj.name}**")
-        base_df = _entrada_summary_df(db, cong_obj.id, start, end)
+        st.divider()
+        sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
         
-        edited = st.data_editor(
-            base_df, use_container_width=True, hide_index=True, num_rows="dynamic",
-            column_config={
-                "Data do Culto": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
-                "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", format="R$ %.2f"),
-                "Oferta": st.column_config.NumberColumn("Oferta (R$)", format="R$ %.2f"),
-                "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
-            },
-            key="re_entrada_sum_editor",
-        )
+        opcoes = {"-- Todas (Principal + Subs) --": "ALL", parent_cong_obj.name + " (Principal)": None}
+        for sub in sub_congs:
+            opcoes[sub.name] = sub.id
+
+        contexto_selecionado = st.selectbox("Filtrar por unidade:", list(opcoes.keys()), key="re_sub_sel")
+        target_sub_cong_id_or_all = opcoes[contexto_selecionado]
         
-        # =================================================================
-        # NOVO BLOCO DE TOTAIS (GARANTINDO A EXIBIÇÃO CORRETA)
-        # =================================================================
-        try:
-            total_dizimo = 0.0
-            total_oferta = 0.0
-            total_geral = 0.0
-            if isinstance(edited, pd.DataFrame) and not edited.empty:
-                # Garante que os valores sejam numéricos para a soma
-                edited_calc = edited.copy()
-                edited_calc["Dízimo"] = edited_calc["Dízimo"].apply(_to_float_brl)
-                edited_calc["Oferta"] = edited_calc["Oferta"].apply(_to_float_brl)
-                
-                total_dizimo = edited_calc["Dízimo"].sum()
-                total_oferta = edited_calc["Oferta"].sum()
-                total_geral = total_dizimo + total_oferta
-        except Exception as e:
-            # Em caso de erro, os totais permanecerão zero, sem quebrar a aplicação
-            pass
+        st.info(f"Exibindo dados para: **{contexto_selecionado}**")
+
+        if target_sub_cong_id_or_all == "ALL":
+            # Visão de resumo (não editável)
+            all_units = [(parent_cong_obj.name + " (Principal)", None)] + [(s.name, s.id) for s in sub_congs]
+            rows, total_geral = [], 0.0
+            for name, sub_id in all_units:
+                totals = _collect_month_data(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)["totals"]
+                total_entradas_unidade = totals["entradas_total_sem_missoes"]
+                rows.append({"Unidade": name, "Dízimos": totals["dizimos"], "Ofertas": totals["ofertas"], "Total Entradas": total_entradas_unidade})
+                total_geral += total_entradas_unidade
+            df_agg = pd.DataFrame(rows)
+            st.dataframe(df_agg.style.format({"Dízimos": format_currency, "Ofertas": format_currency, "Total Entradas": format_currency}), use_container_width=True)
+            st.metric("Total Geral de Entradas (Principal + Subs)", format_currency(total_geral))
         
-        st.markdown("---")
-        st.subheader("Totais do Período (baseado na tabela acima)")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Soma Dízimos", format_currency(total_dizimo))
-        col2.metric("Soma Ofertas", format_currency(total_oferta))
-        col3.metric("Soma Geral", format_currency(total_geral))
-        st.markdown("---")
-        # =================================================================
-        # FIM DO BLOCO DE TOTAIS
-        # =================================================================
+        else:
+            # Visão detalhada e EDITÁVEL
+            base_df = _entrada_summary_df(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id_or_all)
+            
+            edited_df = st.data_editor(
+                base_df, use_container_width=True, hide_index=True, num_rows="dynamic",
+                column_config={
+                    "Data do Culto": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
+                    "Dízimo": st.column_config.NumberColumn("Dízimo (R$)", format="R$ %.2f"),
+                    "Oferta": st.column_config.NumberColumn("Oferta (R$)", format="R$ %.2f"),
+                    "Total": st.column_config.NumberColumn("Total (R$)", disabled=True, format="R$ %.2f"),
+                },
+                key="re_editor_detalhado"
+            )
 
-        def _save_sum():
-            _apply_entrada_summary_changes(cong_obj.id, start, end, edited)
-            st.toast("💾 Alterações salvas.", icon="✅")
-            st.rerun()
-        _save_btn(_save_sum, "entrada_sum")
+            try:
+                total_dizimo, total_oferta, total_geral_unidade = 0.0, 0.0, 0.0
+                if isinstance(edited_df, pd.DataFrame) and not edited_df.empty:
+                    df_calc = edited_df.copy()
+                    df_calc["Dízimo"] = df_calc["Dízimo"].map(_to_float_brl)
+                    df_calc["Oferta"] = df_calc["Oferta"].map(_to_float_brl)
+                    total_dizimo = df_calc["Dízimo"].sum()
+                    total_oferta = df_calc["Oferta"].sum()
+                    total_geral_unidade = total_dizimo + total_oferta
+            except Exception: pass
+            
+            st.divider()
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Soma Dízimos (tabela)", format_currency(total_dizimo))
+            col2.metric("Soma Ofertas (tabela)", format_currency(total_oferta))
+            col3.metric("Soma Geral (tabela)", format_currency(total_geral_unidade))
 
-        # Seção para apagar linhas (mantida como estava)
-        if isinstance(edited, pd.DataFrame) and not edited.empty and ("Data do Culto" in edited.columns):
-            with st.expander("🗑️ Apagar linhas da tabela-resumo"):
-                try:
-                    _datas_ord = sorted({_to_date(d) for d in edited["Data do Culto"].tolist() if pd.notna(d)})
-                    _label_map = {format_date(d): d for d in _datas_ord}
-                    _rotulos = list(_label_map.keys())
-                except Exception:
-                    _rotulos, _label_map = [], {}
+            def _save_summary():
+                _apply_entrada_summary_changes(parent_cong_obj.id, start, end, edited_df, sub_cong_id=target_sub_cong_id_or_all)
+                st.toast("💾 Alterações salvas com sucesso!", icon="✅")
+                st.rerun()
 
-                _sel_del = st.multiselect(
-                    "Selecione as datas que deseja APAGAR", options=_rotulos, key="re_entrada_sum_del_dates"
-                )
-                def _delete_selected_rows():
-                    if not _sel_del: return
-                    to_drop = {_label_map[x] for x in _sel_del if x in _label_map}
-                    edited_clean = edited.copy()
-                    edited_clean["Data do Culto"] = edited_clean["Data do Culto"].map(_to_date)
-                    edited_clean = edited_clean[~edited_clean["Data do Culto"].isin(to_drop)]
-                    _apply_entrada_summary_changes(cong_obj.id, start, end, edited_clean)
-                    st.toast("🗑️ Linhas apagadas com sucesso.", icon="✅")
-                    st.rerun()
-
-                st.button(
-                    "Apagar linhas selecionadas", type="secondary", on_click=_delete_selected_rows, key="btn_del_entrada_sum"
-                )
+            _save_btn(_save_summary, "entrada_sum_detalhado", theme="entrada")
 # ===================== MAIN =====================
 def main():
     try:
