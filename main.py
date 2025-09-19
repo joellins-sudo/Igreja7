@@ -241,6 +241,54 @@ def get_sessionmaker():
 SessionLocal = get_sessionmaker()
 
 # ===================== AUTH HELPERS =====================
+# COLE ESTA FUNÇÃO DE VOLTA NO SEU CÓDIGO
+
+def ensure_seed():
+    engine = get_engine()
+    Base.metadata.create_all(engine)
+    with SessionLocal() as db:
+        # Adiciona categorias padrão se não existirem
+        if db.scalar(select(func.count(Category.id))) == 0:
+            default_categories = [
+                ("Dízimo", "DOAÇÃO"), ("Oferta", "DOAÇÃO"), ("Missões", "DOAÇÃO"),
+                ("Aluguel", "SAÍDA"), ("Energia", "SAÍDA"), ("Água", "SAÍDA"),
+                ("Assistência Social", "SAÍDA"), ("Produtos de Limpeza", "SAÍDA"),
+                ("Transporte", "SAÍDA"), ("Material de Expediente", "SAÍDA"),
+                ("Missões (Saída)", "SAÍDA")
+            ]
+            for name, type in default_categories:
+                if not db.scalar(select(Category).where(Category.name == name)):
+                    db.add(Category(name=name, type=type))
+            db.commit()
+
+        # Adiciona congregações padrão se não existirem
+        CONGREGACOES_PADRAO = [
+            "Sede","Rodeadouro","Dr. Humberto","Jatobá","Massaroca","Riacho Seco","Pedro Raimundo",
+            "Lagoa do Salitre","Lagoa da Areia","Sítio Roçado","Fazenda Bebedouro","Junco","Rua Vermelha"
+            # ... (pode adicionar mais se quiser)
+        ]
+        existentes = set(db.scalars(select(Congregation.name)).all())
+        faltantes = [n for n in CONGREGACOES_PADRAO if n not in existentes]
+        if faltantes:
+            db.add_all(Congregation(name=n) for n in faltantes)
+            db.commit()
+
+        # Garante que a Sede e o usuário admin existam
+        sede_cong = db.scalar(select(Congregation).where(Congregation.name == "Sede"))
+        if sede_cong is None:
+            sede_cong = Congregation(name="Sede")
+            db.add(sede_cong)
+            db.commit() # Commit para garantir que a sede tenha um ID
+
+        if db.scalar(select(User).where(User.username == "admin")) is None:
+            db.add(User(
+                username="admin",
+                password_hash=hash_password("123456"),
+                role="SEDE",
+                congregation_id=sede_cong.id,
+            ))
+            db.commit()
+
 def hash_password(password: str) -> str:
     salt = os.urandom(16)
     pwdhash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, 100000)
