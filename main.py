@@ -1812,8 +1812,8 @@ def page_lancamentos(user: "User"):
             
             df_logs = _load_service_logs(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
 
-            # ===================== ALERTA INLINE (sem novas defs) =====================
-            # Compara Dízimo declarado no resumo do culto x valor real por data (Tithes/Transações)
+            # ===================== ALERTA INLINE (com evidência) =====================
+            # Compara Dízimo declarado no resumo do culto x valor real por data
             with SessionLocal() as _db_chk:
                 tithe_sub = (Tithe.sub_congregation_id.is_(None) if target_sub_cong_id is None else (Tithe.sub_congregation_id == target_sub_cong_id))
                 tx_sub    = (Transaction.sub_congregation_id.is_(None) if target_sub_cong_id is None else (Transaction.sub_congregation_id == target_sub_cong_id))
@@ -1848,11 +1848,16 @@ def page_lancamentos(user: "User"):
 
                 # Equivalência por data (maior entre nominais e tx de dízimo)
                 real_by_date = {d: max(by_tithe.get(d, 0.0), by_tx.get(d, 0.0)) for d in (set(by_tithe) | set(by_tx))}
+                # NOVO: só alertar quando houver evidência (tithe ou tx de dízimo no dia)
+                evidence_dates = set(by_tithe) | set(by_tx)
 
             alertas = []
             if not df_logs.empty:
                 for _, row in df_logs.iterrows():
                     d = _to_date(row["Data do Culto"])
+                    # Ignora dias sem evidência para evitar “falsos positivos”
+                    if d not in evidence_dates:
+                        continue
                     declarado = float(row.get("Dízimo", 0.0) or 0.0)
                     real = float(real_by_date.get(d, 0.0))
                     delta = round(declarado - real, 2)
@@ -1922,6 +1927,7 @@ def page_lancamentos(user: "User"):
             txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == "SAÍDA", Transaction.sub_congregation_id == target_sub_cong_id)
             txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
             _editor_lancamentos(txs_out, f"Saídas - {contexto_tabela}", tx_type_hint="SAÍDA", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
+
 
 
 # ===== PÁGINA: LANÇAMENTOS (com modo Tabela + 3 editores) =====
