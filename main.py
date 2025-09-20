@@ -2170,7 +2170,30 @@ def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, m
 # SUBSTITUA A SUA FUNÇÃO build_single_unit_report_pdf PELA VERSÃO CORRIGIDA ABAIXO
 
 def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_name: str, ref: date, db: Session) -> bytes:
-    """Gera um PDF de prestação de contas para uma única unidade (principal ou sub)."""
+    """
+    Gera um PDF de prestação de contas para uma única unidade (principal ou sub).
+    ALTERAÇÃO: se for a unidade principal (sub_cong_id=None) e existir sub-congregação,
+    delega para build_full_statement_pdf(cong_id, ref, db) para incluir as subs no PDF.
+    """
+    # >>> ALTERAÇÃO (bloco curto de desvio para PDF consolidado) <<<
+    try:
+        has_subs = bool(db.scalar(select(func.count(SubCongregation.id)).where(SubCongregation.congregation_id == cong_id)) or 0)
+    except Exception:
+        has_subs = False
+    if sub_cong_id is None and has_subs:
+        # Gera o PDF consolidado (principal + subs) reaproveitando sua função existente
+        return build_full_statement_pdf(parent_cong_id=cong_id, ref=ref, db=db)
+    # >>> FIM DA ALTERAÇÃO <<<
+
+    # ======= A PARTIR DAQUI, CÓDIGO ORIGINAL MANTIDO =======
+    from io import BytesIO
+    from reportlab.lib.pagesizes import A4, portrait
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer
+    from reportlab.lib.enums import TA_CENTER
+
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
     styles = getSampleStyleSheet()
@@ -2237,7 +2260,7 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
         story.append(Paragraph("Nenhuma entrada registada.", normal_style))
     story.append(Spacer(1, 0.5*cm))
 
-    # Tabela de Saídas (continua igual, usando a coleta de dados antiga)
+    # Tabela de Saídas
     story.append(Paragraph("2. Saídas", heading_style))
     if data_geral["tx_out"]:
         data_out = [["Data", "Categoria", "Descrição", "Valor"]]
@@ -2281,8 +2304,6 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
 
     doc.build(story)
     return buf.getvalue()
-
-
 
 
 def page_relatorio_dizimistas(user: "User"):
