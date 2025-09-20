@@ -1341,6 +1341,112 @@ def _editor_missions_outflows(saidas: List["Transaction"], titulo: str, congs_al
 
     _save_btn(_save, f"missoes_out_{titulo}")
 
+def _editor_missions_entries_agg(congs_all: List[Congregation], start: date, end: date, titulo: str):
+    with SessionLocal() as db:
+        # Totais de Missões (Entrada) por congregação no período
+        q = select(
+            Congregation.name,
+            func.sum(Transaction.amount)
+        ).join(Transaction).join(Category).where(
+            Transaction.date >= start, Transaction.date < end,
+            Transaction.type == TYPE_IN,
+            func.lower(Category.name).in_(("missões", "missoes"))
+        ).group_by(Congregation.name)
+
+        sums = db.execute(q).all()
+        rows = [{"Congregação": name, "Valor": float(val or 0.0)} for name, val in sums]
+        rows.sort(key=lambda x: x["Valor"], reverse=True)
+
+    df_view = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["Congregação", "Valor"])
+    df_orig = df_view.copy()  # guarda o estado original para comparação
+
+    edited_view = st.data_editor(
+        df_view,
+        use_container_width=True,
+        hide_index=True,
+        num_rows="dynamic",
+        column_config={
+            "Congregação": st.column_config.SelectboxColumn(
+                "Congregação",
+                options=[c.name for c in order_congs_sede_first(congs_all)],
+                required=True
+            ),
+            "Valor": st.column_config.NumberColumn(
+                "Valor (R$)",
+                min_value=0.0,
+                step=1.0,
+                format="R$ %.2f"
+            ),
+        },
+        key=f"missoes_in_agg_{titulo}",
+    )
+
+    # Totalizador do mês
+    try:
+        _total_in_missions = 0.0
+        if isinstance(edited_view, pd.DataFrame) and not edited_view.empty:
+            _total_in_missions = edited_view["Valor"].map(_to_float_brl).sum()
+    except Exception:
+        _total_in_missions = 0.0
+    st.metric("Total de ENTRADAS de Missões (mês corrente)", format_currency(_total_in_missions))
+
+    def _save():
+        with SessionLocal() as db:
+            by_name = {c.name: c.id for c in congs_all}
+            cat_miss = db.scalar(select(Category).where(func.lower(Category.name).in_(("missões", "missoes"))))
+            if not cat_miss:
+                st.error("Categoria 'Missões' não encontrada.")
+                return
+
+            # Mapeia valores antes/depois para gerar/atualizar o AJUSTE agregado
+            orig_map = {row["Congregação"]: row["Valor"] for _, row in df_orig.iterrows()}
+            edited_map = {row["Congregação"]: row["Valor"] for _, row in edited_view.iterrows()}
+            all_congs = set(orig_map.keys()) | set(edited_map.keys())
+
+            for cong_name in all_congs:
+                cong_id = by_name.get(cong_name)
+                if not cong_id:
+                    continue
+
+                valor_antigo = float(orig_map.get(cong_name, 0.0) or 0.0)
+                valor_novo   = float(edited_map.get(cong_name, 0.0) or 0.0)
+                if abs(valor_antigo - valor_novo) <= 0.01:
+                    continue
+
+                ajuste = valor_novo - valor_antigo
+
+                # Procura um ajuste existente para este mês/unidade
+                q_adj = select(Transaction).where(
+                    Transaction.congregation_id == cong_id,
+                    Transaction.category_id == cat_miss.id,
+                    Transaction.description == ADJ_MISS_IN_DESC,
+                    Transaction.date >= start, Transaction.date < end
+                )
+                adj_existente = db.scalar(q_adj)
+
+                if adj_existente:
+                    novo_valor_ajuste = float(adj_existente.amount or 0.0) + ajuste
+                    if abs(novo_valor_ajuste) < 0.01:
+                        db.delete(adj_existente)
+                    else:
+                        adj_existente.amount = novo_valor_ajuste
+                        db.add(adj_existente)
+                elif abs(ajuste) >= 0.01:
+                    db.add(Transaction(
+                        date=start,
+                        type=TYPE_IN,
+                        category_id=cat_miss.id,
+                        amount=ajuste,
+                        description=ADJ_MISS_IN_DESC,
+                        congregation_id=cong_id
+                    ))
+
+            db.commit()
+        st.toast("💾 Alterações salvas com sucesso!", icon="✅")
+        st.rerun()
+
+    _save_btn(_save, f"missoes_in_{titulo}")
+
 
 def _editor_missions_entries_unit(cong_id: int, sub_cong_id: Optional[int], start: date, end: date, titulo: str = "Entradas de Missões (por culto)"):
     """
