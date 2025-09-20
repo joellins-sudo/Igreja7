@@ -422,6 +422,78 @@ st.markdown(CSS_TABLE_BOOST, unsafe_allow_html=True)
 st.markdown(CSS, unsafe_allow_html=True)
 st.markdown(MODERN_UI_CSS, unsafe_allow_html=True)
 
+# === Cores dos botões ===
+BTN_COLORS = {
+    "entrada":   "#16a34a",  # verde
+    "dizimista": "#1d4ed8",  # azul
+    "saida":     "#dc2626",  # vermelho
+    "neutral":   "#1f6feb",  # fallback
+}
+
+def form_submit_colored(label: str, key_suffix: str, theme: str = "neutral") -> bool:
+    """
+    Igual ao st.form_submit_button, mas pinta o botão com a cor desejada.
+    Não muda nenhuma lógica — só a cor/estilo.
+    """
+    import streamlit as st
+    color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
+
+    # marcador invisível ANTES do botão
+    st.markdown(f'<div id="mark-{key_suffix}" style="display:none"></div>', unsafe_allow_html=True)
+
+    # botão original (devolve True/False)
+    clicked = st.form_submit_button(label, type="primary", key=f"submit_{key_suffix}")
+
+    # CSS que mira o botão que vem depois do marcador
+    st.markdown(
+        f"""
+        <style>
+          #mark-{key_suffix} + div [data-testid="stFormSubmitButton"] > button,
+          #mark-{key_suffix} ~ div [data-testid="stFormSubmitButton"] > button {{
+            background: {color} !important;
+            border-color: {color} !important;
+            color: #fff !important;
+            box-shadow: 0 6px 16px rgba(0,0,0,.12) !important;
+          }}
+          #mark-{key_suffix} + div [data-testid="stFormSubmitButton"] > button:hover,
+          #mark-{key_suffix} ~ div [data-testid="stFormSubmitButton"] > button:hover {{
+            filter: brightness(0.93);
+            transform: translateY(-1px);
+          }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+    return clicked
+
+def button_colored(label: str, key_suffix: str, theme: str = "neutral", on_click=None) -> None:
+    """
+    Versão colorida para st.button (fora de form).
+    """
+    import streamlit as st
+    color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
+    st.markdown(f'<div id="mark-{key_suffix}" style="display:none"></div>', unsafe_allow_html=True)
+    st.button(label, key=f"btn_{key_suffix}", type="primary", on_click=on_click)
+    st.markdown(
+        f"""
+        <style>
+          #mark-{key_suffix} + div [data-testid="stButton"] > button,
+          #mark-{key_suffix} ~ div [data-testid="stButton"] > button {{
+            background: {color} !important;
+            border-color: {color} !important;
+            color: #fff !important;
+            box-shadow: 0 6px 16px rgba(0,0,0,.12) !important;
+          }}
+          #mark-{key_suffix} + div [data-testid="stButton"] > button:hover,
+          #mark-{key_suffix} ~ div [data-testid="stButton"] > button:hover {{
+            filter: brightness(0.93);
+            transform: translateY(-1px);
+          }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
 # IMPORTANTE:
 # Quando estiver dentro da função de login (login_ui), chame:
 # st.markdown(ADRF_LOGIN_CSS, unsafe_allow_html=True)
@@ -1958,7 +2030,7 @@ def page_lancamentos(user: "User"):
                     ent_dizimo = c1.number_input("Valor do Dízimo", min_value=0.0, value=0.0, format="%.2f", key="ent_dizimo_form")
                     ent_oferta = c2.number_input("Valor da Oferta", min_value=0.0, value=0.0, format="%.2f", key="ent_oferta_form")
 
-                    if st.form_submit_button("Salvar Entrada do Culto"):
+                    if form_submit_colored("Salvar Entrada do Culto", "ent_culto_submit", theme="entrada"):
                         if ent_dizimo > 0 or ent_oferta > 0:
                             log_existente = db.scalar(
                                 select(ServiceLog).where(
@@ -2026,7 +2098,7 @@ def page_lancamentos(user: "User"):
                     sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
                     sai_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="sai_valor")
 
-                    if st.form_submit_button("Salvar SAÍDA"):
+                    if form_submit_colored("Salvar SAÍDA", "saida_submit", theme="saida"):
                         cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
                         if sai_valor > 0 and cat_obj:
                             db.add(
