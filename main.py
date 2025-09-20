@@ -3405,16 +3405,18 @@ def page_relatorio_entrada(user: "User"):
             escopo_selecionado = st.selectbox("Selecione o escopo do relatório:", escopo_opts, key="re_sede_escopo")
             
             if escopo_selecionado == "-- Visão Agregada --":
-                st.info("Visualização do total de entradas por unidade.")
+                st.info("Visualização do total de entradas por unidade, baseado nos resumos de culto.")
                 rows_data = []
                 for c in congs_all:
-                    principal_df = _build_entry_report_df(db, c.id, start, end, sub_cong_id=None)
+                    # Dados da congregação principal
+                    principal_df = _load_service_logs(db, c.id, start, end, sub_cong_id=None)
                     principal_total = principal_df['Total'].sum() if not principal_df.empty else 0.0
                     rows_data.append({"Unidade": f"{c.name} (Principal)", "Total (R$)": principal_total})
                     
+                    # Dados das sub-congregações
                     sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == c.id)).all()
                     for sub in sub_congs:
-                        sub_df = _build_entry_report_df(db, c.id, start, end, sub_cong_id=sub.id)
+                        sub_df = _load_service_logs(db, c.id, start, end, sub_cong_id=sub.id)
                         sub_total = sub_df['Total'].sum() if not sub_df.empty else 0.0
                         rows_data.append({"Unidade": f"↳ {sub.name}", "Total (R$)": sub_total})
                 
@@ -3446,8 +3448,10 @@ def page_relatorio_entrada(user: "User"):
         
         st.info(f"Exibindo dados para: **{contexto_selecionado}**")
 
-        report_df = _build_entry_report_df(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id)
+        # Usa a mesma função da página de Lançamentos para buscar os dados
+        report_df = _load_service_logs(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id)
         
+        # Usa st.dataframe para exibir como uma "vitrine" (não editável)
         st.dataframe(
             report_df.style.format({
                 "Data do Culto": "{:%d/%m/%Y}",
@@ -3456,9 +3460,11 @@ def page_relatorio_entrada(user: "User"):
                 "Total": format_currency
             }),
             use_container_width=True,
-            hide_index=True
+            hide_index=True,
+            column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"] # Garante a ordem correta
         )
 
+        # Calcula e exibe os totais
         try:
             total_dizimo, total_oferta, total_geral_unidade = 0.0, 0.0, 0.0
             if not report_df.empty:
