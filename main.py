@@ -2177,6 +2177,8 @@ def build_dizimista_search_pdf(df: pd.DataFrame, ano_pesq: int, cong_sel: str, m
 
     doc.build(story)
     return buf.getvalue()
+# SUBSTITUA A SUA FUNÇÃO build_single_unit_report_pdf PELA VERSÃO CORRIGIDA ABAIXO
+
 def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_name: str, ref: date, db: Session) -> bytes:
     """Gera um PDF de prestação de contas para uma única unidade (principal ou sub)."""
     buf = BytesIO()
@@ -2202,8 +2204,8 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
     story.append(Spacer(1, 0.5*cm))
 
     # Coleta de dados gerais (para Saídas e Resumo Final)
-    data = _collect_month_data(db, cong_id, start, end, sub_cong_id=sub_cong_id)
-    totals = data["totals"]
+    data_geral = _collect_month_data(db, cong_id, start, end, sub_cong_id=sub_cong_id)
+    totals_gerais = data_geral["totals"]
     
     # ===== Tabela de Entradas (CORRIGIDA) =====
     story.append(Paragraph("1. Entradas (Resumo por Culto)", heading_style))
@@ -2216,7 +2218,7 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
         for _, row in df_entradas.iterrows():
             data_in.append([
                 row["Data do Culto"].strftime("%d/%m/%Y"),
-                Paragraph(row["Tipo de Culto"], normal_style),
+                Paragraph(str(row["Tipo de Culto"]), normal_style),
                 format_currency(row["Dízimo"]),
                 format_currency(row["Oferta"]),
                 format_currency(row["Total"])
@@ -2237,7 +2239,7 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
         tbl_in.setStyle(TableStyle([
             ('GRID', (0,0), (-1,-1), 1, colors.grey), ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
             ('ALIGN', (2,1), (-1,-1), 'RIGHT'), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('SPAN', (0,-1), (1,-1)),
+            ('SPAN', (0,-1), (1,-1)), # Junta as duas primeiras células da linha de total
             ('BACKGROUND', (0,-1), (-1,-1), colors.lightgreen)
         ]))
         story.append(tbl_in)
@@ -2245,14 +2247,14 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
         story.append(Paragraph("Nenhuma entrada registada.", normal_style))
     story.append(Spacer(1, 0.5*cm))
 
-    # Tabela de Saídas (continua igual, usando a coleta de dados antiga)
+    # Tabela de Saídas
     story.append(Paragraph("2. Saídas", heading_style))
-    if data["tx_out"]:
+    if data_geral["tx_out"]:
         data_out = [["Data", "Categoria", "Descrição", "Valor"]]
-        for t in data["tx_out"]:
+        for t in data_geral["tx_out"]:
             data_out.append([t.date.strftime("%d/%m/%Y"), t.category.name, t.description or "", format_currency(t.amount)])
         
-        data_out.append([Paragraph("<b>Total de Saídas:</b>", right_align_style), "", "", Paragraph(f"<b>{format_currency(totals['saidas_total'])}</b>", right_align_style)])
+        data_out.append([Paragraph("<b>Total de Saídas:</b>", right_align_style), "", "", Paragraph(f"<b>{format_currency(totals_gerais['saidas_total'])}</b>", right_align_style)])
         
         tbl_out = Table(data_out, colWidths=[2.5*cm, 4.5*cm, 6.5*cm, 3*cm], repeatRows=1)
         tbl_out.setStyle(TableStyle([
@@ -2267,9 +2269,8 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
 
     # Tabela de Resumo Financeiro
     story.append(Paragraph("3. Resumo Financeiro da Unidade", heading_style))
-    # Os totais aqui agora refletem as entradas da nova tabela ServiceLog
     entradas_resumo = df_entradas['Total'].sum() if not df_entradas.empty else 0.0
-    saidas_resumo = totals['saidas_total']
+    saidas_resumo = totals_gerais['saidas_total']
     saldo_resumo = entradas_resumo - saidas_resumo
     summary_data = [
         ["Total de Entradas", format_currency(entradas_resumo)],
