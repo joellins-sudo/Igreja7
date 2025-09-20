@@ -1713,7 +1713,7 @@ def page_lancamentos(user: "User"):
         tipos_de_culto = [
             "Culto da Noite (Padrão)", 
             "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)", 
-            "Culto de missões(Registre ofertas no Relatório de Missões)",
+            "Culto de missões(Registre a oferta no Relatório de Missões)",
             "Evento Especial", 
             "Outro"
         ]
