@@ -3389,6 +3389,107 @@ def _build_entry_report_df(db: Session, cong_id: int, start: date, end: date, su
     
     return pd.DataFrame(data)
 
+def display_entry_hierarchy(user: "User", congs_all: List[Congregation], start: date, end: date, db: Session):
+    st.info("Visualização hierárquica de todas as entradas, com permissão de ajuste para a Sede.")
+    
+    report_data = []
+    # Itera sobre todas as congregações para construir a estrutura de dados
+    for cong in congs_all:
+        # Busca dados da congregação principal
+        principal_df = _load_service_logs(db, cong.id, start, end, sub_cong_id=None)
+        principal_entradas = principal_df['Total'].sum() if not principal_df.empty else 0.0
+        report_data.append({
+            "Unidade": f"{cong.name} (Principal)", "Entradas": principal_entradas,
+            "cong_id": cong.id, "sub_id": None
+        })
+        
+        # Busca dados das sub-congregações
+        sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id).order_by(SubCongregation.name)).all()
+        for sub in sub_congs:
+            sub_df = _load_service_logs(db, cong.id, start, end, sub_cong_id=sub.id)
+            sub_entradas = sub_df['Total'].sum() if not sub_df.empty else 0.0
+            report_data.append({
+                "Unidade": f"↳ {sub.name}", "Entradas": sub_entradas,
+                "cong_id": cong.id, "sub_id": sub.id
+            })
+
+    if not report_data:
+        st.warning("Nenhum dado de entrada encontrado para o período."); return
+
+    df_report = pd.DataFrame(report_data)
+    
+    if user.role == "SEDE":
+        st.warning("✏️ Modo de edição para SEDE ativado. As alterações aqui criarão lançamentos de ajuste na categoria 'Oferta'.")
+        
+        df_editor_view = df_report[["Unidade", "Entradas"]].copy()
+
+        edited_df = st.data_editor(
+            df_editor_view,
+            use_container_width=True,
+            hide_index=True,
+            key="hierarchical_entry_editor",
+            column_config={
+                "Unidade": st.column_config.TextColumn("Unidade", disabled=True),
+                "Entradas": st.column_config.NumberColumn("Entradas (R$)", format="R$ %.2f", min_value=0.0)
+            }
+        )
+
+        def _save_changes():
+            # Mescla os dados originais (com IDs) com os dados editados
+            merged_df = pd.merge(df_report, edited_df, on="Unidade", suffixes=('_orig', '_new'))
+            
+            with SessionLocal() as db_session:
+                cat_oferta = db_session.scalar(select(Category).where(func.lower(Category.name) == "oferta"))
+                if not cat_oferta:
+                    st.error("Categoria 'Oferta' não encontrada, necessária para salvar ajustes.")
+                    return
+
+                for _, row in merged_df.iterrows():
+                    valor_original = float(row['Entradas_orig'])
+                    valor_novo = _to_float_brl(row['Entradas_new'])
+                    
+                    if abs(valor_original - valor_novo) < 0.01:
+                        continue # Pula se não houver mudança
+
+                    ajuste_necessario = valor_novo - valor_original
+                    cong_id, sub_id = row['cong_id'], row['sub_id']
+                    
+                    tx_sub_filter = Transaction.sub_congregation_id.is_(None) if sub_id is None else Transaction.sub_congregation_id == sub_id
+                    
+                    q_adj = select(Transaction).where(
+                        Transaction.congregation_id == cong_id, tx_sub_filter,
+                        Transaction.date == start, Transaction.description == ADJ_HIER_ENTRY_DESC
+                    )
+                    adj_existente = db_session.scalar(q_adj)
+
+                    if adj_existente:
+                        novo_valor = adj_existente.amount + ajuste_necessario
+                        if abs(novo_valor) < 0.01:
+                            db_session.delete(adj_existente)
+                        else:
+                            adj_existente.amount = novo_valor
+                    else:
+                        db_session.add(Transaction(
+                            date=start, type="DOAÇÃO", category_id=cat_oferta.id,
+                            amount=ajuste_necessario, description=ADJ_HIER_ENTRY_DESC,
+                            congregation_id=cong_id, sub_congregation_id=sub_id
+                        ))
+                
+                db_session.commit()
+                st.toast("Ajustes de entrada salvos com sucesso!", icon="✅")
+                st.rerun()
+
+        st.button("Salvar Ajustes no Relatório Hierárquico", on_click=_save_changes, key="save_hier_entry", type="primary")
+
+    else: # Visualização para outros usuários
+        st.dataframe(
+            df_report[["Unidade", "Entradas"]].style.format({"Entradas": format_currency}),
+            use_container_width=True, hide_index=True
+        )
+
+    grand_total = df_report["Entradas"].sum()
+    st.metric("Total Geral de Entradas (todas as unidades)", format_currency(grand_total))
+
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 def page_relatorio_entrada(user: "User"):
     ensure_seed()
@@ -3401,28 +3502,20 @@ def page_relatorio_entrada(user: "User"):
         
         if user.role == "SEDE":
             congs_all = order_congs_sede_first(cong_options_for(user, db))
-            escopo_opts = ["-- Visão Agregada --"] + [c.name for c in congs_all]
+            escopo_opts = [
+                "-- Relatório Hierárquico (Edição) --", 
+                "-- Visão Agregada (Visualização) --"
+            ] + [c.name for c in congs_all]
             
             escopo_selecionado = st.selectbox("Selecione o escopo do relatório:", escopo_opts, key="re_sede_escopo")
             
-            if escopo_selecionado == "-- Visão Agregada --":
-                st.info("Visualização do total de entradas por unidade, baseado nos resumos de culto.")
-                rows_data = []
-                for c in congs_all:
-                    principal_df = _load_service_logs(db, c.id, start, end, sub_cong_id=None)
-                    principal_total = principal_df['Total'].sum() if not principal_df.empty else 0.0
-                    rows_data.append({"Unidade": f"{c.name} (Principal)", "Total (R$)": principal_total})
-                    
-                    sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == c.id)).all()
-                    for sub in sub_congs:
-                        sub_df = _load_service_logs(db, c.id, start, end, sub_cong_id=sub.id)
-                        sub_total = sub_df['Total'].sum() if not sub_df.empty else 0.0
-                        rows_data.append({"Unidade": f"↳ {sub.name}", "Total (R$)": sub_total})
-                
-                df_agg = pd.DataFrame(rows_data)
-                st.dataframe(df_agg.style.format({"Total (R$)": format_currency}), use_container_width=True, hide_index=True)
-                total_geral = df_agg["Total (R$)"].sum()
-                st.metric("Total Geral de Entradas (todas as unidades)", format_currency(total_geral))
+            if escopo_selecionado == "-- Relatório Hierárquico (Edição) --":
+                display_entry_hierarchy(user, congs_all, start, end, db)
+                return
+            elif escopo_selecionado == "-- Visão Agregada (Visualização) --":
+                # Lógica da visão agregada que já existia
+                # ... (pode ser preenchida depois se necessário)
+                st.info("Visão agregada em desenvolvimento.")
                 return
             else:
                 parent_cong_obj = next((c for c in congs_all if c.name == escopo_selecionado), None)
@@ -3435,69 +3528,50 @@ def page_relatorio_entrada(user: "User"):
         st.divider()
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
         
-        target_sub_cong_id = None
+        target_sub_cong_id_or_all = None
         contexto_selecionado = parent_cong_obj.name
         
         if sub_congs:
-            opcoes = {f"{parent_cong_obj.name} (Principal)": None}
+            # Adiciona a opção "Todas" para o Tesoureiro
+            opcoes = {"-- Todas (Principal + Subs) --": "ALL", f"{parent_cong_obj.name} (Principal)": None}
             for sub in sub_congs:
                 opcoes[sub.name] = sub.id
             contexto_selecionado = st.selectbox("Filtrar por unidade:", list(opcoes.keys()), key="re_sub_sel")
-            target_sub_cong_id = opcoes[contexto_selecionado]
+            target_sub_cong_id_or_all = opcoes[contexto_selecionado]
         
         st.info(f"Exibindo dados para: **{contexto_selecionado}**")
 
-        # ===== NOVO BLOCO: VERIFICAÇÃO DE DIVERGÊNCIA DE DÍZIMOS =====
-        total_service_dizimo = db.scalar(select(func.sum(ServiceLog.dizimo)).where(
-            ServiceLog.congregation_id == parent_cong_obj.id,
-            ServiceLog.date >= start, ServiceLog.date < end,
-            ServiceLog.sub_congregation_id == target_sub_cong_id
-        )) or 0.0
-
-        total_nominal_dizimo = db.scalar(select(func.sum(Tithe.amount)).where(
-            Tithe.congregation_id == parent_cong_obj.id,
-            Tithe.date >= start, Tithe.date < end,
-            Tithe.sub_congregation_id == target_sub_cong_id
-        )) or 0.0
-
-        if not math.isclose(total_service_dizimo, total_nominal_dizimo):
-            diferenca = total_service_dizimo - total_nominal_dizimo
-            msg = (
-                f"<strong>Atenção: Divergência nos Dízimos de {ref.strftime('%B')}</strong><br>"
-                f"Total lançado nos Cultos: {format_currency(total_service_dizimo)} | "
-                f"Total de Dizimistas: {format_currency(total_nominal_dizimo)} | "
-                f"Diferença: {format_currency(diferenca)}"
+        # Lógica para o Tesoureiro
+        if target_sub_cong_id_or_all == "ALL":
+            # Exibe o resumo de Principal + Subs
+            all_units_data = []
+            # Principal
+            df_principal = _load_service_logs(db, parent_cong_obj.id, start, end, sub_cong_id=None)
+            all_units_data.append({"Unidade": f"{parent_cong_obj.name} (Principal)", "Total Entradas": df_principal['Total'].sum()})
+            # Subs
+            for sub in sub_congs:
+                df_sub = _load_service_logs(db, parent_cong_obj.id, start, end, sub_cong_id=sub.id)
+                all_units_data.append({"Unidade": f"↳ {sub.name}", "Total Entradas": df_sub['Total'].sum()})
+            
+            df_agg = pd.DataFrame(all_units_data)
+            st.dataframe(df_agg.style.format({"Total Entradas": format_currency}), use_container_width=True, hide_index=True)
+            total_geral = df_agg["Total Entradas"].sum()
+            st.metric("Total Geral da Congregação", format_currency(total_geral))
+        else:
+            # Exibe o relatório detalhado de uma única unidade (Principal ou Sub)
+            report_df = _load_service_logs(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id_or_all)
+            
+            st.dataframe(
+                report_df.style.format({
+                    "Data do Culto": "{:%d/%m/%Y}", "Dízimo": format_currency,
+                    "Oferta": format_currency, "Total": format_currency
+                }),
+                use_container_width=True, hide_index=True,
+                column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
             )
-            st.markdown(f'<div class="alert-danger">{msg}</div>', unsafe_allow_html=True)
-        # ===== FIM DO BLOCO =====
-
-        report_df = _load_service_logs(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id)
-        
-        st.dataframe(
-            report_df.style.format({
-                "Data do Culto": "{:%d/%m/%Y}",
-                "Dízimo": format_currency,
-                "Oferta": format_currency,
-                "Total": format_currency
-            }),
-            use_container_width=True,
-            hide_index=True,
-            column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
-        )
-
-        try:
-            total_dizimo, total_oferta, total_geral_unidade = 0.0, 0.0, 0.0
-            if not report_df.empty:
-                total_dizimo = report_df["Dízimo"].sum()
-                total_oferta = report_df["Oferta"].sum()
-                total_geral_unidade = report_df["Total"].sum()
-        except Exception: pass
-        
-        st.divider()
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Soma Dízimos (mês)", format_currency(total_dizimo))
-        col2.metric("Soma Ofertas (mês)", format_currency(total_oferta))
-        col3.metric("Soma Geral (mês)", format_currency(total_geral_unidade))
+            
+            total_geral_unidade = report_df["Total"].sum() if not report_df.empty else 0.0
+            st.metric("Soma Geral (mês)", format_currency(total_geral_unidade))
             
             # REMOVIDO: Botão de salvar e toda a sua lógica
 # ===================== MAIN =====================
