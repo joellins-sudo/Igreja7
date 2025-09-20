@@ -119,40 +119,38 @@ ADRF_LOGIN_CSS = """
 # ======== CSS: CORES DOS BOTÕES POR FORMULÁRIO ========
 FORM_BUTTONS_CSS = """
 <style>
-/* ENTRADAS (VERDE) */
-.adrf-entrada [data-testid="stFormSubmitButton"] button {
-    background-color: #16a34a !important;
-    border-color: #16a34a !important;
-    color: white !important;
+/* ENTRADAS (VERDE) — funciona dentro e fora de st.form */
+.adrf-entrada [data-testid="stFormSubmitButton"] button,
+.adrf-entrada [data-testid="stButton"] button{
+  background-color:#16a34a !important;
+  border-color:#16a34a !important;
+  color:#fff !important;
 }
-.adrf-entrada [data-testid="stFormSubmitButton"] button:hover {
-    background-color: #15803d !important;
-    border-color: #15803d !important;
-}
+.adrf-entrada [data-testid="stFormSubmitButton"] button:hover,
+.adrf-entrada [data-testid="stButton"] button:hover{ filter:brightness(0.93); }
 
-/* DIZIMISTAS (AZUL) */
-.adrf-dizimo [data-testid="stFormSubmitButton"] button {
-    background-color: #1d4ed8 !important;
-    border-color: #1d4ed8 !important;
-    color: white !important;
+/* DÍZIMOS (AZUL) */
+.adrf-dizimo [data-testid="stFormSubmitButton"] button,
+.adrf-dizimo [data-testid="stButton"] button{
+  background-color:#1d4ed8 !important;
+  border-color:#1d4ed8 !important;
+  color:#fff !important;
 }
-.adrf-dizimo [data-testid="stFormSubmitButton"] button:hover {
-    background-color: #1e40af !important;
-    border-color: #1e40af !important;
-}
+.adrf-dizimo [data-testid="stFormSubmitButton"] button:hover,
+.adrf-dizimo [data-testid="stButton"] button:hover{ filter:brightness(0.93); }
 
 /* SAÍDAS (VERMELHO) */
-.adrf-saida [data-testid="stFormSubmitButton"] button {
-    background-color: #dc2626 !important;
-    border-color: #dc2626 !important;
-    color: white !important;
+.adrf-saida [data-testid="stFormSubmitButton"] button,
+.adrf-saida [data-testid="stButton"] button{
+  background-color:#dc2626 !important;
+  border-color:#dc2626 !important;
+  color:#fff !important;
 }
-.adrf-saida [data-testid="stFormSubmitButton"] button:hover {
-    background-color: #b91c1c !important;
-    border-color: #b91c1c !important;
-}
+.adrf-saida [data-testid="stFormSubmitButton"] button:hover,
+.adrf-saida [data-testid="stButton"] button:hover{ filter:brightness(0.93); }
 </style>
 """
+
 # alias que seu código usa em alguns pontos
 BUTTONS_CSS = FORM_BUTTONS_CSS
 
@@ -423,76 +421,57 @@ st.markdown(CSS, unsafe_allow_html=True)
 st.markdown(MODERN_UI_CSS, unsafe_allow_html=True)
 
 # === Cores dos botões ===
+# 🔵 ÚNICA definição válida — deixe-a UMA VEZ só, acima dos helpers de botão
+# mantenha UMA definição de BTN_COLORS
 BTN_COLORS = {
-    "entrada":   "#16a34a",  # verde
-    "dizimista": "#1d4ed8",  # azul
-    "saida":     "#dc2626",  # vermelho
-    "neutral":   "#1f6feb",  # fallback
+    "entrada":   "#16a34a",
+    "dizimista": "#1d4ed8",
+    "saida":     "#dc2626",
+    "neutral":   "#1f6feb",
 }
 
 def form_submit_colored(label: str, key_suffix: str, theme: str = "neutral") -> bool:
-    """
-    Igual ao st.form_submit_button, mas pinta o botão com a cor desejada.
-    Não muda nenhuma lógica — só a cor/estilo.
-    """
     import streamlit as st
     color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
-
-    # marcador invisível ANTES do botão
-    st.markdown(f'<div id="mark-{key_suffix}" style="display:none"></div>', unsafe_allow_html=True)
-
-    # botão original (devolve True/False)
-    clicked = st.form_submit_button(label, type="primary", key=f"submit_{key_suffix}")
-
-    # CSS que mira o botão que vem depois do marcador
-    st.markdown(
-        f"""
-        <style>
-          #mark-{key_suffix} + div [data-testid="stFormSubmitButton"] > button,
-          #mark-{key_suffix} ~ div [data-testid="stFormSubmitButton"] > button {{
-            background: {color} !important;
-            border-color: {color} !important;
-            color: #fff !important;
-            box-shadow: 0 6px 16px rgba(0,0,0,.12) !important;
-          }}
-          #mark-{key_suffix} + div [data-testid="stFormSubmitButton"] > button:hover,
-          #mark-{key_suffix} ~ div [data-testid="stFormSubmitButton"] > button:hover {{
-            filter: brightness(0.93);
-            transform: translateY(-1px);
-          }}
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
+    scope = f"scoped-submit-{key_suffix}"
+    with st.container():
+        st.markdown(f"<div class='{scope}'>", unsafe_allow_html=True)
+        clicked = st.form_submit_button(label, type="primary", key=f"submit_{key_suffix}")
+        st.markdown(
+            f"""
+            <style>
+              .{scope} [data-testid="stFormSubmitButton"] > button {{
+                background:{color} !important; border-color:{color} !important; color:#fff !important;
+                box-shadow:0 6px 16px rgba(0,0,0,.12) !important;
+              }}
+              .{scope} [data-testid="stFormSubmitButton"] > button:hover {{ filter:brightness(0.93); }}
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
     return clicked
 
-def button_colored(label: str, key_suffix: str, theme: str = "neutral", on_click=None) -> None:
-    """
-    Versão colorida para st.button (fora de form).
-    """
+def _save_btn(on_click, key_suffix: str, theme: str = "neutral", label: str = "Salvar alterações"):
     import streamlit as st
     color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
-    st.markdown(f'<div id="mark-{key_suffix}" style="display:none"></div>', unsafe_allow_html=True)
-    st.button(label, key=f"btn_{key_suffix}", type="primary", on_click=on_click)
-    st.markdown(
-        f"""
-        <style>
-          #mark-{key_suffix} + div [data-testid="stButton"] > button,
-          #mark-{key_suffix} ~ div [data-testid="stButton"] > button {{
-            background: {color} !important;
-            border-color: {color} !important;
-            color: #fff !important;
-            box-shadow: 0 6px 16px rgba(0,0,0,.12) !important;
-          }}
-          #mark-{key_suffix} + div [data-testid="stButton"] > button:hover,
-          #mark-{key_suffix} ~ div [data-testid="stButton"] > button:hover {{
-            filter: brightness(0.93);
-            transform: translateY(-1px);
-          }}
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
+    scope = f"scoped-btn-{key_suffix}"
+    with st.container():
+        st.markdown(f"<div class='{scope}'>", unsafe_allow_html=True)
+        st.button(label, key=f"btn_save_{key_suffix}", type="primary", on_click=on_click)
+        st.markdown(
+            f"""
+            <style>
+              .{scope} [data-testid="stButton"] > button {{
+                background:{color} !important; border-color:{color} !important; color:#fff !important;
+                box-shadow:0 6px 16px rgba(0,0,0,.12) !important;
+              }}
+              .{scope} [data-testid="stButton"] > button:hover {{ filter:brightness(0.93); }}
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
 
 # IMPORTANTE:
 # Quando estiver dentro da função de login (login_ui), chame:
@@ -1026,69 +1005,6 @@ def sidebar_common(user: "User") -> str:
 
 # ======= NOVO: helper padrão para botões 'Salvar alterações' =======
 # ====== CORES P/ BOTÕES ======
-BTN_COLORS = {
-    "entrada":  "#16a34a",  # verde
-    "dizimista":"#2563eb",  # azul
-    "saida":    "#dc2626",  # vermelha
-    "neutral":  "#1f6feb",  # fallback (azul padrão)
-}
-
-def _save_btn(on_click, key_suffix: str, theme: str = "neutral", label: str = "Salvar alterações"):
-    """
-    Botão 'Salvar alterações' com cor personalizada por tema:
-      - 'entrada'  -> verde
-      - 'dizimista'-> azul
-      - 'saida'    -> vermelho
-      - 'neutral'  -> cor padrão
-    """
-    color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
-    with st.container():
-        # marcador p/ escopar o CSS desse botão apenas
-        st.markdown(f'<div id="mark-{key_suffix}"></div>', unsafe_allow_html=True)
-        st.button(label, key=f"btn_save_{key_suffix}", type="primary", on_click=on_click)
-        st.markdown(
-            f"""
-            <style>
-              /* pinta SOMENTE o botão dentro deste bloco */
-              #mark-{key_suffix} ~ div[data-testid="stButton"] > button {{
-                background: {color} !important;
-                border-color: {color} !important;
-              }}
-              #mark-{key_suffix} ~ div[data-testid="stButton"] > button:hover {{
-                filter: brightness(0.93);
-              }}
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
-
-def _submit_btn(label: str, key_suffix: str, theme: str = "neutral") -> bool:
-    """
-    Versão colorida para st.form_submit_button (forms de ENTRADA, DIZIMISTA, SAÍDA).
-    Retorna True quando o usuário clica.
-    """
-    color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
-    with st.container():
-        st.markdown(f'<div id="mark-{key_suffix}"></div>', unsafe_allow_html=True)
-        clicked = st.form_submit_button(label, type="primary")
-        st.markdown(
-            f"""
-            <style>
-              /* cobre tanto submit de form quanto um fallback de stButton */
-              #mark-{key_suffix} ~ div[data-testid="stFormSubmitButton"] > button,
-              #mark-{key_suffix} ~ div[data-testid="stButton"] > button {{
-                background: {color} !important;
-                border-color: {color} !important
-              }}
-              #mark-{key_suffix} ~ div[data-testid="stFormSubmitButton"] > button:hover,
-              #mark-{key_suffix} ~ div[data-testid="stButton"] > button:hover {{
-                filter: brightness(0.93);
-              }}
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
-    return clicked
 
 def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: str, default_cong_id: Optional[int], default_sub_cong_id: Optional[int] = None):
     def norm_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -2069,7 +1985,7 @@ def page_lancamentos(user: "User"):
                     dz_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="dz_valor")
                     dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência"], key="dz_pay")
 
-                    if st.form_submit_button("Salvar DIZIMISTA"):
+                    if form_submit_colored("Salvar DIZIMISTA", "dz_submit", theme="dizimista"):
                         if dz_valor > 0 and dz_nome.strip():
                             db.add(
                                 Tithe(
