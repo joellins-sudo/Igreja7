@@ -1709,11 +1709,11 @@ def page_lancamentos(user: "User"):
 
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
         
-        # ===== ALTERAÇÃO AQUI: Texto do culto de missões atualizado =====
+        # Mantém seus tipos exatamente como estavam
         tipos_de_culto = [
             "Culto da Noite (Padrão)", 
             "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)", 
-            "Culto de Missões (oferta no Rel. Missões)",
+            "Culto de missões(Registre a oferta no Relatório de Missões)",
             "Evento Especial", 
             "Outro"
         ]
@@ -1812,18 +1812,63 @@ def page_lancamentos(user: "User"):
             
             df_logs = _load_service_logs(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
 
-            # ===================== ALTERAÇÃO (ALERTA ATIVO) =====================
-            # Gera e exibe alertas de divergência (dízimo declarado x base real) por data
+            # ===================== ALERTA INLINE (sem novas defs) =====================
+            # Compara Dízimo declarado no resumo do culto x valor real por data (Tithes/Transações)
             with SessionLocal() as _db_chk:
-                _alertas = _gera_alertas_divergencia_dizimo(
-                    _db_chk,
-                    parent_cong_obj.id,
-                    start_tab,
-                    end_tab,
-                    sub_cong_id=target_sub_cong_id
-                )
-            _render_alertas_divergencia(_alertas)
-            # =================== FIM ALTERAÇÃO (ALERTA ATIVO) ===================
+                tithe_sub = (Tithe.sub_congregation_id.is_(None) if target_sub_cong_id is None else (Tithe.sub_congregation_id == target_sub_cong_id))
+                tx_sub    = (Transaction.sub_congregation_id.is_(None) if target_sub_cong_id is None else (Transaction.sub_congregation_id == target_sub_cong_id))
+
+                # Somatório de Tithes por data
+                t_rows = _db_chk.execute(
+                    select(Tithe.date, func.coalesce(func.sum(Tithe.amount), 0.0))
+                    .where(
+                        Tithe.congregation_id == parent_cong_obj.id,
+                        Tithe.date >= start_tab, Tithe.date < end_tab,
+                        tithe_sub
+                    )
+                    .group_by(Tithe.date)
+                ).all()
+                by_tithe = {d: float(v or 0.0) for d, v in t_rows}
+
+                # Somatório de Transações categoria "Dízimo" por data
+                cat_diz = _db_chk.scalar(select(Category).where(func.lower(Category.name).in_(("dízimo","dizimo"))))
+                by_tx = {}
+                if cat_diz:
+                    tx_rows = _db_chk.execute(
+                        select(Transaction.date, func.coalesce(func.sum(Transaction.amount), 0.0))
+                        .where(
+                            Transaction.congregation_id == parent_cong_obj.id,
+                            Transaction.date >= start_tab, Transaction.date < end_tab,
+                            Transaction.category_id == cat_diz.id,
+                            tx_sub
+                        )
+                        .group_by(Transaction.date)
+                    ).all()
+                    by_tx = {d: float(v or 0.0) for d, v in tx_rows}
+
+                # Equivalência por data (maior entre nominais e tx de dízimo)
+                real_by_date = {d: max(by_tithe.get(d, 0.0), by_tx.get(d, 0.0)) for d in (set(by_tithe) | set(by_tx))}
+
+            alertas = []
+            if not df_logs.empty:
+                for _, row in df_logs.iterrows():
+                    d = _to_date(row["Data do Culto"])
+                    declarado = float(row.get("Dízimo", 0.0) or 0.0)
+                    real = float(real_by_date.get(d, 0.0))
+                    delta = round(declarado - real, 2)
+                    if abs(delta) >= 0.01:
+                        alertas.append((d, declarado, real, delta))
+
+            for d, declarado, real, delta in sorted(alertas):
+                st.markdown(f"""
+<div class="alert-danger">
+  <strong>Divergência de Dízimo — {d.strftime('%d/%m/%Y')}</strong><br>
+  Declarado no resumo do culto: <strong>{format_currency(declarado)}</strong><br>
+  Somatório real (nominais/lançamentos): <strong>{format_currency(real)}</strong><br>
+  Diferença: <strong>{format_currency(delta)}</strong>
+</div>
+""", unsafe_allow_html=True)
+            # =================== FIM ALERTA INLINE ===================
 
             if df_logs.empty:
                 df_logs = pd.DataFrame(
