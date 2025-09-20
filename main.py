@@ -3408,12 +3408,10 @@ def page_relatorio_entrada(user: "User"):
                 st.info("Visualização do total de entradas por unidade, baseado nos resumos de culto.")
                 rows_data = []
                 for c in congs_all:
-                    # Dados da congregação principal
                     principal_df = _load_service_logs(db, c.id, start, end, sub_cong_id=None)
                     principal_total = principal_df['Total'].sum() if not principal_df.empty else 0.0
                     rows_data.append({"Unidade": f"{c.name} (Principal)", "Total (R$)": principal_total})
                     
-                    # Dados das sub-congregações
                     sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == c.id)).all()
                     for sub in sub_congs:
                         sub_df = _load_service_logs(db, c.id, start, end, sub_cong_id=sub.id)
@@ -3448,10 +3446,32 @@ def page_relatorio_entrada(user: "User"):
         
         st.info(f"Exibindo dados para: **{contexto_selecionado}**")
 
-        # Usa a mesma função da página de Lançamentos para buscar os dados
+        # ===== NOVO BLOCO: VERIFICAÇÃO DE DIVERGÊNCIA DE DÍZIMOS =====
+        total_service_dizimo = db.scalar(select(func.sum(ServiceLog.dizimo)).where(
+            ServiceLog.congregation_id == parent_cong_obj.id,
+            ServiceLog.date >= start, ServiceLog.date < end,
+            ServiceLog.sub_congregation_id == target_sub_cong_id
+        )) or 0.0
+
+        total_nominal_dizimo = db.scalar(select(func.sum(Tithe.amount)).where(
+            Tithe.congregation_id == parent_cong_obj.id,
+            Tithe.date >= start, Tithe.date < end,
+            Tithe.sub_congregation_id == target_sub_cong_id
+        )) or 0.0
+
+        if not math.isclose(total_service_dizimo, total_nominal_dizimo):
+            diferenca = total_service_dizimo - total_nominal_dizimo
+            msg = (
+                f"<strong>Atenção: Divergência nos Dízimos de {ref.strftime('%B')}</strong><br>"
+                f"Total lançado nos Cultos: {format_currency(total_service_dizimo)} | "
+                f"Total de Dizimistas: {format_currency(total_nominal_dizimo)} | "
+                f"Diferença: {format_currency(diferenca)}"
+            )
+            st.markdown(f'<div class="alert-danger">{msg}</div>', unsafe_allow_html=True)
+        # ===== FIM DO BLOCO =====
+
         report_df = _load_service_logs(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id)
         
-        # Usa st.dataframe para exibir como uma "vitrine" (não editável)
         st.dataframe(
             report_df.style.format({
                 "Data do Culto": "{:%d/%m/%Y}",
@@ -3461,10 +3481,9 @@ def page_relatorio_entrada(user: "User"):
             }),
             use_container_width=True,
             hide_index=True,
-            column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"] # Garante a ordem correta
+            column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
         )
 
-        # Calcula e exibe os totais
         try:
             total_dizimo, total_oferta, total_geral_unidade = 0.0, 0.0, 0.0
             if not report_df.empty:
