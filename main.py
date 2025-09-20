@@ -1713,7 +1713,7 @@ def page_lancamentos(user: "User"):
         tipos_de_culto = [
             "Culto da Noite (Padrão)", 
             "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)", 
-            "Culto de missões(Registre a oferta no Relatório de Missões)",
+            "Culto de Missões (oferta no Rel. Missões)",
             "Evento Especial", 
             "Outro"
         ]
@@ -1811,6 +1811,19 @@ def page_lancamentos(user: "User"):
             st.markdown("##### Resumo de Entradas por Culto")
             
             df_logs = _load_service_logs(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
+
+            # ===================== ALTERAÇÃO (ALERTA ATIVO) =====================
+            # Gera e exibe alertas de divergência (dízimo declarado x base real) por data
+            with SessionLocal() as _db_chk:
+                _alertas = _gera_alertas_divergencia_dizimo(
+                    _db_chk,
+                    parent_cong_obj.id,
+                    start_tab,
+                    end_tab,
+                    sub_cong_id=target_sub_cong_id
+                )
+            _render_alertas_divergencia(_alertas)
+            # =================== FIM ALTERAÇÃO (ALERTA ATIVO) ===================
 
             if df_logs.empty:
                 df_logs = pd.DataFrame(
