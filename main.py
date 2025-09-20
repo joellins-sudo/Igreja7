@@ -186,40 +186,6 @@ hr{ opacity: .6; }
 </style>
 """
 
-# Garanta que a linha abaixo esteja no seu código, após a definição acima
-st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)
-
-# Alias para manter compatibilidade com a linha 256
-BUTTONS_CSS = FORM_BUTTONS_CSS
-
-
-st.markdown(BUTTONS_CSS, unsafe_allow_html=True)
-
-CSS_TABLE_BOOST = """
-<style>
-/* Aumenta o tamanho da fonte APENAS do conteúdo das células */
-[data-testid="stDataFrame"] [role="gridcell"] *,
-[data-testid="stDataEditor"] [role="gridcell"] *{
-  font-size: 1.18rem !important;   /* ajuste aqui: 1.10–1.30rem */
-  line-height: 1.55 !important;
-}
-
-/* Cabeçalhos das colunas um pouco maiores e mais fortes */
-[data-testid="stDataFrame"] [role="columnheader"] *,
-[data-testid="stDataEditor"] [role="columnheader"] *{
-  font-size: 1.08rem !important;
-  font-weight: 700 !important;
-}
-</style>
-"""
-
-st.markdown(CSS_TABLE_BOOST, unsafe_allow_html=True)
-
-st.markdown(CSS, unsafe_allow_html=True)
-
-ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
-LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
-
 # ===================== LOCALE (fallback) =====================
 def _set_locale_ptbr():
     for loc in ("pt_BR.utf8", "pt_BR.UTF-8", "pt_BR", "Portuguese_Brazil.1252"):
