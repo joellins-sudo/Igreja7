@@ -3502,23 +3502,9 @@ def page_relatorio_entrada(user: "User"):
         
         if user.role == "SEDE":
             congs_all = order_congs_sede_first(cong_options_for(user, db))
-            escopo_opts = [
-                "-- Relatório Hierárquico (Edição) --", 
-                "-- Visão Agregada (Visualização) --"
-            ] + [c.name for c in congs_all]
-            
-            escopo_selecionado = st.selectbox("Selecione o escopo do relatório:", escopo_opts, key="re_sede_escopo")
-            
-            if escopo_selecionado == "-- Relatório Hierárquico (Edição) --":
-                display_entry_hierarchy(user, congs_all, start, end, db)
-                return
-            elif escopo_selecionado == "-- Visão Agregada (Visualização) --":
-                # Lógica da visão agregada que já existia
-                # ... (pode ser preenchida depois se necessário)
-                st.info("Visão agregada em desenvolvimento.")
-                return
-            else:
-                parent_cong_obj = next((c for c in congs_all if c.name == escopo_selecionado), None)
+            # Mostra diretamente a visão hierárquica para a Sede
+            display_entry_hierarchy(user, congs_all, start, end, db)
+            return  # Encerra a função aqui para a Sede
         else: # TESOUREIRO
             parent_cong_obj = db.get(Congregation, user.congregation_id)
 
@@ -3532,7 +3518,7 @@ def page_relatorio_entrada(user: "User"):
         contexto_selecionado = parent_cong_obj.name
         
         if sub_congs:
-            # Adiciona a opção "Todas" para o Tesoureiro
+            # Mantém a opção "Todas" para o Tesoureiro
             opcoes = {"-- Todas (Principal + Subs) --": "ALL", f"{parent_cong_obj.name} (Principal)": None}
             for sub in sub_congs:
                 opcoes[sub.name] = sub.id
@@ -3543,7 +3529,6 @@ def page_relatorio_entrada(user: "User"):
 
         # Lógica para o Tesoureiro
         if target_sub_cong_id_or_all == "ALL":
-            # Exibe o resumo de Principal + Subs
             all_units_data = []
             # Principal
             df_principal = _load_service_logs(db, parent_cong_obj.id, start, end, sub_cong_id=None)
@@ -3558,7 +3543,6 @@ def page_relatorio_entrada(user: "User"):
             total_geral = df_agg["Total Entradas"].sum()
             st.metric("Total Geral da Congregação", format_currency(total_geral))
         else:
-            # Exibe o relatório detalhado de uma única unidade (Principal ou Sub)
             report_df = _load_service_logs(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id_or_all)
             
             st.dataframe(
