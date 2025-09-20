@@ -120,6 +120,28 @@ ADRF_LOGIN_CSS = """
 """
 
 CSS = """
+# ... (início da variável CSS) ...
+.stButton > button, .stDownloadButton > button {
+  font-size: 1.02rem;
+  border-radius: 14px;
+  font-weight: 650;
+}
+
+/* Aviso de Divergência Discreto */
+.alert-discreet {
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    border: 1px solid transparent;
+    border-radius: .375rem;
+    background-color: #fffbeb; /* Amarelo claro */
+    border-color: #fde68a;   /* Borda amarela */
+    color: #92400e;         /* Texto escuro */
+    font-size: 0.9rem;      /* Letras pequenas */
+}
+.alert-discreet strong {
+    font-weight: 700;
+}
+
 <style>
 /* ==================== BASE / TIPOGRAFIA ==================== */
 :root{
