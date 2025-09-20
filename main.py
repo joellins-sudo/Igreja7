@@ -3502,9 +3502,17 @@ def page_relatorio_entrada(user: "User"):
         
         if user.role == "SEDE":
             congs_all = order_congs_sede_first(cong_options_for(user, db))
-            # Mostra diretamente a visão hierárquica para a Sede
-            display_entry_hierarchy(user, congs_all, start, end, db)
-            return  # Encerra a função aqui para a Sede
+            # Opções para a Sede: Visão Hierárquica + lista de cada congregação
+            escopo_opts = ["-- Relatório Hierárquico (Edição) --"] + [c.name for c in congs_all]
+            
+            escopo_selecionado = st.selectbox("Selecione o escopo do relatório:", escopo_opts, key="re_sede_escopo")
+            
+            if escopo_selecionado == "-- Relatório Hierárquico (Edição) --":
+                display_entry_hierarchy(user, congs_all, start, end, db)
+                return # Encerra a função aqui, pois a visão hierárquica já foi exibida
+            else:
+                # Se a Sede escolheu uma congregação específica, define o objeto para o resto da função
+                parent_cong_obj = next((c for c in congs_all if c.name == escopo_selecionado), None)
         else: # TESOUREIRO
             parent_cong_obj = db.get(Congregation, user.congregation_id)
 
@@ -3517,9 +3525,13 @@ def page_relatorio_entrada(user: "User"):
         target_sub_cong_id_or_all = None
         contexto_selecionado = parent_cong_obj.name
         
+        # O filtro de sub-unidades só aparece se houver sub-congregações
         if sub_congs:
-            # Mantém a opção "Todas" para o Tesoureiro
-            opcoes = {"-- Todas (Principal + Subs) --": "ALL", f"{parent_cong_obj.name} (Principal)": None}
+            # Para o Tesoureiro, adiciona a opção "Todas"
+            opcoes = {f"{parent_cong_obj.name} (Principal)": None}
+            if user.role == "TESOUREIRO":
+                opcoes = {"-- Todas (Principal + Subs) --": "ALL", **opcoes}
+
             for sub in sub_congs:
                 opcoes[sub.name] = sub.id
             contexto_selecionado = st.selectbox("Filtrar por unidade:", list(opcoes.keys()), key="re_sub_sel")
@@ -3527,7 +3539,7 @@ def page_relatorio_entrada(user: "User"):
         
         st.info(f"Exibindo dados para: **{contexto_selecionado}**")
 
-        # Lógica para o Tesoureiro
+        # Lógica para o Tesoureiro que selecionou "Todas"
         if target_sub_cong_id_or_all == "ALL":
             all_units_data = []
             # Principal
@@ -3543,6 +3555,7 @@ def page_relatorio_entrada(user: "User"):
             total_geral = df_agg["Total Entradas"].sum()
             st.metric("Total Geral da Congregação", format_currency(total_geral))
         else:
+            # Lógica para exibir o relatório de uma única unidade (funciona para a Sede e para o Tesoureiro)
             report_df = _load_service_logs(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id_or_all)
             
             st.dataframe(
