@@ -3565,7 +3565,6 @@ def page_relatorio_entrada(user: "User"):
         
         if user.role == "SEDE":
             congs_all = order_congs_sede_first(cong_options_for(user, db))
-            # Opções para a Sede: Visão Hierárquica + lista de cada congregação
             escopo_opts = ["-- Relatório Hierárquico (Edição) --"] + [c.name for c in congs_all]
             
             escopo_selecionado = st.selectbox("Selecione o escopo do relatório:", escopo_opts, key="re_sede_escopo")
@@ -3574,7 +3573,6 @@ def page_relatorio_entrada(user: "User"):
                 display_entry_hierarchy(user, congs_all, start, end, db)
                 return
             else:
-                # Se a Sede escolheu uma congregação específica, o código prossegue
                 parent_cong_obj = next((c for c in congs_all if c.name == escopo_selecionado), None)
         else: # TESOUREIRO
             parent_cong_obj = db.get(Congregation, user.congregation_id)
@@ -3590,12 +3588,8 @@ def page_relatorio_entrada(user: "User"):
         target_sub_cong_id_or_all = None
         contexto_selecionado = parent_cong_obj.name
         
-        # Lógica Unificada: Se a congregação selecionada (por qualquer perfil) tiver subs, mostra o seletor
         if sub_congs:
-            opcoes = {
-                "-- Todas (Principal + Subs) --": "ALL",
-                f"{parent_cong_obj.name} (Principal)": None
-            }
+            opcoes = {"-- Todas (Principal + Subs) --": "ALL", f"{parent_cong_obj.name} (Principal)": None}
             for sub in sub_congs:
                 opcoes[sub.name] = sub.id
             contexto_selecionado = st.selectbox("Filtrar por unidade:", list(opcoes.keys()), key="re_sub_sel_unified")
@@ -3603,13 +3597,10 @@ def page_relatorio_entrada(user: "User"):
         
         st.info(f"Exibindo dados para: **{contexto_selecionado}**")
 
-        # Se a visão consolidada "Todas" for selecionada
         if target_sub_cong_id_or_all == "ALL":
             all_units_data = []
-            # Dados da Principal
             df_principal = _load_service_logs(db, parent_cong_obj.id, start, end, sub_cong_id=None)
             all_units_data.append({"Unidade": f"{parent_cong_obj.name} (Principal)", "Total Entradas": df_principal['Total'].sum()})
-            # Dados das Subs
             for sub in sub_congs:
                 df_sub = _load_service_logs(db, parent_cong_obj.id, start, end, sub_cong_id=sub.id)
                 all_units_data.append({"Unidade": f"↳ {sub.name}", "Total Entradas": df_sub['Total'].sum()})
@@ -3619,7 +3610,6 @@ def page_relatorio_entrada(user: "User"):
             total_geral = df_agg["Total Entradas"].sum()
             st.metric("Total Geral da Congregação", format_currency(total_geral))
         else:
-            # Se uma unidade específica for selecionada (ou se não houver subs)
             report_df = _load_service_logs(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id_or_all)
             
             st.dataframe(
@@ -3631,8 +3621,21 @@ def page_relatorio_entrada(user: "User"):
                 column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
             )
             
-            total_geral_unidade = report_df["Total"].sum() if not report_df.empty else 0.0
-            st.metric("Soma Geral (mês)", format_currency(total_geral_unidade))
+            # ===== NOVO BLOCO DE MÉTRICAS PARA TESOUREIRO =====
+            st.divider()
+            try:
+                total_dizimo, total_oferta, total_geral = 0.0, 0.0, 0.0
+                if not report_df.empty:
+                    total_dizimo = report_df["Dízimo"].sum()
+                    total_oferta = report_df["Oferta"].sum()
+                    total_geral = report_df["Total"].sum()
+                
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total de Dízimos", format_currency(total_dizimo))
+                col2.metric("Total de Ofertas", format_currency(total_oferta))
+                col3.metric("Total Geral Entradas", format_currency(total_geral))
+            except Exception:
+                st.caption("Calculando totais...")
             
             # REMOVIDO: Botão de salvar e toda a sua lógica
 # ===================== MAIN =====================
