@@ -2622,24 +2622,24 @@ def build_consolidated_pdf(congs_all: List[Congregation], ref: date, db: Session
     story.append(Paragraph("1. Resumo de Entradas por Unidade (Exceto Missões)", heading_style))
     entry_data = [["Unidade", "Dízimos", "Ofertas", "Total (R$)"]]
     
-    # Coleta e processa os dados de entrada primeiro
     all_units_entries = []
     for cong in congs_all:
         # Principal
         df_principal = _load_service_logs(db, cong.id, start, end, None)
-        dizimo_p = df_principal['Dízimo'].sum()
-        oferta_p = df_principal['Oferta'].sum()
+        # CORREÇÃO: Verifica se o DataFrame está vazio antes de somar
+        dizimo_p = df_principal['Dízimo'].sum() if not df_principal.empty else 0.0
+        oferta_p = df_principal['Oferta'].sum() if not df_principal.empty else 0.0
         all_units_entries.append({"cong_name": cong.name, "is_sub": False, "unit_name": cong.name, "dizimo": dizimo_p, "oferta": oferta_p, "total": dizimo_p + oferta_p})
         
         # Subs
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id)).all()
         for sub in sub_congs:
             df_sub = _load_service_logs(db, cong.id, start, end, sub.id)
-            dizimo_s = df_sub['Dízimo'].sum()
-            oferta_s = df_sub['Oferta'].sum()
+            # CORREÇÃO: Verifica se o DataFrame está vazio antes de somar
+            dizimo_s = df_sub['Dízimo'].sum() if not df_sub.empty else 0.0
+            oferta_s = df_sub['Oferta'].sum() if not df_sub.empty else 0.0
             all_units_entries.append({"cong_name": cong.name, "is_sub": True, "unit_name": f"↳ {sub.name}", "dizimo": dizimo_s, "oferta": oferta_s, "total": dizimo_s + oferta_s})
     
-    # Ordena por maior entrada total
     all_units_entries.sort(key=lambda x: x["total"], reverse=True)
     
     for unit_data in all_units_entries:
