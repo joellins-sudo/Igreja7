@@ -1709,7 +1709,6 @@ def page_lancamentos(user: "User"):
 
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
         
-        # ===== ALTERAÇÃO AQUI: Adicionado o novo tipo de culto =====
         tipos_de_culto = [
             "Culto da Noite (Padrão)", 
             "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)", 
@@ -1808,6 +1807,8 @@ def page_lancamentos(user: "User"):
             ref_tab = get_month_selector("Mês de referência da tabela")
             start_tab, end_tab = month_bounds(ref_tab)
             
+            # (A lógica do aviso de divergência permanece igual)
+            
             st.markdown("##### Resumo de Entradas por Culto")
             
             df_logs = _load_service_logs(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
@@ -1825,11 +1826,11 @@ def page_lancamentos(user: "User"):
                 key=f"editor_service_logs_{parent_cong_obj.id}_{target_sub_cong_id}",
                 column_config={
                     "ID": None,
-                    "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
-                    "Tipo de Culto": st.column_config.SelectboxColumn("Tipo de Culto", options=tipos_de_culto, required=True),
-                    "Dízimo": st.column_config.NumberColumn("Dízimo", format="R$ %.2f", required=True),
-                    "Oferta": st.column_config.NumberColumn("Oferta", format="R$ %.2f", required=True),
-                    "Total": st.column_config.NumberColumn("Total", help="Soma do Dízimo e Oferta. Atualiza após salvar.", format="R$ %.2f", disabled=True),
+                    "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY", width="small"),
+                    "Tipo de Culto": st.column_config.SelectboxColumn("Tipo de Culto", options=tipos_de_culto, required=True, width="large"),
+                    "Dízimo": st.column_config.NumberColumn("Dízimo", format="R$ %.2f", required=True, width="medium"),
+                    "Oferta": st.column_config.NumberColumn("Oferta", format="R$ %.2f", required=True, width="medium"),
+                    "Total": st.column_config.NumberColumn("Total", help="Soma do Dízimo e Oferta. Atualiza após salvar.", format="R$ %.2f", disabled=True, width="medium"),
                 },
                 column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
             )
@@ -1864,6 +1865,8 @@ def page_lancamentos(user: "User"):
             txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == "SAÍDA", Transaction.sub_congregation_id == target_sub_cong_id)
             txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
             _editor_lancamentos(txs_out, f"Saídas - {contexto_tabela}", tx_type_hint="SAÍDA", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
+
+
 
 # ===== PÁGINA: LANÇAMENTOS (com modo Tabela + 3 editores) =====
 # ===== PÁGINA: LANÇAMENTOS (modo Tabela mostra total abaixo de cada uma) =====
