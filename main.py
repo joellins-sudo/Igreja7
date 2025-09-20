@@ -1709,10 +1709,11 @@ def page_lancamentos(user: "User"):
 
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
         
+        # ===== ALTERAÇÃO AQUI: Texto do culto de missões atualizado =====
         tipos_de_culto = [
             "Culto da Noite (Padrão)", 
             "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)", 
-            "Culto de missões (oferta deve ser lançada no relatório de missões)",
+            "Culto de missões(Registre ofertas no Relatório de Missões)",
             "Evento Especial", 
             "Outro"
         ]
@@ -1816,7 +1817,6 @@ def page_lancamentos(user: "User"):
                     [{"Data do Culto": today_bahia(), "Tipo de Culto": tipos_de_culto[0], "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0, "ID": None}]
                 )
 
-            # ===== ALTERAÇÃO AQUI: Removidas as larguras (width) =====
             edited_df = st.data_editor(
                 df_logs,
                 use_container_width=True, 
