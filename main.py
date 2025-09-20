@@ -414,11 +414,14 @@ hr{ border:none; height:1px; background:linear-gradient(90deg, transparent, #e8e
 """
 
 # ======== INJEÇÃO: aplique todos (menos o do login) ========
-st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)
-st.markdown(BUTTONS_CSS, unsafe_allow_html=True)          # compat se seu código referenciar BUTTONS_CSS
-st.markdown(CSS_TABLE_BOOST, unsafe_allow_html=True)
+# 1) Base/tema primeiro
 st.markdown(CSS, unsafe_allow_html=True)
 st.markdown(MODERN_UI_CSS, unsafe_allow_html=True)
+st.markdown(CSS_TABLE_BOOST, unsafe_allow_html=True)
+
+# 2) POR ÚLTIMO: as cores dos botões por formulário
+st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)
+
 
 # === Cores dos botões ===
 # 🔵 ÚNICA definição válida — deixe-a UMA VEZ só, acima dos helpers de botão
@@ -2127,9 +2130,8 @@ def page_lancamentos(user: "User"):
                 _apply_service_log_changes(df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id)
                 st.rerun()
 
-            st.markdown('<div class="adrf-entrada">', unsafe_allow_html=True)
-            st.button("Salvar alterações na tabela", on_click=on_save_click, key=f"save_table_{parent_cong_obj.id}", type="primary")
-            st.markdown('</div>', unsafe_allow_html=True)
+            _save_btn(on_save_click,f"save_table_{parent_cong_obj.id}",theme="entrada",  # verde label="Salvar alterações na tabela"
+)
 
             st.markdown("---")
             tithes_query = select(Tithe).where(
