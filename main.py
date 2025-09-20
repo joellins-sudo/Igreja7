@@ -3352,9 +3352,42 @@ def display_exit_hierarchy(user: User, congs_all: List[Congregation], start: dat
     grand_total = df_report["Saídas"].sum()
     st.metric("Total Geral de Saídas (todas as congregações)", format_currency(grand_total))
                    
-# ===================== PAGE: RELATÓRIO DE ENTRADA =====================
+def _build_entry_report_df(db: Session, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
+    """
+    Constrói o DataFrame para o Relatório de Entrada a partir dos ServiceLog.
+    Agrupa os múltiplos cultos de um mesmo dia numa única linha.
+    """
+    log_filter = and_(
+        ServiceLog.congregation_id == cong_id,
+        ServiceLog.date >= start,
+        ServiceLog.date < end,
+        ServiceLog.sub_congregation_id == sub_cong_id
+    )
 
-# ===================== PAGE: RELATÓRIO DE ENTRADA =====================
+    # Agrupa por data e soma os dízimos e ofertas de todos os cultos do dia
+    query = select(
+        ServiceLog.date,
+        func.sum(ServiceLog.dizimo),
+        func.sum(ServiceLog.oferta)
+    ).where(log_filter).group_by(ServiceLog.date).order_by(ServiceLog.date)
+
+    results = db.execute(query).all()
+
+    if not results:
+        return pd.DataFrame(columns=["Data do Culto", "Dízimo", "Oferta", "Total"])
+
+    data = []
+    for log_date, total_dizimo, total_oferta in results:
+        total_dia = (total_dizimo or 0.0) + (total_oferta or 0.0)
+        data.append({
+            "Data do Culto": log_date,
+            "Dízimo": total_dizimo or 0.0,
+            "Oferta": total_oferta or 0.0,
+            "Total": total_dia
+        })
+    
+    return pd.DataFrame(data)
+
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 def page_relatorio_entrada(user: "User"):
     ensure_seed()
@@ -3367,19 +3400,28 @@ def page_relatorio_entrada(user: "User"):
         
         if user.role == "SEDE":
             congs_all = order_congs_sede_first(cong_options_for(user, db))
-            escopo_opts = [
-                "-- Relatório Hierárquico (Visualização) --", 
-                "-- Visão Agregada (Visualização) --"
-            ] + [c.name for c in congs_all]
+            escopo_opts = ["-- Visão Agregada --"] + [c.name for c in congs_all]
             
             escopo_selecionado = st.selectbox("Selecione o escopo do relatório:", escopo_opts, key="re_sede_escopo")
             
-            if escopo_selecionado == "-- Relatório Hierárquico (Visualização) --":
-                display_entry_hierarchy(user, congs_all, start, end, db)
-                return
-            elif escopo_selecionado == "-- Visão Agregada (Visualização) --": # Alterado o label
+            if escopo_selecionado == "-- Visão Agregada --":
                 st.info("Visualização do total de entradas por unidade.")
-                _editor_entradas_agg_all(congs_all, start, end)
+                rows_data = []
+                for c in congs_all:
+                    principal_df = _build_entry_report_df(db, c.id, start, end, sub_cong_id=None)
+                    principal_total = principal_df['Total'].sum() if not principal_df.empty else 0.0
+                    rows_data.append({"Unidade": f"{c.name} (Principal)", "Total (R$)": principal_total})
+                    
+                    sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == c.id)).all()
+                    for sub in sub_congs:
+                        sub_df = _build_entry_report_df(db, c.id, start, end, sub_cong_id=sub.id)
+                        sub_total = sub_df['Total'].sum() if not sub_df.empty else 0.0
+                        rows_data.append({"Unidade": f"↳ {sub.name}", "Total (R$)": sub_total})
+                
+                df_agg = pd.DataFrame(rows_data)
+                st.dataframe(df_agg.style.format({"Total (R$)": format_currency}), use_container_width=True, hide_index=True)
+                total_geral = df_agg["Total (R$)"].sum()
+                st.metric("Total Geral de Entradas (todas as unidades)", format_currency(total_geral))
                 return
             else:
                 parent_cong_obj = next((c for c in congs_all if c.name == escopo_selecionado), None)
@@ -3392,61 +3434,44 @@ def page_relatorio_entrada(user: "User"):
         st.divider()
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
         
-        target_sub_cong_id_or_all = None
+        target_sub_cong_id = None
         contexto_selecionado = parent_cong_obj.name
         
         if sub_congs:
-            opcoes = {"-- Todas (Principal + Subs) --": "ALL", f"{parent_cong_obj.name} (Principal)": None}
+            opcoes = {f"{parent_cong_obj.name} (Principal)": None}
             for sub in sub_congs:
                 opcoes[sub.name] = sub.id
             contexto_selecionado = st.selectbox("Filtrar por unidade:", list(opcoes.keys()), key="re_sub_sel")
-            target_sub_cong_id_or_all = opcoes[contexto_selecionado]
+            target_sub_cong_id = opcoes[contexto_selecionado]
         
         st.info(f"Exibindo dados para: **{contexto_selecionado}**")
 
-        if target_sub_cong_id_or_all == "ALL":
-            all_units = [(f"{parent_cong_obj.name} (Principal)", None)] + [(s.name, s.id) for s in sub_congs]
-            rows = []
-            for name, sub_id in all_units:
-                totals = _collect_month_data(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)["totals"]
-                rows.append({
-                    "Unidade": name,
-                    "Dízimos": totals["dizimos"],
-                    "Ofertas": totals["ofertas"],
-                    "Total Entradas": totals["entradas_total_sem_missoes"]
-                })
-            
-            df_agg = pd.DataFrame(rows)
-            st.dataframe(df_agg.style.format({"Dízimos": format_currency, "Ofertas": format_currency, "Total Entradas": format_currency}), use_container_width=True, hide_index=True)
-        else:
-            base_df = _entrada_summary_df(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id_or_all)
-            
-            # ALTERADO: st.data_editor virou st.dataframe
-            st.dataframe(
-                base_df.style.format({
-                    "Data do Culto": "{:%d/%m/%Y}",
-                    "Dízimo": format_currency,
-                    "Oferta": format_currency,
-                    "Total": format_currency
-                }),
-                use_container_width=True,
-                hide_index=True
-            )
+        report_df = _build_entry_report_df(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id)
+        
+        st.dataframe(
+            report_df.style.format({
+                "Data do Culto": "{:%d/%m/%Y}",
+                "Dízimo": format_currency,
+                "Oferta": format_currency,
+                "Total": format_currency
+            }),
+            use_container_width=True,
+            hide_index=True
+        )
 
-            # Lógica de totais agora usa o 'base_df' (dataframe original)
-            try:
-                total_dizimo, total_oferta, total_geral_unidade = 0.0, 0.0, 0.0
-                if not base_df.empty:
-                    total_dizimo = base_df["Dízimo"].sum()
-                    total_oferta = base_df["Oferta"].sum()
-                    total_geral_unidade = total_dizimo + total_oferta
-            except Exception: pass
-            
-            st.divider()
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Soma Dízimos (visualização)", format_currency(total_dizimo))
-            col2.metric("Soma Ofertas (visualização)", format_currency(total_oferta))
-            col3.metric("Soma Geral (visualização)", format_currency(total_geral_unidade))
+        try:
+            total_dizimo, total_oferta, total_geral_unidade = 0.0, 0.0, 0.0
+            if not report_df.empty:
+                total_dizimo = report_df["Dízimo"].sum()
+                total_oferta = report_df["Oferta"].sum()
+                total_geral_unidade = report_df["Total"].sum()
+        except Exception: pass
+        
+        st.divider()
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Soma Dízimos (mês)", format_currency(total_dizimo))
+        col2.metric("Soma Ofertas (mês)", format_currency(total_oferta))
+        col3.metric("Soma Geral (mês)", format_currency(total_geral_unidade))
             
             # REMOVIDO: Botão de salvar e toda a sua lógica
 # ===================== MAIN =====================
