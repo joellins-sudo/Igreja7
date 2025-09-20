@@ -304,6 +304,197 @@ st.markdown(CSS, unsafe_allow_html=True)
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
 
+# ======== THEME PACK — UI MODERNA (visual apenas) ========
+MODERN_UI_CSS = """
+<style>
+/* Escopo: somente dentro da área principal, sem tocar no login */
+[data-testid="stAppViewContainer"] .main {
+
+  /* --------- Variáveis visuais --------- */
+  --brand: #1f6feb;
+  --brand-2: #185fcd;
+  --ok: #16a34a;
+  --warn: #f59e0b;
+  --err: #dc2626;
+  --ink: #0f172a;
+  --muted: #667085;
+  --card: #ffffff;
+  --card-border: #e9edf3;
+  --bg-soft: #f7f8fc;
+
+  /* Fonte mais clean */
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+
+  /* Fundo suave */
+  background: linear-gradient(180deg, #fafbff 0%, #f6f7fc 60%, #f2f4f9 100%);
+}
+
+/* ---------- TÍTULOS / HEADERS ---------- */
+[data-testid="stAppViewContainer"] .main h1.page-title {
+  display: inline-flex; align-items: center; gap:.6rem;
+  padding: .35rem .80rem; margin:.2rem 0 1rem 0;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(31,111,235,.10), rgba(24,95,205,.06));
+  border: 1px solid rgba(31,111,235,.16);
+  color: var(--ink);
+  letter-spacing:.2px;
+}
+
+/* Subtítulos mais marcados */
+[data-testid="stAppViewContainer"] .main h2, 
+[data-testid="stAppViewContainer"] .main h3{
+  color: var(--ink);
+}
+
+/* ---------- SIDEBAR ---------- */
+[data-testid="stSidebar"] {
+  background: linear-gradient(180deg, #f7f8fd 0%, #eef2fb 100%) !important;
+  border-right: 1px solid #e7eaf3;
+}
+[data-testid="stSidebar"] .stRadio > div[role="radiogroup"] label {
+  border-radius: 10px; padding: .35rem .55rem;
+}
+[data-testid="stSidebar"] .stRadio > div[role="radiogroup"] label:hover {
+  background: rgba(31,111,235,.08);
+}
+[data-testid="stSidebar"] .stRadio > div[role="radiogroup"] label [data-testid="stMarkdownContainer"]{
+  font-weight: 600;
+}
+
+/* ---------- CARTÕES/CONTAINERS ---------- */
+.block-container > div:has(> .stat-card),
+.block-container > div:has(> .stDownloadButton),
+[data-testid="stExpander"] {
+  border-radius: 16px !important;
+  border: 1px solid var(--card-border) !important;
+  background: var(--card) !important;
+  box-shadow: 0 8px 24px rgba(16,24,40,.06) !important;
+}
+
+/* ---------- BOTÕES (geral) ---------- */
+.stButton > button,
+[data-testid="stFormSubmitButton"] > button,
+.stDownloadButton > button{
+  border-radius: 12px !important;
+  font-weight: 700 !important;
+  letter-spacing:.2px;
+  padding:.55rem 1rem !important;
+  box-shadow: 0 6px 16px rgba(31,111,235,.18);
+  border:1px solid transparent;
+}
+.stButton > button:hover,
+[data-testid="stFormSubmitButton"] > button:hover,
+.stDownloadButton > button:hover{
+  transform: translateY(-1px);
+}
+
+/* “primary” herdará sua cor por CSS existente; aqui só garantimos foco bonito */
+.stButton > button:focus-visible,
+[data-testid="stFormSubmitButton"] > button:focus-visible{
+  outline: 3px solid rgba(31,111,235,.28);
+}
+
+/* Download mais caprichado */
+.stDownloadButton > button{
+  background: linear-gradient(180deg, var(--brand) 0%, var(--brand-2) 100%) !important;
+  color:#fff !important;
+}
+
+/* ---------- MÉTRICAS ---------- */
+[data-testid="stMetric"]{
+  border: 1px solid var(--card-border);
+  border-radius: 14px; padding:.65rem .85rem; background:#fff;
+  box-shadow: 0 8px 18px rgba(20,20,40,.05);
+}
+[data-testid="stMetricLabel"]{ color: var(--muted) !important; }
+[data-testid="stMetricValue"]{ font-weight:800 !important; }
+
+/* ---------- TABELAS (dataframe e editor) ---------- */
+[data-testid="stDataFrame"] table,
+[data-testid="stDataEditor"] table{
+  border: 1px solid var(--card-border);
+  box-shadow: 0 8px 24px rgba(16,24,40,.05);
+}
+
+/* Cabeçalho “sticky” e mais alto */
+[data-testid="stDataFrame"] thead tr, 
+[data-testid="stDataEditor"] thead tr{
+  position: sticky; top: 0; z-index: 2;
+  background: linear-gradient(180deg, #ffffff 0%, #f7f8fc 100%);
+}
+
+/* Listras e hover */
+[data-testid="stDataFrame"] tbody tr:nth-child(even),
+[data-testid="stDataEditor"] tbody tr:nth-child(even){ background:#fbfcff; }
+[data-testid="stDataFrame"] tbody tr:hover,
+[data-testid="stDataEditor"] tbody tr:hover{ background:#eef5ff !important; }
+
+/* Células arredondadas levemente */
+[data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th,
+[data-testid="stDataEditor"] td, [data-testid="stDataEditor"] th{
+  border-color:#e8ecf3 !important;
+}
+
+/* Inputs das células um pouco mais “clean” */
+[data-testid="stDataEditor"] input, 
+[data-testid="stDataEditor"] select{
+  border-radius: 8px !important;
+}
+
+/* ---------- DIVISORES ---------- */
+hr{ border:none; height:1px; background:linear-gradient(90deg, transparent, #e8ecf3 20%, #e8ecf3 80%, transparent); }
+
+/* ---------- ALERTAS (você já tem .alert-danger — adiciono variações) ---------- */
+.alert-info{
+  padding:.75rem 1rem; border-radius:.5rem;
+  background:#e0f2fe; border:1px solid #bae6fd; color:#075985;
+  font-size:.92rem;
+}
+.alert-success{
+  padding:.75rem 1rem; border-radius:.5rem;
+  background:#dcfce7; border:1px solid #bbf7d0; color:#14532d;
+  font-size:.92rem;
+}
+.alert-warn{
+  padding:.75rem 1rem; border-radius:.5rem;
+  background:#fff7ed; border:1px solid #fed7aa; color:#7c2d12;
+  font-size:.92rem;
+}
+
+/* ---------- EXPANDERS com cabeçalho forte ---------- */
+[data-testid="stExpander"] > details > summary{
+  font-weight: 750; letter-spacing:.2px;
+}
+[data-testid="stExpander"] > details{
+  background:#fff !important;
+  border-radius: 14px; border:1px solid var(--card-border);
+}
+
+/* ---------- DARK (se o sistema do usuário estiver escuro) ---------- */
+@media (prefers-color-scheme: dark){
+  [data-testid="stAppViewContainer"] .main{
+    --ink: #e9edf3; --muted:#9aa4b2; --card:#0f172a; --card-border:#1e293b; --bg-soft:#0b1220;
+    background: linear-gradient(180deg, #0b1220 0%, #0b1220 100%);
+    color: var(--ink);
+  }
+  [data-testid="stSidebar"]{
+    background: linear-gradient(180deg, #0b1220 0%, #0b1528 100%) !important;
+    border-right-color: #1e293b;
+  }
+  [data-testid="stDataFrame"] table,
+  [data-testid="stDataEditor"] table{
+    background:#0f172a;
+  }
+  .stButton > button,
+  [data-testid="stFormSubmitButton"] > button,
+  .stDownloadButton > button{
+    box-shadow: none;
+  }
+}
+</style>
+"""
+st.markdown(MODERN_UI_CSS, unsafe_allow_html=True)
+
 # ===================== LOCALE (fallback) =====================
 def _set_locale_ptbr():
     for loc in ("pt_BR.utf8", "pt_BR.UTF-8", "pt_BR", "Portuguese_Brazil.1252"):
