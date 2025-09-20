@@ -119,187 +119,108 @@ ADRF_LOGIN_CSS = """
 </style>
 """
 
+# SUBSTITUA TODA A SECÇÃO DE CSS NO TOPO DO SEU FICHEIRO POR ESTE BLOCO CORRIGIDO
+
+st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
+
+# ================== DEFINIÇÃO DOS BLOCOS DE CSS ==================
 CSS = """
 <style>
-/* ==================== BASE / TIPOGRAFIA ==================== */
-:root{
-  --base-font: 17px;         /* aumente para 18/19/20px se quiser */
-  --table-font-size: 1.90rem;   /* fonte das células */
-  --table-header-size: 1.08rem;   /* fonte dos cabeçalhos */
+/* Base e Tipografia */
+:root {
+  --base-font: 17px;
 }
-
-html, body, [data-testid="stAppViewContainer"]{
+html, body, [data-testid="stAppViewContainer"] {
   font-size: var(--base-font);
   line-height: 1.45;
 }
+.page-title, h1 { font-size: 2.0rem; font-weight: 800 !important; }
+h2 { font-size: 1.45rem; font-weight: 750; }
+h3 { font-size: 1.25rem; font-weight: 700; }
 
-/* Títulos mais fortes e maiores */
-.page-title, h1{ font-size: 2.0rem; font-weight: 800 !important; }
-h2{ font-size: 1.45rem; font-weight: 750; }
-h3{ font-size: 1.25rem; font-weight: 700; }
-
-/* ==================== WIDGETS / TEXTOS ==================== */
-[data-testid="stSidebar"] *{ font-size: 1.02rem; }
-label, [data-testid="stWidgetLabel"]{ font-size: 1.02rem; }
-
-/* Inputs (texto, número, data, selects) um pouco maiores */
-.stTextInput input,
-.stNumberInput input,
-.stDateInput input,
-.stSelectbox div,
-.stMultiSelect div{
+/* Widgets e Textos */
+[data-testid="stSidebar"] * { font-size: 1.02rem; }
+label, [data-testid="stWidgetLabel"] { font-size: 1.02rem; }
+.stTextInput input, .stNumberInput input, .stDateInput input, .stSelectbox div, .stMultiSelect div {
   font-size: 1.02rem !important;
 }
 
-/* ==================== TABELAS / EDITOR ==================== */
-/* Regras gerais (ok manter) */
-[data-testid="stDataFrame"] *{ font-size: 1.0rem; }
-[data-testid="stDataEditor"] *{ font-size: 1.02rem; }
-
-/* Regras específicas – aumentam o tamanho real das células/cabeçalhos */
-[data-testid="stDataFrame"] [role="gridcell"],
-[data-testid="stDataEditor"] [role="gridcell"]{
-  font-size: var(--table-font-size) !important;
+/* Tabelas e Editor */
+[data-testid="stDataFrame"] *, [data-testid="stDataEditor"] * { font-size: 1.0rem; }
+[data-testid="stDataFrame"] [role="gridcell"] *, [data-testid="stDataEditor"] [role="gridcell"] * {
+  font-size: 1.18rem !important;
+  line-height: 1.55 !important;
 }
-
-[data-testid="stDataFrame"] [role="columnheader"],
-[data-testid="stDataEditor"] [role="columnheader"]{
-  font-size: var(--table-header-size) !important;
+[data-testid="stDataFrame"] [role="columnheader"] *, [data-testid="stDataEditor"] [role="columnheader"] * {
+  font-size: 1.08rem !important;
   font-weight: 700 !important;
 }
 
-/* Altura das linhas (opcional) */
-[data-testid="stDataFrame"] [role="row"],
-[data-testid="stDataEditor"] [role="row"]{
-  min-height: 38px;
-}
-
-/* Espaço interno das células (opcional) */
-[data-testid="stDataFrame"] [role="gridcell"] > div,
-[data-testid="stDataEditor"] [role="gridcell"] > div{
-  padding: 8px 10px;
-}
-
-/* ==================== MÉTRICAS ==================== */
-[data-testid="stMetricValue"]{
+/* Métricas */
+[data-testid="stMetricValue"] {
   font-size: 1.9rem !important;
   font-weight: 780 !important;
 }
-[data-testid="stMetricLabel"]{ font-size: 1.0rem; opacity: .8; }
+[data-testid="stMetricLabel"] { font-size: 1.0rem; opacity: .8; }
 
-/* ==================== BOTÕES ==================== */
-.stButton > button, .stDownloadButton > button{
+/* Botões Gerais */
+.stButton > button, .stDownloadButton > button {
   font-size: 1.02rem;
   border-radius: 14px;
   font-weight: 650;
 }
-
-/* ==================== CARTÕES ESTATÍSTICOS ==================== */
-.stat-card{
-  background: #fff;
-  border: 1px solid #e9e9ee;
-  border-radius: 16px;
-  padding: 14px 16px;
-}
-.stat-label{ font-size: .92rem; opacity: .75; }
-.stat-value{ font-size: 1.12rem; font-weight: 700; margin-top: .2rem; }
-
-/* ==================== SIDEBAR ==================== */
-[data-testid="stSidebar"]{
-  background: linear-gradient(180deg, #f7f7fb 0%, #f2f3f9 100%);
-}
-[data-testid="stSidebar"] .block-container{ padding-top: 1rem; }
-
-/* ==================== AJUSTES LEVES ==================== */
-hr{ opacity: .6; }
-
-/* ===== NOVO: AVISO DE DIVERGÊNCIA VERMELHO ===== */
-.alert-danger {
-    padding: 0.75rem 1rem;
-    margin-bottom: 1rem;
-    border: 1px solid transparent;
-    border-radius: .375rem;
-    background-color: #fee2e2; /* Vermelho claro */
-    border-color: #fca5a5;   /* Borda vermelha */
-    color: #991b1b;         /* Texto vermelho escuro */
-    font-size: 0.9rem;      /* Letras pequenas */
-}
-.alert-danger strong {
-    font-weight: 700;
-}
-
 </style>
 """
 
-# === Cores dos botões por formulário (compat com chamada antiga BUTTONS_CSS) ===
-# SUBSTITUA SEU CSS DE BOTÕES ANTIGO POR ESTE
 FORM_BUTTONS_CSS = """
 <style>
 /* --- ENTRADAS (VERDE) --- */
-.adrf-entrada [data-testid="stFormSubmitButton"] button {
+.adrf-entrada [data-testid="stFormSubmitButton"] button,
+.adrf-entrada [data-testid="stButton"] button {
     background-color: #16a34a !important;
     border-color: #16a34a !important;
     color: white !important;
 }
-.adrf-entrada [data-testid="stFormSubmitButton"] button:hover {
+.adrf-entrada [data-testid="stFormSubmitButton"] button:hover,
+.adrf-entrada [data-testid="stButton"] button:hover {
     background-color: #15803d !important;
     border-color: #15803d !important;
 }
 
 /* --- DIZIMISTAS (AZUL) --- */
-.adrf-dizimo [data-testid="stFormSubmitButton"] button {
-    background-color: #1d4ed8 !important;
-    border-color: #1d4ed8 !important;
+.adrf-dizimo [data-testid="stFormSubmitButton"] button,
+.adrf-dizimo [data-testid="stButton"] button {
+    background-color: #2563eb !important;
+    border-color: #2563eb !important;
     color: white !important;
 }
-.adrf-dizimo [data-testid="stFormSubmitButton"] button:hover {
-    background-color: #1e40af !important;
-    border-color: #1e40af !important;
+.adrf-dizimo [data-testid="stFormSubmitButton"] button:hover,
+.adrf-dizimo [data-testid="stButton"] button:hover {
+    background-color: #1d4ed8 !important;
+    border-color: #1d4ed8 !important;
 }
 
 /* --- SAÍDAS (VERMELHO) --- */
-.adrf-saida [data-testid="stFormSubmitButton"] button {
+.adrf-saida [data-testid="stFormSubmitButton"] button,
+.adrf-saida [data-testid="stButton"] button {
     background-color: #dc2626 !important;
     border-color: #dc2626 !important;
     color: white !important;
 }
-.adrf-saida [data-testid="stFormSubmitButton"] button:hover {
+.adrf-saida [data-testid="stFormSubmitButton"] button:hover,
+.adrf-saida [data-testid="stButton"] button:hover {
     background-color: #b91c1c !important;
     border-color: #b91c1c !important;
 }
 </style>
 """
 
-# Garanta que a linha abaixo esteja no seu código, após a definição acima
-st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)
-
-# Alias para manter compatibilidade com a linha 256
-BUTTONS_CSS = FORM_BUTTONS_CSS
-
-
-st.markdown(BUTTONS_CSS, unsafe_allow_html=True)
-
-CSS_TABLE_BOOST = """
-<style>
-/* Aumenta o tamanho da fonte APENAS do conteúdo das células */
-[data-testid="stDataFrame"] [role="gridcell"] *,
-[data-testid="stDataEditor"] [role="gridcell"] *{
-  font-size: 1.18rem !important;   /* ajuste aqui: 1.10–1.30rem */
-  line-height: 1.55 !important;
-}
-
-/* Cabeçalhos das colunas um pouco maiores e mais fortes */
-[data-testid="stDataFrame"] [role="columnheader"] *,
-[data-testid="stDataEditor"] [role="columnheader"] *{
-  font-size: 1.08rem !important;
-  font-weight: 700 !important;
-}
-</style>
-"""
-
-st.markdown(CSS_TABLE_BOOST, unsafe_allow_html=True)
-
+# ================== CARREGANDO OS ESTILOS NA ORDEM CORRETA ==================
+# 1. Carrega o CSS geral primeiro
 st.markdown(CSS, unsafe_allow_html=True)
+
+# 2. Carrega o CSS das cores dos botões por ÚLTIMO, para ter a palavra final
+st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
