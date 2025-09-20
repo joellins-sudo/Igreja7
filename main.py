@@ -2598,7 +2598,7 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
     return buf.getvalue()
 
 def build_consolidated_pdf(congs_all: List[Congregation], ref: date, db: Session) -> bytes:
-    """Gera o PDF consolidado hierárquico para a Sede, com o novo layout."""
+    """Gera o PDF consolidado hierárquico para a Sede, com o novo layout e ordenação."""
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
     styles = getSampleStyleSheet()
@@ -2622,32 +2622,44 @@ def build_consolidated_pdf(congs_all: List[Congregation], ref: date, db: Session
     story.append(Paragraph("1. Resumo de Entradas por Unidade", heading_style))
     entry_data = [["Unidade", "Valor (R$)"]]
     
+    # Coleta e processa os dados de entrada primeiro
+    cong_data_list = []
     for cong in congs_all:
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id)).all()
         
         df_principal = _load_service_logs(db, cong.id, start, end, None)
         principal_entradas = df_principal['Total'].sum() if not df_principal.empty else 0.0
         
-        if not sub_congs:
-            entry_data.append([Paragraph(cong.name, normal_style), format_currency(principal_entradas)])
-            grand_total_entradas += principal_entradas
-            continue
-            
-        subs_rows = []
         total_subs = 0.0
+        subs_data = []
         for sub in sub_congs:
             df_sub = _load_service_logs(db, cong.id, start, end, sub.id)
             sub_entradas = df_sub['Total'].sum() if not df_sub.empty else 0.0
-            subs_rows.append([Paragraph(f"↳ {sub.name}", normal_style), format_currency(sub_entradas)])
+            subs_data.append({"name": sub.name, "total": sub_entradas})
             total_subs += sub_entradas
-        
+            
         cong_total = principal_entradas + total_subs
-        grand_total_entradas += cong_total
+        cong_data_list.append({
+            "name": cong.name,
+            "principal_total": principal_entradas,
+            "subs_data": subs_data,
+            "cong_total": cong_total
+        })
+
+    # Separa a Sede e ordena o resto por maior entrada
+    sede_data = next((c for c in cong_data_list if _norm(c["name"]) == "sede"), None)
+    other_congs_data = sorted([c for c in cong_data_list if _norm(c["name"]) != "sede"], key=lambda x: x["cong_total"], reverse=True)
+    
+    sorted_congs = ([sede_data] if sede_data else []) + other_congs_data
+
+    for cong_data in sorted_congs:
+        grand_total_entradas += cong_data["cong_total"]
+        entry_data.append([Paragraph(f"{cong_data['name']} (Principal)", normal_style), format_currency(cong_data["principal_total"])])
+        for sub_data in cong_data["subs_data"]:
+            entry_data.append([Paragraph(f"↳ {sub_data['name']}", normal_style), format_currency(sub_data["total"])])
         
-        # Adiciona na ordem: Principal, Subs, Total
-        entry_data.append([Paragraph(f"{cong.name} (Principal)", normal_style), format_currency(principal_entradas)])
-        entry_data.extend(subs_rows)
-        entry_data.append([Paragraph(f"<b>{cong.name} (Total)</b>", normal_style), Paragraph(f"<b>{format_currency(cong_total)}</b>", normal_style)])
+        if cong_data["subs_data"]: # Só mostra total do grupo se tiver subs
+            entry_data.append([Paragraph(f"<b>{cong_data['name']} (Total)</b>", normal_style), Paragraph(f"<b>{format_currency(cong_data['cong_total'])}</b>", normal_style)])
 
     entry_data.append([Paragraph("<b>Total Geral de Entradas</b>", normal_style), Paragraph(f"<b>{format_currency(grand_total_entradas)}</b>", normal_style)])
     tbl_in = Table(entry_data, colWidths=[12*cm, 4*cm])
@@ -2697,7 +2709,7 @@ def build_consolidated_pdf(congs_all: List[Congregation], ref: date, db: Session
     story.append(Spacer(1, 2.5*cm))
     signature_style = ParagraphStyle('signature', parent=styles['Normal'], alignment=TA_CENTER, spaceBefore=0)
     
-    col_width = doc.width / 2.0 - 1*cm
+    col_width = doc.width / 2.0 - 0.5*cm
     
     left_signatures_text = """
     _________________________<br/>
