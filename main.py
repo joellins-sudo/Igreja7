@@ -70,7 +70,10 @@ ADJ_HIER_OUT_DESC = "[Ajuste via Relatório Hierárquico (Saída)]"
 
 st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
 
-# ======== CSS: LOGIN (aplicar dentro do login_ui) ========
+# ================== CSS do cartão de login (estilo SEI) ==================
+# ================== CSS do cartão de login (estilo ADRF) ==================
+# ================== LOGIN SEI: CSS/HTML (trabalhando com Streamlit) ==================
+# ================== LOGIN ADRF: CSS/HTML ==================
 ADRF_LOGIN_CSS = """
 <style>
   :root{
@@ -116,80 +119,30 @@ ADRF_LOGIN_CSS = """
 </style>
 """
 
-# ======== CSS: CORES DOS BOTÕES POR FORMULÁRIO ========
-FORM_BUTTONS_CSS = """
-<style>
-/* ENTRADAS (VERDE) — funciona dentro e fora de st.form */
-.adrf-entrada [data-testid="stFormSubmitButton"] button,
-.adrf-entrada [data-testid="stButton"] button{
-  background-color:#16a34a !important;
-  border-color:#16a34a !important;
-  color:#fff !important;
-}
-.adrf-entrada [data-testid="stFormSubmitButton"] button:hover,
-.adrf-entrada [data-testid="stButton"] button:hover{ filter:brightness(0.93); }
-
-/* DÍZIMOS (AZUL) */
-.adrf-dizimo [data-testid="stFormSubmitButton"] button,
-.adrf-dizimo [data-testid="stButton"] button{
-  background-color:#1d4ed8 !important;
-  border-color:#1d4ed8 !important;
-  color:#fff !important;
-}
-.adrf-dizimo [data-testid="stFormSubmitButton"] button:hover,
-.adrf-dizimo [data-testid="stButton"] button:hover{ filter:brightness(0.93); }
-
-/* SAÍDAS (VERMELHO) */
-.adrf-saida [data-testid="stFormSubmitButton"] button,
-.adrf-saida [data-testid="stButton"] button{
-  background-color:#dc2626 !important;
-  border-color:#dc2626 !important;
-  color:#fff !important;
-}
-.adrf-saida [data-testid="stFormSubmitButton"] button:hover,
-.adrf-saida [data-testid="stButton"] button:hover{ filter:brightness(0.93); }
-</style>
-"""
-
-# alias que seu código usa em alguns pontos
-BUTTONS_CSS = FORM_BUTTONS_CSS
-
-# ======== CSS: BOOST DE TABELA (fonte maior nas células) ========
-CSS_TABLE_BOOST = """
-<style>
-[data-testid="stDataFrame"] [role="gridcell"] *,
-[data-testid="stDataEditor"] [role="gridcell"] *{
-  font-size: 1.18rem !important;
-  line-height: 1.55 !important;
-}
-[data-testid="stDataFrame"] [role="columnheader"] *,
-[data-testid="stDataEditor"] [role="columnheader"] *{
-  font-size: 1.08rem !important;
-  font-weight: 700 !important;
-}
-</style>
-"""
-
-# ======== CSS: BASE + TIPOGRAFIA + MÉTRICAS + ALERTAS ========
 CSS = """
 <style>
+/* ==================== BASE / TIPOGRAFIA ==================== */
 :root{
-  --base-font: 17px;
-  --table-font-size: 1.90rem;
-  --table-header-size: 1.08rem;
+  --base-font: 17px;         /* aumente para 18/19/20px se quiser */
+  --table-font-size: 1.90rem;   /* fonte das células */
+  --table-header-size: 1.08rem;   /* fonte dos cabeçalhos */
 }
+
 html, body, [data-testid="stAppViewContainer"]{
   font-size: var(--base-font);
   line-height: 1.45;
 }
 
+/* Títulos mais fortes e maiores */
 .page-title, h1{ font-size: 2.0rem; font-weight: 800 !important; }
 h2{ font-size: 1.45rem; font-weight: 750; }
 h3{ font-size: 1.25rem; font-weight: 700; }
 
+/* ==================== WIDGETS / TEXTOS ==================== */
 [data-testid="stSidebar"] *{ font-size: 1.02rem; }
 label, [data-testid="stWidgetLabel"]{ font-size: 1.02rem; }
 
+/* Inputs (texto, número, data, selects) um pouco maiores */
 .stTextInput input,
 .stNumberInput input,
 .stDateInput input,
@@ -198,9 +151,12 @@ label, [data-testid="stWidgetLabel"]{ font-size: 1.02rem; }
   font-size: 1.02rem !important;
 }
 
+/* ==================== TABELAS / EDITOR ==================== */
+/* Regras gerais (ok manter) */
 [data-testid="stDataFrame"] *{ font-size: 1.0rem; }
 [data-testid="stDataEditor"] *{ font-size: 1.02rem; }
 
+/* Regras específicas – aumentam o tamanho real das células/cabeçalhos */
 [data-testid="stDataFrame"] [role="gridcell"],
 [data-testid="stDataEditor"] [role="gridcell"]{
   font-size: var(--table-font-size) !important;
@@ -212,28 +168,33 @@ label, [data-testid="stWidgetLabel"]{ font-size: 1.02rem; }
   font-weight: 700 !important;
 }
 
+/* Altura das linhas (opcional) */
 [data-testid="stDataFrame"] [role="row"],
 [data-testid="stDataEditor"] [role="row"]{
   min-height: 38px;
 }
+
+/* Espaço interno das células (opcional) */
 [data-testid="stDataFrame"] [role="gridcell"] > div,
 [data-testid="stDataEditor"] [role="gridcell"] > div{
   padding: 8px 10px;
 }
 
+/* ==================== MÉTRICAS ==================== */
 [data-testid="stMetricValue"]{
   font-size: 1.9rem !important;
   font-weight: 780 !important;
 }
 [data-testid="stMetricLabel"]{ font-size: 1.0rem; opacity: .8; }
 
+/* ==================== BOTÕES ==================== */
 .stButton > button, .stDownloadButton > button{
   font-size: 1.02rem;
   border-radius: 14px;
   font-weight: 650;
 }
 
-/* Cartões de estatísticas */
+/* ==================== CARTÕES ESTATÍSTICOS ==================== */
 .stat-card{
   background: #fff;
   border: 1px solid #e9e9ee;
@@ -243,245 +204,105 @@ label, [data-testid="stWidgetLabel"]{ font-size: 1.02rem; }
 .stat-label{ font-size: .92rem; opacity: .75; }
 .stat-value{ font-size: 1.12rem; font-weight: 700; margin-top: .2rem; }
 
+/* ==================== SIDEBAR ==================== */
 [data-testid="stSidebar"]{
   background: linear-gradient(180deg, #f7f7fb 0%, #f2f3f9 100%);
 }
 [data-testid="stSidebar"] .block-container{ padding-top: 1rem; }
 
+/* ==================== AJUSTES LEVES ==================== */
 hr{ opacity: .6; }
 
-/* ALERTA de divergência (vermelho) */
+/* ===== NOVO: AVISO DE DIVERGÊNCIA VERMELHO ===== */
 .alert-danger {
     padding: 0.75rem 1rem;
     margin-bottom: 1rem;
     border: 1px solid transparent;
     border-radius: .375rem;
-    background-color: #fee2e2;
-    border-color: #fca5a5;
-    color: #991b1b;
-    font-size: 0.9rem;
+    background-color: #fee2e2; /* Vermelho claro */
+    border-color: #fca5a5;   /* Borda vermelha */
+    color: #991b1b;         /* Texto vermelho escuro */
+    font-size: 0.9rem;      /* Letras pequenas */
 }
-.alert-danger strong { font-weight: 700; }
+.alert-danger strong {
+    font-weight: 700;
+}
+
 </style>
 """
 
-# ======== THEME PACK — UI MODERNA (visual apenas) ========
-MODERN_UI_CSS = """
+# === Cores dos botões por formulário (compat com chamada antiga BUTTONS_CSS) ===
+# SUBSTITUA SEU CSS DE BOTÕES ANTIGO POR ESTE
+FORM_BUTTONS_CSS = """
 <style>
-/* Escopo: apenas área principal; login segue separado */
-[data-testid="stAppViewContainer"] .main {
-
-  --brand: #1f6feb; --brand-2: #185fcd;
-  --ok: #16a34a; --warn: #f59e0b; --err: #dc2626;
-  --ink: #0f172a; --muted: #667085;
-  --card: #ffffff; --card-border: #e9edf3; --bg-soft: #f7f8fc;
-
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
-  background: linear-gradient(180deg, #fafbff 0%, #f6f7fc 60%, #f2f4f9 100%);
+/* --- ENTRADAS (VERDE) --- */
+.adrf-entrada [data-testid="stFormSubmitButton"] button {
+    background-color: #16a34a !important;
+    border-color: #16a34a !important;
+    color: white !important;
+}
+.adrf-entrada [data-testid="stFormSubmitButton"] button:hover {
+    background-color: #15803d !important;
+    border-color: #15803d !important;
 }
 
-/* Títulos */
-[data-testid="stAppViewContainer"] .main h1.page-title {
-  display: inline-flex; align-items: center; gap:.6rem;
-  padding: .35rem .80rem; margin:.2rem 0 1rem 0;
-  border-radius: 12px;
-  background: linear-gradient(135deg, rgba(31,111,235,.10), rgba(24,95,205,.06));
-  border: 1px solid rgba(31,111,235,.16);
-  color: var(--ink);
-  letter-spacing:.2px;
+/* --- DIZIMISTAS (AZUL) --- */
+.adrf-dizimo [data-testid="stFormSubmitButton"] button {
+    background-color: #1d4ed8 !important;
+    border-color: #1d4ed8 !important;
+    color: white !important;
 }
-[data-testid="stAppViewContainer"] .main h2, 
-[data-testid="stAppViewContainer"] .main h3{ color: var(--ink); }
-
-/* Sidebar */
-[data-testid="stSidebar"] {
-  background: linear-gradient(180deg, #f7f8fd 0%, #eef2fb 100%) !important;
-  border-right: 1px solid #e7eaf3;
-}
-[data-testid="stSidebar"] .stRadio > div[role="radiogroup"] label {
-  border-radius: 10px; padding: .35rem .55rem;
-}
-[data-testid="stSidebar"] .stRadio > div[role="radiogroup"] label:hover {
-  background: rgba(31,111,235,.08);
-}
-[data-testid="stSidebar"] .stRadio > div[role="radiogroup"] label [data-testid="stMarkdownContainer"]{
-  font-weight: 600;
+.adrf-dizimo [data-testid="stFormSubmitButton"] button:hover {
+    background-color: #1e40af !important;
+    border-color: #1e40af !important;
 }
 
-/* Cartões/containers */
-.block-container > div:has(> .stat-card),
-.block-container > div:has(> .stDownloadButton),
-[data-testid="stExpander"] {
-  border-radius: 16px !important;
-  border: 1px solid var(--card-border) !important;
-  background: var(--card) !important;
-  box-shadow: 0 8px 24px rgba(16,24,40,.06) !important;
+/* --- SAÍDAS (VERMELHO) --- */
+.adrf-saida [data-testid="stFormSubmitButton"] button {
+    background-color: #dc2626 !important;
+    border-color: #dc2626 !important;
+    color: white !important;
 }
-
-/* Botões gerais e download */
-.stButton > button,
-[data-testid="stFormSubmitButton"] > button,
-.stDownloadButton > button{
-  border-radius: 12px !important;
-  font-weight: 700 !important;
-  letter-spacing:.2px;
-  padding:.55rem 1rem !important;
-  box-shadow: 0 6px 16px rgba(31,111,235,.18);
-  border:1px solid transparent;
-}
-.stButton > button:hover,
-[data-testid="stFormSubmitButton"] > button:hover,
-.stDownloadButton > button:hover{ transform: translateY(-1px); }
-.stDownloadButton > button{
-  background: linear-gradient(180deg, var(--brand) 0%, var(--brand-2) 100%) !important;
-  color:#fff !important;
-}
-
-/* Métricas */
-[data-testid="stMetric"]{
-  border: 1px solid var(--card-border);
-  border-radius: 14px; padding:.65rem .85rem; background:#fff;
-  box-shadow: 0 8px 18px rgba(20,20,40,.05);
-}
-[data-testid="stMetricLabel"]{ color: var(--muted) !important; }
-[data-testid="stMetricValue"]{ font-weight:800 !important; }
-
-/* Tabelas */
-[data-testid="stDataFrame"] table,
-[data-testid="stDataEditor"] table{
-  border: 1px solid var(--card-border);
-  box-shadow: 0 8px 24px rgba(16,24,40,.05);
-}
-[data-testid="stDataFrame"] thead tr, 
-[data-testid="stDataEditor"] thead tr{
-  position: sticky; top: 0; z-index: 2;
-  background: linear-gradient(180deg, #ffffff 0%, #f7f8fc 100%);
-}
-[data-testid="stDataFrame"] tbody tr:nth-child(even),
-[data-testid="stDataEditor"] tbody tr:nth-child(even){ background:#fbfcff; }
-[data-testid="stDataFrame"] tbody tr:hover,
-[data-testid="stDataEditor"] tbody tr:hover{ background:#eef5ff !important; }
-[data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th,
-[data-testid="stDataEditor"] td, [data-testid="stDataEditor"] th{
-  border-color:#e8ecf3 !important;
-}
-[data-testid="stDataEditor"] input, 
-[data-testid="stDataEditor"] select{
-  border-radius: 8px !important;
-}
-
-/* Divisores */
-hr{ border:none; height:1px; background:linear-gradient(90deg, transparent, #e8ecf3 20%, #e8ecf3 80%, transparent); }
-
-/* Alertas extras (info/sucesso/aviso) */
-.alert-info{
-  padding:.75rem 1rem; border-radius:.5rem;
-  background:#e0f2fe; border:1px solid #bae6fd; color:#075985; font-size:.92rem;
-}
-.alert-success{
-  padding:.75rem 1rem; border-radius:.5rem;
-  background:#dcfce7; border:1px solid #bbf7d0; color:#14532d; font-size:.92rem;
-}
-.alert-warn{
-  padding:.75rem 1rem; border-radius:.5rem;
-  background:#fff7ed; border:1px solid #fed7aa; color:#7c2d12; font-size:.92rem;
-}
-
-/* Expanders */
-[data-testid="stExpander"] > details > summary{ font-weight: 750; letter-spacing:.2px; }
-[data-testid="stExpander"] > details{
-  background:#fff !important; border-radius: 14px; border:1px solid var(--card-border);
-}
-
-/* Dark mode (automático) */
-@media (prefers-color-scheme: dark){
-  [data-testid="stAppViewContainer"] .main{
-    --ink: #e9edf3; --muted:#9aa4b2; --card:#0f172a; --card-border:#1e293b; --bg-soft:#0b1220;
-    background: linear-gradient(180deg, #0b1220 0%, #0b1220 100%);
-    color: var(--ink);
-  }
-  [data-testid="stSidebar"]{
-    background: linear-gradient(180deg, #0b1220 0%, #0b1528 100%) !important;
-    border-right-color: #1e293b;
-  }
-  [data-testid="stDataFrame"] table,
-  [data-testid="stDataEditor"] table{ background:#0f172a; }
-  .stButton > button,
-  [data-testid="stFormSubmitButton"] > button,
-  .stDownloadButton > button{ box-shadow: none; }
+.adrf-saida [data-testid="stFormSubmitButton"] button:hover {
+    background-color: #b91c1c !important;
+    border-color: #b91c1c !important;
 }
 </style>
 """
 
-# ======== INJEÇÃO: aplique todos (menos o do login) ========
-# 1) Base/tema primeiro
-st.markdown(CSS, unsafe_allow_html=True)
-st.markdown(MODERN_UI_CSS, unsafe_allow_html=True)
-st.markdown(CSS_TABLE_BOOST, unsafe_allow_html=True)
-
-# 2) POR ÚLTIMO: as cores dos botões por formulário
+# Garanta que a linha abaixo esteja no seu código, após a definição acima
 st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)
 
+# Alias para manter compatibilidade com a linha 256
+BUTTONS_CSS = FORM_BUTTONS_CSS
 
-# === Cores dos botões ===
-# 🔵 ÚNICA definição válida — deixe-a UMA VEZ só, acima dos helpers de botão
-# mantenha UMA definição de BTN_COLORS
-BTN_COLORS = {
-    "entrada":   "#16a34a",
-    "dizimista": "#1d4ed8",
-    "saida":     "#dc2626",
-    "neutral":   "#1f6feb",
+
+st.markdown(BUTTONS_CSS, unsafe_allow_html=True)
+
+CSS_TABLE_BOOST = """
+<style>
+/* Aumenta o tamanho da fonte APENAS do conteúdo das células */
+[data-testid="stDataFrame"] [role="gridcell"] *,
+[data-testid="stDataEditor"] [role="gridcell"] *{
+  font-size: 1.18rem !important;   /* ajuste aqui: 1.10–1.30rem */
+  line-height: 1.55 !important;
 }
 
-def form_submit_colored(label: str, key_suffix: str, theme: str = "neutral") -> bool:
-    import streamlit as st
-    color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
-    scope = f"scoped-submit-{key_suffix}"
-    with st.container():
-        st.markdown(f"<div class='{scope}'>", unsafe_allow_html=True)
-        clicked = st.form_submit_button(label, type="primary", key=f"submit_{key_suffix}")
-        st.markdown(
-            f"""
-            <style>
-              .{scope} [data-testid="stFormSubmitButton"] > button {{
-                background:{color} !important; border-color:{color} !important; color:#fff !important;
-                box-shadow:0 6px 16px rgba(0,0,0,.12) !important;
-              }}
-              .{scope} [data-testid="stFormSubmitButton"] > button:hover {{ filter:brightness(0.93); }}
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
-    return clicked
+/* Cabeçalhos das colunas um pouco maiores e mais fortes */
+[data-testid="stDataFrame"] [role="columnheader"] *,
+[data-testid="stDataEditor"] [role="columnheader"] *{
+  font-size: 1.08rem !important;
+  font-weight: 700 !important;
+}
+</style>
+"""
 
-def _save_btn(on_click, key_suffix: str, theme: str = "neutral", label: str = "Salvar alterações"):
-    import streamlit as st
-    color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
-    scope = f"scoped-btn-{key_suffix}"
-    with st.container():
-        st.markdown(f"<div class='{scope}'>", unsafe_allow_html=True)
-        st.button(label, key=f"btn_save_{key_suffix}", type="primary", on_click=on_click)
-        st.markdown(
-            f"""
-            <style>
-              .{scope} [data-testid="stButton"] > button {{
-                background:{color} !important; border-color:{color} !important; color:#fff !important;
-                box-shadow:0 6px 16px rgba(0,0,0,.12) !important;
-              }}
-              .{scope} [data-testid="stButton"] > button:hover {{ filter:brightness(0.93); }}
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
+st.markdown(CSS_TABLE_BOOST, unsafe_allow_html=True)
 
-# IMPORTANTE:
-# Quando estiver dentro da função de login (login_ui), chame:
-# st.markdown(ADRF_LOGIN_CSS, unsafe_allow_html=True)
-# para estilizar o cartão de login sem afetar as outras páginas.
+st.markdown(CSS, unsafe_allow_html=True)
 
-
+ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
 
 # ===================== LOCALE (fallback) =====================
 def _set_locale_ptbr():
@@ -1008,6 +829,69 @@ def sidebar_common(user: "User") -> str:
 
 # ======= NOVO: helper padrão para botões 'Salvar alterações' =======
 # ====== CORES P/ BOTÕES ======
+BTN_COLORS = {
+    "entrada":  "#16a34a",  # verde
+    "dizimista":"#2563eb",  # azul
+    "saida":    "#dc2626",  # vermelha
+    "neutral":  "#1f6feb",  # fallback (azul padrão)
+}
+
+def _save_btn(on_click, key_suffix: str, theme: str = "neutral", label: str = "Salvar alterações"):
+    """
+    Botão 'Salvar alterações' com cor personalizada por tema:
+      - 'entrada'  -> verde
+      - 'dizimista'-> azul
+      - 'saida'    -> vermelho
+      - 'neutral'  -> cor padrão
+    """
+    color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
+    with st.container():
+        # marcador p/ escopar o CSS desse botão apenas
+        st.markdown(f'<div id="mark-{key_suffix}"></div>', unsafe_allow_html=True)
+        st.button(label, key=f"btn_save_{key_suffix}", type="primary", on_click=on_click)
+        st.markdown(
+            f"""
+            <style>
+              /* pinta SOMENTE o botão dentro deste bloco */
+              #mark-{key_suffix} ~ div[data-testid="stButton"] > button {{
+                background: {color} !important;
+                border-color: {color} !important;
+              }}
+              #mark-{key_suffix} ~ div[data-testid="stButton"] > button:hover {{
+                filter: brightness(0.93);
+              }}
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+
+def _submit_btn(label: str, key_suffix: str, theme: str = "neutral") -> bool:
+    """
+    Versão colorida para st.form_submit_button (forms de ENTRADA, DIZIMISTA, SAÍDA).
+    Retorna True quando o usuário clica.
+    """
+    color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
+    with st.container():
+        st.markdown(f'<div id="mark-{key_suffix}"></div>', unsafe_allow_html=True)
+        clicked = st.form_submit_button(label, type="primary")
+        st.markdown(
+            f"""
+            <style>
+              /* cobre tanto submit de form quanto um fallback de stButton */
+              #mark-{key_suffix} ~ div[data-testid="stFormSubmitButton"] > button,
+              #mark-{key_suffix} ~ div[data-testid="stButton"] > button {{
+                background: {color} !important;
+                border-color: {color} !important
+              }}
+              #mark-{key_suffix} ~ div[data-testid="stFormSubmitButton"] > button:hover,
+              #mark-{key_suffix} ~ div[data-testid="stButton"] > button:hover {{
+                filter: brightness(0.93);
+              }}
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+    return clicked
 
 def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: str, default_cong_id: Optional[int], default_sub_cong_id: Optional[int] = None):
     def norm_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -1949,7 +1833,7 @@ def page_lancamentos(user: "User"):
                     ent_dizimo = c1.number_input("Valor do Dízimo", min_value=0.0, value=0.0, format="%.2f", key="ent_dizimo_form")
                     ent_oferta = c2.number_input("Valor da Oferta", min_value=0.0, value=0.0, format="%.2f", key="ent_oferta_form")
 
-                    if form_submit_colored("Salvar Entrada do Culto", "ent_culto_submit", theme="entrada"):
+                    if st.form_submit_button("Salvar Entrada do Culto"):
                         if ent_dizimo > 0 or ent_oferta > 0:
                             log_existente = db.scalar(
                                 select(ServiceLog).where(
@@ -1988,7 +1872,7 @@ def page_lancamentos(user: "User"):
                     dz_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="dz_valor")
                     dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência"], key="dz_pay")
 
-                    if form_submit_colored("Salvar DIZIMISTA", "dz_submit", theme="dizimista"):
+                    if st.form_submit_button("Salvar DIZIMISTA"):
                         if dz_valor > 0 and dz_nome.strip():
                             db.add(
                                 Tithe(
@@ -2017,7 +1901,7 @@ def page_lancamentos(user: "User"):
                     sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
                     sai_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="sai_valor")
 
-                    if form_submit_colored("Salvar SAÍDA", "saida_submit", theme="saida"):
+                    if st.form_submit_button("Salvar SAÍDA"):
                         cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
                         if sai_valor > 0 and cat_obj:
                             db.add(
@@ -2130,8 +2014,9 @@ def page_lancamentos(user: "User"):
                 _apply_service_log_changes(df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id)
                 st.rerun()
 
-            _save_btn(on_save_click,f"save_table_{parent_cong_obj.id}",theme="entrada",  # verde label="Salvar alterações na tabela"
-)
+            st.markdown('<div class="adrf-entrada">', unsafe_allow_html=True)
+            st.button("Salvar alterações na tabela", on_click=on_save_click, key=f"save_table_{parent_cong_obj.id}", type="primary")
+            st.markdown('</div>', unsafe_allow_html=True)
 
             st.markdown("---")
             tithes_query = select(Tithe).where(
