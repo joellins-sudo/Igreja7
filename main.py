@@ -2618,15 +2618,14 @@ def build_consolidated_pdf(congs_all: List[Congregation], ref: date, db: Session
     grand_total_entradas = 0.0
     grand_total_saidas = 0.0
 
-    # --- Tabela 1: Resumo de Entradas Hierárquico (sem Missões) ---
-    story.append(Paragraph("1. Resumo de Entradas por Unidade (Exceto Missões)", heading_style))
+    # --- Tabela 1: Resumo de Entradas por Unidade ---
+    story.append(Paragraph("1. Resumo de Entradas por Unidade", heading_style))
     entry_data = [["Unidade", "Dízimos", "Ofertas", "Total (R$)"]]
     
     all_units_entries = []
     for cong in congs_all:
         # Principal
         df_principal = _load_service_logs(db, cong.id, start, end, None)
-        # CORREÇÃO: Verifica se o DataFrame está vazio antes de somar
         dizimo_p = df_principal['Dízimo'].sum() if not df_principal.empty else 0.0
         oferta_p = df_principal['Oferta'].sum() if not df_principal.empty else 0.0
         all_units_entries.append({"cong_name": cong.name, "is_sub": False, "unit_name": cong.name, "dizimo": dizimo_p, "oferta": oferta_p, "total": dizimo_p + oferta_p})
@@ -2635,7 +2634,6 @@ def build_consolidated_pdf(congs_all: List[Congregation], ref: date, db: Session
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id)).all()
         for sub in sub_congs:
             df_sub = _load_service_logs(db, cong.id, start, end, sub.id)
-            # CORREÇÃO: Verifica se o DataFrame está vazio antes de somar
             dizimo_s = df_sub['Dízimo'].sum() if not df_sub.empty else 0.0
             oferta_s = df_sub['Oferta'].sum() if not df_sub.empty else 0.0
             all_units_entries.append({"cong_name": cong.name, "is_sub": True, "unit_name": f"↳ {sub.name}", "dizimo": dizimo_s, "oferta": oferta_s, "total": dizimo_s + oferta_s})
@@ -2663,8 +2661,8 @@ def build_consolidated_pdf(congs_all: List[Congregation], ref: date, db: Session
     story.append(tbl_in)
     story.append(Spacer(1, 0.8*cm))
 
-    # --- Tabela 2: Detalhamento de Saídas por Categoria (sem Missões) ---
-    story.append(Paragraph("2. Total de Saídas por Categoria (Geral, Exceto Missões)", heading_style))
+    # --- Tabela 2: Detalhamento de Saídas por Categoria ---
+    story.append(Paragraph("2. Total de Saídas por Categoria", heading_style))
     exit_data = [["Categoria de Saída", "Valor Total (R$)"]]
     
     cat_miss_saida = db.scalar(select(Category).where(func.lower(Category.name) == 'missões (saída)'))
@@ -2683,19 +2681,19 @@ def build_consolidated_pdf(congs_all: List[Congregation], ref: date, db: Session
         exit_data.append([cat_name, format_currency(total)])
         grand_total_saidas += float(total or 0.0)
     
-    exit_data.append([Paragraph("<b>Total Geral de Saídas (Exceto Missões)</b>", normal_style), Paragraph(f"<b>{format_currency(grand_total_saidas)}</b>", normal_style)])
+    exit_data.append([Paragraph("<b>Total Geral de Saídas</b>", normal_style), Paragraph(f"<b>{format_currency(grand_total_saidas)}</b>", normal_style)])
     tbl_out = Table(exit_data, colWidths=[12*cm, 4*cm])
     tbl_out.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)]))
     story.append(tbl_out)
     story.append(Spacer(1, 0.8*cm))
 
     # --- Tabela 3: Resumo Financeiro Geral ---
-    story.append(Paragraph("3. Resumo Financeiro Geral (Caixa Principal)", heading_style))
+    story.append(Paragraph("3. Resumo Financeiro Geral", heading_style))
     saldo_final = grand_total_entradas - grand_total_saidas
     summary_data = [
-        ["Total Geral de Entradas (Exceto Missões)", format_currency(grand_total_entradas)],
-        ["Total Geral de Saídas (Exceto Missões)", format_currency(grand_total_saidas)],
-        [Paragraph("<b>Saldo do Mês (Caixa Principal)</b>", normal_style), Paragraph(f"<b>{format_currency(saldo_final)}</b>", normal_style)]
+        ["Total Geral de Entradas", format_currency(grand_total_entradas)],
+        ["Total Geral de Saídas", format_currency(grand_total_saidas)],
+        [Paragraph("<b>Saldo do Mês</b>", normal_style), Paragraph(f"<b>{format_currency(saldo_final)}</b>", normal_style)]
     ]
     tbl_summary = Table(summary_data, colWidths=[8*cm, 8*cm])
     tbl_summary.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,2), (-1,2), colors.lightcyan)]))
@@ -2747,17 +2745,17 @@ def page_visao_geral(user: "User"):
                 df_entradas = _load_service_logs(db, cong.id, start, end, sub_id)
                 total_dizimos = df_entradas['Dízimo'].sum() if not df_entradas.empty else 0.0
                 total_ofertas = df_entradas['Oferta'].sum() if not df_entradas.empty else 0.0
-                total_geral = total_dizimos + total_ofertas
+                total_geral_entradas = total_dizimos + total_ofertas
 
                 dados_saidas = _collect_month_data(db, cong.id, start, end, sub_id)
                 total_saidas = dados_saidas["totals"]["saidas_total"]
-                saldo_total = total_geral - total_saidas
+                saldo_total = total_geral_entradas - total_saidas
 
                 report_data.append({
                     "Unidade": unit_name,
                     "Total de Dízimos": total_dizimos,
                     "Total de Ofertas": total_ofertas,
-                    "Total Geral (Entradas)": total_geral,
+                    "Total Geral (Entradas)": total_geral_entradas,
                     "Total de Saídas": total_saidas,
                     "Saldo Total": saldo_total
                 })
@@ -2799,7 +2797,7 @@ def page_visao_geral(user: "User"):
                 key="dl_pdf_geral_consolidado"
             )
         
-        # Botão para o relatório individual detalhado
+        # O botão para o relatório individual continua aqui, como antes
         sel_cong_name = st.selectbox(
             "Selecione a congregação para gerar o relatório detalhado individual:",
             [c.name for c in display_congs],
@@ -2810,7 +2808,7 @@ def page_visao_geral(user: "User"):
             if selected_cong_obj:
                 st.download_button(
                     f"⬇️ Baixar PDF de {selected_cong_obj.name} (e suas subs)",
-                    data=build_full_statement_pdf(selected_cong_obj.id, ref, db),
+                    data=build_single_unit_report_pdf(selected_cong_obj.id, None, selected_cong_obj.name, ref, db),
                     file_name=f"prestacao_{_norm(selected_cong_obj.name)}_{ref.strftime('%Y-%m')}.pdf",
                     mime="application/pdf",
                     key=f"dl_pdf_cong_{_norm(selected_cong_obj.name)}"
