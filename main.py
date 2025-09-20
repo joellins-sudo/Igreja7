@@ -1708,7 +1708,15 @@ def page_lancamentos(user: "User"):
         st.divider()
 
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
-        tipos_de_culto = ["Culto da Noite (Padrão)", "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)", "Evento Especial", "Outro"]
+        
+        # ===== ALTERAÇÃO AQUI: Texto do culto de missões atualizado =====
+        tipos_de_culto = [
+            "Culto da Noite (Padrão)", 
+            "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)", 
+            "Culto de missões(Registre a oferta no Relatório de Missões)",
+            "Evento Especial", 
+            "Outro"
+        ]
 
         if modo == "Formulário único":
             target_cong_obj = parent_cong_obj
@@ -1800,29 +1808,8 @@ def page_lancamentos(user: "User"):
             ref_tab = get_month_selector("Mês de referência da tabela")
             start_tab, end_tab = month_bounds(ref_tab)
             
-            total_service_dizimo = db.scalar(select(func.sum(ServiceLog.dizimo)).where(
-                ServiceLog.congregation_id == parent_cong_obj.id,
-                ServiceLog.date >= start_tab, ServiceLog.date < end_tab,
-                ServiceLog.sub_congregation_id == target_sub_cong_id
-            )) or 0.0
-
-            total_nominal_dizimo = db.scalar(select(func.sum(Tithe.amount)).where(
-                Tithe.congregation_id == parent_cong_obj.id,
-                Tithe.date >= start_tab, Tithe.date < end_tab,
-                Tithe.sub_congregation_id == target_sub_cong_id
-            )) or 0.0
-
-            if not math.isclose(total_service_dizimo, total_nominal_dizimo):
-                diferenca = total_service_dizimo - total_nominal_dizimo
-                msg = (
-                    f"<strong>Atenção: Divergência nos Dízimos de {ref_tab.strftime('%B')}</strong><br>"
-                    f"Total nos Cultos: {format_currency(total_service_dizimo)} | "
-                    f"Total de Dizimistas: {format_currency(total_nominal_dizimo)} | "
-                    f"Diferença: {format_currency(diferenca)}"
-                )
-                st.markdown(f'<div class="alert-danger">{msg}</div>', unsafe_allow_html=True)
-            
             st.markdown("##### Resumo de Entradas por Culto")
+            
             df_logs = _load_service_logs(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
 
             if df_logs.empty:
@@ -1832,14 +1819,17 @@ def page_lancamentos(user: "User"):
 
             edited_df = st.data_editor(
                 df_logs,
-                use_container_width=True, hide_index=True, num_rows="dynamic",
+                use_container_width=True, 
+                hide_index=True, 
+                num_rows="dynamic",
                 key=f"editor_service_logs_{parent_cong_obj.id}_{target_sub_cong_id}",
                 column_config={
-                    "ID": None, "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
+                    "ID": None,
+                    "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
                     "Tipo de Culto": st.column_config.SelectboxColumn("Tipo de Culto", options=tipos_de_culto, required=True),
                     "Dízimo": st.column_config.NumberColumn("Dízimo", format="R$ %.2f", required=True),
                     "Oferta": st.column_config.NumberColumn("Oferta", format="R$ %.2f", required=True),
-                    "Total": st.column_config.NumberColumn("Total", help="Soma do Dízimo e Oferta.", format="R$ %.2f", disabled=True),
+                    "Total": st.column_config.NumberColumn("Total", help="Soma do Dízimo e Oferta. Atualiza após salvar.", format="R$ %.2f", disabled=True),
                 },
                 column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
             )
@@ -1849,12 +1839,13 @@ def page_lancamentos(user: "User"):
                 total_dizimo = _to_float_brl(edited_df["Dízimo"].sum())
                 total_oferta = _to_float_brl(edited_df["Oferta"].sum())
                 total_geral = total_dizimo + total_oferta
+
                 col1, col2, col3 = st.columns(3)
                 col1.metric("Total Dízimos (na tabela)", format_currency(total_dizimo))
                 col2.metric("Total Ofertas (na tabela)", format_currency(total_oferta))
                 col3.metric("Total Geral (na tabela)", format_currency(total_geral))
             except Exception:
-                st.caption("A calcular totais...")
+                st.caption("Calculando totais...")
             
             def on_save_click():
                 _apply_service_log_changes(df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id)
@@ -1873,6 +1864,8 @@ def page_lancamentos(user: "User"):
             txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == "SAÍDA", Transaction.sub_congregation_id == target_sub_cong_id)
             txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
             _editor_lancamentos(txs_out, f"Saídas - {contexto_tabela}", tx_type_hint="SAÍDA", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
+
+
 # ===== PÁGINA: LANÇAMENTOS (com modo Tabela + 3 editores) =====
 # ===== PÁGINA: LANÇAMENTOS (modo Tabela mostra total abaixo de cada uma) =====
 
@@ -3565,7 +3558,6 @@ def page_relatorio_entrada(user: "User"):
         
         if user.role == "SEDE":
             congs_all = order_congs_sede_first(cong_options_for(user, db))
-            # Opções para a Sede: Visão Hierárquica + lista de cada congregação
             escopo_opts = ["-- Relatório Hierárquico (Edição) --"] + [c.name for c in congs_all]
             
             escopo_selecionado = st.selectbox("Selecione o escopo do relatório:", escopo_opts, key="re_sede_escopo")
@@ -3574,7 +3566,6 @@ def page_relatorio_entrada(user: "User"):
                 display_entry_hierarchy(user, congs_all, start, end, db)
                 return
             else:
-                # Se a Sede escolheu uma congregação específica, o código prossegue
                 parent_cong_obj = next((c for c in congs_all if c.name == escopo_selecionado), None)
         else: # TESOUREIRO
             parent_cong_obj = db.get(Congregation, user.congregation_id)
@@ -3590,12 +3581,8 @@ def page_relatorio_entrada(user: "User"):
         target_sub_cong_id_or_all = None
         contexto_selecionado = parent_cong_obj.name
         
-        # Lógica Unificada: Se a congregação selecionada (por qualquer perfil) tiver subs, mostra o seletor
         if sub_congs:
-            opcoes = {
-                "-- Todas (Principal + Subs) --": "ALL",
-                f"{parent_cong_obj.name} (Principal)": None
-            }
+            opcoes = {"-- Todas (Principal + Subs) --": "ALL", f"{parent_cong_obj.name} (Principal)": None}
             for sub in sub_congs:
                 opcoes[sub.name] = sub.id
             contexto_selecionado = st.selectbox("Filtrar por unidade:", list(opcoes.keys()), key="re_sub_sel_unified")
@@ -3603,13 +3590,10 @@ def page_relatorio_entrada(user: "User"):
         
         st.info(f"Exibindo dados para: **{contexto_selecionado}**")
 
-        # Se a visão consolidada "Todas" for selecionada
         if target_sub_cong_id_or_all == "ALL":
             all_units_data = []
-            # Dados da Principal
             df_principal = _load_service_logs(db, parent_cong_obj.id, start, end, sub_cong_id=None)
             all_units_data.append({"Unidade": f"{parent_cong_obj.name} (Principal)", "Total Entradas": df_principal['Total'].sum()})
-            # Dados das Subs
             for sub in sub_congs:
                 df_sub = _load_service_logs(db, parent_cong_obj.id, start, end, sub_cong_id=sub.id)
                 all_units_data.append({"Unidade": f"↳ {sub.name}", "Total Entradas": df_sub['Total'].sum()})
@@ -3619,7 +3603,6 @@ def page_relatorio_entrada(user: "User"):
             total_geral = df_agg["Total Entradas"].sum()
             st.metric("Total Geral da Congregação", format_currency(total_geral))
         else:
-            # Se uma unidade específica for selecionada (ou se não houver subs)
             report_df = _load_service_logs(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id_or_all)
             
             st.dataframe(
@@ -3631,8 +3614,21 @@ def page_relatorio_entrada(user: "User"):
                 column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
             )
             
-            total_geral_unidade = report_df["Total"].sum() if not report_df.empty else 0.0
-            st.metric("Soma Geral (mês)", format_currency(total_geral_unidade))
+            # ===== NOVO BLOCO DE MÉTRICAS PARA TESOUREIRO =====
+            st.divider()
+            try:
+                total_dizimo, total_oferta, total_geral = 0.0, 0.0, 0.0
+                if not report_df.empty:
+                    total_dizimo = report_df["Dízimo"].sum()
+                    total_oferta = report_df["Oferta"].sum()
+                    total_geral = report_df["Total"].sum()
+                
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total de Dízimos", format_currency(total_dizimo))
+                col2.metric("Total de Ofertas", format_currency(total_oferta))
+                col3.metric("Total Geral Entradas", format_currency(total_geral))
+            except Exception:
+                st.caption("Calculando totais...")
             
             # REMOVIDO: Botão de salvar e toda a sua lógica
 # ===================== MAIN =====================
