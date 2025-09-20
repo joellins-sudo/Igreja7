@@ -1691,9 +1691,9 @@ def page_lancamentos(user: "User"):
             congs_all = order_congs_sede_first(cong_options_for(user, db))
             cong_sel_name = st.selectbox("Selecione a Congregação Principal:", [c.name for c in congs_all], key="lan_cong_sel_sede")
             parent_cong_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
-        else: # TESOUREIRO
+        else:  # TESOUREIRO
             parent_cong_obj = db.get(Congregation, user.congregation_id)
-        
+
         if not parent_cong_obj:
             st.error("Nenhuma congregação selecionada ou encontrada."); return
 
@@ -1708,13 +1708,12 @@ def page_lancamentos(user: "User"):
         st.divider()
 
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
-        
-        # Mantém seus tipos exatamente como estavam
+
         tipos_de_culto = [
-            "Culto da Noite (Padrão)", 
-            "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)", 
+            "Culto da Noite (Padrão)",
+            "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)",
             "Culto de missões(Registre a oferta no Relatório de Missões)",
-            "Evento Especial", 
+            "Evento Especial",
             "Outro"
         ]
 
@@ -1729,7 +1728,7 @@ def page_lancamentos(user: "User"):
                     opcoes[sub.name] = sub.id
                 contexto_selecionado = st.selectbox("Lançar em:", list(opcoes.keys()), key="lan_sub_sel_context_form")
                 target_sub_cong_id = opcoes[contexto_selecionado]
-            
+
             st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
             st.divider()
 
@@ -1744,13 +1743,27 @@ def page_lancamentos(user: "User"):
 
                     if st.form_submit_button("Salvar Entrada do Culto"):
                         if ent_dizimo > 0 or ent_oferta > 0:
-                            log_existente = db.scalar(select(ServiceLog).where(ServiceLog.date == ent_data, ServiceLog.service_type == ent_tipo, ServiceLog.congregation_id == target_cong_obj.id, ServiceLog.sub_congregation_id == target_sub_cong_id))
+                            log_existente = db.scalar(
+                                select(ServiceLog).where(
+                                    ServiceLog.date == ent_data,
+                                    ServiceLog.service_type == ent_tipo,
+                                    ServiceLog.congregation_id == target_cong_obj.id,
+                                    ServiceLog.sub_congregation_id == target_sub_cong_id
+                                )
+                            )
                             if log_existente:
                                 log_existente.dizimo += ent_dizimo
                                 log_existente.oferta += ent_oferta
                                 st.success("Valores adicionados ao registro do culto existente!")
                             else:
-                                novo_log = ServiceLog(date=ent_data, service_type=ent_tipo, dizimo=ent_dizimo, oferta=ent_oferta, congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id)
+                                novo_log = ServiceLog(
+                                    date=ent_data,
+                                    service_type=ent_tipo,
+                                    dizimo=ent_dizimo,
+                                    oferta=ent_oferta,
+                                    congregation_id=target_cong_obj.id,
+                                    sub_congregation_id=target_sub_cong_id
+                                )
                                 db.add(novo_log)
                                 st.success("Novo registro de culto salvo com sucesso!")
                             db.commit()
@@ -1766,10 +1779,19 @@ def page_lancamentos(user: "User"):
                     dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
                     dz_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="dz_valor")
                     dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência"], key="dz_pay")
-                    
+
                     if st.form_submit_button("Salvar DIZIMISTA"):
                         if dz_valor > 0 and dz_nome.strip():
-                            db.add(Tithe(date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor, congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id, payment_method=dz_payment))
+                            db.add(
+                                Tithe(
+                                    date=dz_data,
+                                    tither_name=dz_nome.strip(),
+                                    amount=dz_valor,
+                                    congregation_id=target_cong_obj.id,
+                                    sub_congregation_id=target_sub_cong_id,
+                                    payment_method=dz_payment
+                                )
+                            )
                             db.commit()
                             st.success("Dízimo registrado!")
                             st.rerun()
@@ -1780,20 +1802,32 @@ def page_lancamentos(user: "User"):
                 with st.form("form_saida"):
                     cats_out = categories_for_type(db, "SAÍDA")
                     c1, c2 = st.columns(2)
-                    with c1: sai_data = st.date_input("Data da Saída", value=today_bahia(), key="sai_data")
-                    with c2: sai_cat_name = st.selectbox("Categoria", [c.name for c in cats_out] or ["—"], key="sai_cat")
+                    with c1:
+                        sai_data = st.date_input("Data da Saída", value=today_bahia(), key="sai_data")
+                    with c2:
+                        sai_cat_name = st.selectbox("Categoria", [c.name for c in cats_out] or ["—"], key="sai_cat")
                     sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
                     sai_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="sai_valor")
 
                     if st.form_submit_button("Salvar SAÍDA"):
                         cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
                         if sai_valor > 0 and cat_obj:
-                            db.add(Transaction(date=sai_data, type="SAÍDA", category_id=cat_obj.id, amount=sai_valor, description=(sai_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
+                            db.add(
+                                Transaction(
+                                    date=sai_data,
+                                    type="SAÍDA",
+                                    category_id=cat_obj.id,
+                                    amount=sai_valor,
+                                    description=(sai_desc or None),
+                                    congregation_id=target_cong_obj.id,
+                                    sub_congregation_id=target_sub_cong_id
+                                )
+                            )
                             db.commit()
                             st.success("Saída registrada!")
                             st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
-        
+
         elif modo == "Editar direto na tabela":
             contexto_tabela = f"{parent_cong_obj.name} (Principal)"
             target_sub_cong_id = None
@@ -1803,22 +1837,22 @@ def page_lancamentos(user: "User"):
                     opcoes_tabela[sub.name] = sub.id
                 contexto_tabela = st.selectbox("Selecione a unidade para editar:", list(opcoes_tabela.keys()), key="lan_tabela_contexto")
                 target_sub_cong_id = opcoes_tabela[contexto_tabela]
-            
+
             st.info(f"Editando lançamentos de: **{contexto_tabela}**")
             ref_tab = get_month_selector("Mês de referência da tabela")
             start_tab, end_tab = month_bounds(ref_tab)
-            
+
             st.markdown("##### Resumo de Entradas por Culto")
-            
+
             df_logs = _load_service_logs(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
 
-            # ===================== ALERTA INLINE (com evidência) =====================
-            # Compara Dízimo declarado no resumo do culto x valor real por data
+            # ===================== ALERTA INLINE (robusto) =====================
+            # Compara Dízimo do resumo x "real" (nominais + transações Dízimo **sem contar ajuste**)
             with SessionLocal() as _db_chk:
                 tithe_sub = (Tithe.sub_congregation_id.is_(None) if target_sub_cong_id is None else (Tithe.sub_congregation_id == target_sub_cong_id))
                 tx_sub    = (Transaction.sub_congregation_id.is_(None) if target_sub_cong_id is None else (Transaction.sub_congregation_id == target_sub_cong_id))
 
-                # Somatório de Tithes por data
+                # Tithes por data
                 t_rows = _db_chk.execute(
                     select(Tithe.date, func.coalesce(func.sum(Tithe.amount), 0.0))
                     .where(
@@ -1830,8 +1864,8 @@ def page_lancamentos(user: "User"):
                 ).all()
                 by_tithe = {d: float(v or 0.0) for d, v in t_rows}
 
-                # Somatório de Transações categoria "Dízimo" por data
-                cat_diz = _db_chk.scalar(select(Category).where(func.lower(Category.name).in_(("dízimo","dizimo"))))
+                # Transações de Dízimo por data (EXCLUINDO ajuste do resumo)
+                cat_diz = _db_chk.scalar(select(Category).where(func.lower(Category.name).in_(("dízimo", "dizimo"))))
                 by_tx = {}
                 if cat_diz:
                     tx_rows = _db_chk.execute(
@@ -1840,29 +1874,31 @@ def page_lancamentos(user: "User"):
                             Transaction.congregation_id == parent_cong_obj.id,
                             Transaction.date >= start_tab, Transaction.date < end_tab,
                             Transaction.category_id == cat_diz.id,
-                            tx_sub
+                            tx_sub,
+                            func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
                         )
                         .group_by(Transaction.date)
                     ).all()
                     by_tx = {d: float(v or 0.0) for d, v in tx_rows}
 
-                # Equivalência por data (maior entre nominais e tx de dízimo)
+                # Real por data = maior entre (tithes) e (tx Dízimo sem ajuste)
                 real_by_date = {d: max(by_tithe.get(d, 0.0), by_tx.get(d, 0.0)) for d in (set(by_tithe) | set(by_tx))}
-                # NOVO: só alertar quando houver evidência (tithe ou tx de dízimo no dia)
                 evidence_dates = set(by_tithe) | set(by_tx)
 
             alertas = []
             if not df_logs.empty:
                 for _, row in df_logs.iterrows():
                     d = _to_date(row["Data do Culto"])
-                    # Ignora dias sem evidência para evitar “falsos positivos”
-                    if d not in evidence_dates:
-                        continue
                     declarado = float(row.get("Dízimo", 0.0) or 0.0)
-                    real = float(real_by_date.get(d, 0.0))
-                    delta = round(declarado - real, 2)
-                    if abs(delta) >= 0.01:
-                        alertas.append((d, declarado, real, delta))
+                    # Se houver evidência, compara; se não houver, ainda assim alerta se declarou > 0
+                    if d in evidence_dates:
+                        real = float(real_by_date.get(d, 0.0))
+                        delta = round(declarado - real, 2)
+                        if abs(delta) >= 0.01:
+                            alertas.append((d, declarado, real, delta))
+                    else:
+                        if declarado > 0.01:
+                            alertas.append((d, declarado, 0.0, declarado))
 
             for d, declarado, real, delta in sorted(alertas):
                 st.markdown(f"""
@@ -1877,13 +1913,20 @@ def page_lancamentos(user: "User"):
 
             if df_logs.empty:
                 df_logs = pd.DataFrame(
-                    [{"Data do Culto": today_bahia(), "Tipo de Culto": tipos_de_culto[0], "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0, "ID": None}]
+                    [{
+                        "Data do Culto": today_bahia(),
+                        "Tipo de Culto": tipos_de_culto[0],
+                        "Dízimo": 0.0,
+                        "Oferta": 0.0,
+                        "Total": 0.0,
+                        "ID": None
+                    }]
                 )
 
             edited_df = st.data_editor(
                 df_logs,
-                use_container_width=True, 
-                hide_index=True, 
+                use_container_width=True,
+                hide_index=True,
                 num_rows="dynamic",
                 key=f"editor_service_logs_{parent_cong_obj.id}_{target_sub_cong_id}",
                 column_config={
@@ -1896,7 +1939,7 @@ def page_lancamentos(user: "User"):
                 },
                 column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
             )
-            
+
             st.divider()
             try:
                 total_dizimo = _to_float_brl(edited_df["Dízimo"].sum())
@@ -1909,7 +1952,7 @@ def page_lancamentos(user: "User"):
                 col3.metric("Total Geral (na tabela)", format_currency(total_geral))
             except Exception:
                 st.caption("Calculando totais...")
-            
+
             def on_save_click():
                 _apply_service_log_changes(df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id)
                 st.rerun()
@@ -1919,196 +1962,29 @@ def page_lancamentos(user: "User"):
             st.markdown('</div>', unsafe_allow_html=True)
 
             st.markdown("---")
-            tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id == target_sub_cong_id)
+            tithes_query = select(Tithe).where(
+                Tithe.congregation_id == parent_cong_obj.id,
+                Tithe.date >= start_tab, Tithe.date < end_tab,
+                Tithe.sub_congregation_id == target_sub_cong_id
+            )
             tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
             _editor_dizimos(tithes, f"Dizimistas - {contexto_tabela}", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
 
             st.markdown("---")
-            txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == "SAÍDA", Transaction.sub_congregation_id == target_sub_cong_id)
+            txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(
+                Transaction.congregation_id == parent_cong_obj.id,
+                Transaction.date >= start_tab, Transaction.date < end_tab,
+                Transaction.type == "SAÍDA",
+                Transaction.sub_congregation_id == target_sub_cong_id
+            )
             txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
-            _editor_lancamentos(txs_out, f"Saídas - {contexto_tabela}", tx_type_hint="SAÍDA", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
-
-
-
-# ===== PÁGINA: LANÇAMENTOS (com modo Tabela + 3 editores) =====
-# ===== PÁGINA: LANÇAMENTOS (modo Tabela mostra total abaixo de cada uma) =====
-
-# ===================== PAGE: RELATÓRIO DE ENTRADA =====================
-# ===================== PAGE: RELATÓRIO DE DIZIMISTAS =====================
-def page_relatorio_dizimistas(user: "User"):
-    ensure_seed()
-    with SessionLocal() as db:
-        st.markdown("<h1 class='page-title'>Relatório de Dizimistas</h1>", unsafe_allow_html=True)
-        ref = get_month_selector()
-        start, end = month_bounds(ref)
-
-        congs = cong_options_for(user, db)
-        if user.role == "SEDE":
-            ordered = order_congs_sede_first(congs)
-            esc_opt = ["Todas as congregações"] + [c.name for c in ordered]
-            esc = st.selectbox("Escopo", esc_opt, key="rd_escopo")
-            is_all = (esc == "Todas as congregações")
-            cong_obj = None if is_all else next((c for c in ordered if c.name == esc), None)
-        else:
-            cong_obj = congs[0] if congs else None; is_all = False
-
-        if not cong_obj and not is_all:
-            st.info("Sem congregação vinculada."); return
-        if cong_obj:
-            st.info(f"Escopo: **{cong_obj.name}**")
-
-        if is_all:
-            all_tz_q = select(Tithe).where(Tithe.date >= start, Tithe.date < end).options(joinedload(Tithe.congregation))
-            all_tz = db.scalars(all_tz_q).all()
-            by_cong = defaultdict(lambda: {"qtd":0, "valor":0.0})
-            for t in all_tz:
-                k = t.congregation.name if t.congregation else "N/A"
-                by_cong[k]["qtd"] += 1
-                by_cong[k]["valor"] += float(t.amount)
-            df = pd.DataFrame([{"Congregação": k, "Qtde de dizimistas": v["qtd"], "Total (R$)": v["valor"]} for k,v in sorted(by_cong.items())])
-            st.dataframe(df.style.format({"Total (R$)": format_currency}), use_container_width=True, hide_index=True)
-            st.info("Selecione uma congregação específica para ver a lista nominal.")
-        else:
-            tithes = db.scalars(select(Tithe).where(
-                Tithe.date >= start, Tithe.date < end, Tithe.congregation_id == cong_obj.id
-            ).order_by(Tithe.date)).all()
-
-            tithes_by_payment = defaultdict(lambda: {"count": 0, "total": 0.0})
-            for tithe in tithes:
-                method = (tithe.payment_method or "Não Informado").upper()
-                tithes_by_payment[method]["count"] += 1
-                tithes_by_payment[method]["total"] += float(tithe.amount)
-            
-            st.subheader("Resumo de Pagamentos de Dízimos")
-            if tithes_by_payment:
-                cols_metrics = st.columns(len(tithes_by_payment))
-                for i, (method, datax) in enumerate(tithes_by_payment.items()):
-                    cols_metrics[i].metric(f"Total ({method})", format_currency(datax["total"]), f"{datax['count']} dízimos")
-
-            st.divider()
-            
-            # --- CORREÇÃO APLICADA AQUI ---
-            st.markdown("##### Dizimistas do Período (Visualização)")
-            if tithes:
-                rows = [
-                    {
-                        "Data": t.date, 
-                        "Dizimista": t.tither_name, 
-                        "Valor": float(t.amount), 
-                        "Forma de Pagamento": t.payment_method or "—"
-                    } 
-                    for t in tithes
-                ]
-                df_tithes = pd.DataFrame(rows)
-                st.dataframe(
-                    df_tithes.style.format({
-                        "Data": "{:%d/%m/%Y}",
-                        "Valor": format_currency
-                    }),
-                    use_container_width=True,
-                    hide_index=True
-                )
-                total_mes = df_tithes["Valor"].sum()
-                st.metric("Total de Dízimos (nominal) no período", format_currency(total_mes))
-            else:
-                st.caption("Nenhum dízimo nominal registrado para este período.")
-            # --- FIM DA CORREÇÃO ---
-
-        st.divider()
-        st.subheader("Pesquisa de Dizimistas (por Ano)")
-        # O resto da função (pesquisa) continua exatamente igual
-        c1, c2, c3, c4, c5 = st.columns([1.2, 1.8, 1.4, 2.2, 1.6])
-        with c1:
-            ano_pesq = st.number_input("Ano", value=today_bahia().year, step=1, format="%d", key="srch_year")
-        with c2:
-            if user.role == "SEDE":
-                cong_opts = ["Todas"] + [c.name for c in order_congs_sede_first(congs)]
-                cong_sel = st.selectbox("Congregação", cong_opts, key="srch_cong")
-            else:
-                cong_sel = cong_obj.name if cong_obj else "N/A"
-                st.text_input("Congregação", cong_sel, disabled=True, key="srch_cong_disabled")
-        with c3:
-            mes_opt = ["Todos"] + MONTHS
-            mes_sel = st.selectbox("Mês", mes_opt, index=0, key="srch_month")
-        with c4:
-            nome_q = st.text_input("Nome do dizimista (contém)", key="srch_name")
-        with c5:
-            only_pix = st.checkbox("Somente PIX", value=False, key="srch_only_pix")
-
-        year_start = date(int(ano_pesq), 1, 1)
-        year_end = date(int(ano_pesq)+1, 1, 1)
-        q = select(Tithe).options(joinedload(Tithe.congregation)).where(Tithe.date >= year_start, Tithe.date < year_end)
-
-        if user.role == "SEDE":
-            if cong_sel != "Todas":
-                cong_id_sel = next((c.id for c in congs if c.name == cong_sel), None)
-                if cong_id_sel:
-                    q = q.where(Tithe.congregation_id == cong_id_sel)
-        elif cong_obj:
-            q = q.where(Tithe.congregation_id == cong_obj.id)
-
-        with SessionLocal() as db2:
-            t_list = db2.scalars(q.order_by(Tithe.tither_name, Tithe.date)).all()
-
-        if (nome_q or "").strip():
-            nneedle = _norm(nome_q)
-            t_list = [t for t in t_list if nneedle in _norm(t.tither_name)]
-
-        if only_pix:
-            t_list = [t for t in t_list if (t.payment_method or "").strip().upper() == "PIX"]
-
-        agg = {}
-        for t in t_list:
-            key = (_norm(t.tither_name), t.congregation_id)
-            if key not in agg:
-                agg[key] = {"nome_display": t.tither_name, "congregacao": t.congregation.name if t.congregation else "—",
-                            "total_ano": 0.0, "meses": set(), "primeiro": t.date, "ultimo": t.date}
-            agg[key]["total_ano"] += float(t.amount)
-            agg[key]["meses"].add(t.date.month)
-            if t.date < agg[key]["primeiro"]: agg[key]["primeiro"] = t.date
-            if t.date > agg[key]["ultimo"]: agg[key]["ultimo"] = t.date
-
-        rows = []
-        for info in agg.values():
-            meses_sorted = sorted(list(info["meses"]))
-            rows.append({
-                "Dizimista": info["nome_display"],
-                "Congregação": info["congregacao"],
-                "Qtde de meses no ano": len(meses_sorted),
-                "Meses": ", ".join(MONTHS_SHORT[m-1] for m in meses_sorted) if meses_sorted else "—",
-                "Total no ano (R$)": info["total_ano"],
-                "Primeiro dízimo": format_date(info["primeiro"]) if info["primeiro"] else "—",
-                "Último dízimo": format_date(info["ultimo"]) if info["ultimo"] else "—",
-            })
-
-        df_pesq = pd.DataFrame(rows)
-        if not df_pesq.empty:
-            df_show = df_pesq.sort_values(["Qtde de meses no ano","Dizimista"], ascending=[False, True]).reset_index(drop=True)
-            
-            df_display = df_show.copy()
-            df_display["Total no ano (R$)"] = df_display["Total no ano (R$)"].map(format_currency)
-
-            st.dataframe(df_display, use_container_width=True, hide_index=True, height=320)
-            
-            tot_reg = len(df_show)
-            tot_val = float(df_show["Total no ano (R$)"].sum())
-            cA, cB, cC = st.columns(3)
-            cA.metric("Dizimistas encontrados", f"{tot_reg}")
-            cB.metric("Total geral da pesquisa", format_currency(tot_val))
-
-            pix_names = sorted({t.tither_name for t in t_list if (t.payment_method or "").strip().upper() == "PIX"})
-            cC.metric("Dizimaram por PIX (únicos)", f"{len(pix_names)}")
-            if pix_names:
-                st.caption("Nomes que dizimaram por PIX (neste filtro):")
-                st.write(", ".join(pix_names))
-
-            csv = df_show.to_csv(index=False).encode("utf-8-sig")
-            st.download_button("⬇️ Baixar CSV da pesquisa", data=csv, file_name=f"pesquisa_dizimistas_{ano_pesq}.csv", mime="text/csv")
-            
-            pdf_data = build_dizimista_search_pdf(df_show, ano_pesq, cong_sel, mes_sel, nome_q)
-            st.download_button("⬇️ Baixar PDF da pesquisa", data=pdf_data, file_name=f"pesquisa_dizimistas_{ano_pesq}.pdf", mime="application/pdf")
-        else:
-            st.caption("Nenhum resultado para os filtros informados.")
+            _editor_lancamentos(
+                txs_out,
+                f"Saídas - {contexto_tabela}",
+                tx_type_hint="SAÍDA",
+                force_cong_id=parent_cong_obj.id,
+                force_sub_cong_id=target_sub_cong_id
+            )
 
 # ===================== PAGE: RELATÓRIO DE SAÍDA =====================
 def page_relatorio_saida(user: "User"):
