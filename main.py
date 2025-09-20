@@ -120,33 +120,11 @@ ADRF_LOGIN_CSS = """
 """
 
 CSS = """
-# ... (início da variável CSS) ...
-.stButton > button, .stDownloadButton > button {
-  font-size: 1.02rem;
-  border-radius: 14px;
-  font-weight: 650;
-}
-
-/* Aviso de Divergência Discreto */
-.alert-discreet {
-    padding: 0.75rem 1rem;
-    margin-bottom: 1rem;
-    border: 1px solid transparent;
-    border-radius: .375rem;
-    background-color: #fffbeb; /* Amarelo claro */
-    border-color: #fde68a;   /* Borda amarela */
-    color: #92400e;         /* Texto escuro */
-    font-size: 0.9rem;      /* Letras pequenas */
-}
-.alert-discreet strong {
-    font-weight: 700;
-}
-
 <style>
 /* ==================== BASE / TIPOGRAFIA ==================== */
 :root{
-  --base-font: 17px;              /* aumente para 18/19/20px se quiser */
-  --table-font-size: 1.90rem;     /* fonte das células */
+  --base-font: 17px;         /* aumente para 18/19/20px se quiser */
+  --table-font-size: 1.90rem;   /* fonte das células */
   --table-header-size: 1.08rem;   /* fonte dos cabeçalhos */
 }
 
@@ -234,6 +212,22 @@ label, [data-testid="stWidgetLabel"]{ font-size: 1.02rem; }
 
 /* ==================== AJUSTES LEVES ==================== */
 hr{ opacity: .6; }
+
+/* ===== NOVO: AVISO DE DIVERGÊNCIA VERMELHO ===== */
+.alert-danger {
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    border: 1px solid transparent;
+    border-radius: .375rem;
+    background-color: #fee2e2; /* Vermelho claro */
+    border-color: #fca5a5;   /* Borda vermelha */
+    color: #991b1b;         /* Texto vermelho escuro */
+    font-size: 0.9rem;      /* Letras pequenas */
+}
+.alert-danger strong {
+    font-weight: 700;
+}
+
 </style>
 """
 
