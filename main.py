@@ -2186,6 +2186,7 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
     styles = getSampleStyleSheet()
     start, end = month_bounds(ref)
 
+    # Estilos
     TA_RIGHT = 2
     title_style = ParagraphStyle('title', parent=styles['h1'], alignment=TA_CENTER, fontSize=16, spaceAfter=4)
     subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=11, spaceAfter=12)
@@ -2196,15 +2197,20 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
     
     story: List = []
 
+    # Cabeçalho do Documento
     story.append(Paragraph("Prestação de Contas Mensal", title_style))
     story.append(Paragraph(f"Unidade: {unit_name}", subtitle_style))
     story.append(Paragraph(f"Referente a: {ref.strftime('%B de %Y')}", subtitle_style))
     story.append(Spacer(1, 0.5*cm))
 
-    # Coleta de dados de saídas (que continua igual)
-    data_saidas = _collect_month_data(db, cong_id, start, end, sub_cong_id=sub_cong_id)
+    # Coleta de dados gerais (para Saídas e Resumo Final)
+    data_geral = _collect_month_data(db, cong_id, start, end, sub_cong_id=sub_cong_id)
+    totals_gerais = data_geral["totals"]
     
+    # ===== Tabela de Entradas (CORRIGIDA) =====
     story.append(Paragraph("1. Entradas (Resumo por Culto)", heading_style))
+    
+    # Usa a função correta para buscar os logs de serviço
     df_entradas = _load_service_logs(db, cong_id, start, end, sub_cong_id=sub_cong_id)
     
     if not df_entradas.empty:
@@ -2241,13 +2247,14 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
         story.append(Paragraph("Nenhuma entrada registada.", normal_style))
     story.append(Spacer(1, 0.5*cm))
 
+    # Tabela de Saídas (continua igual, usando a coleta de dados antiga)
     story.append(Paragraph("2. Saídas", heading_style))
-    if data_saidas["tx_out"]:
+    if data_geral["tx_out"]:
         data_out = [["Data", "Categoria", "Descrição", "Valor"]]
-        for t in data_saidas["tx_out"]:
+        for t in data_geral["tx_out"]:
             data_out.append([t.date.strftime("%d/%m/%Y"), t.category.name, t.description or "", format_currency(t.amount)])
         
-        data_out.append([Paragraph("<b>Total de Saídas:</b>", right_align_style), "", "", Paragraph(f"<b>{format_currency(data_saidas['totals']['saidas_total'])}</b>", right_align_style)])
+        data_out.append([Paragraph("<b>Total de Saídas:</b>", right_align_style), "", "", Paragraph(f"<b>{format_currency(totals_gerais['saidas_total'])}</b>", right_align_style)])
         
         tbl_out = Table(data_out, colWidths=[2.5*cm, 4.5*cm, 6.5*cm, 3*cm], repeatRows=1)
         tbl_out.setStyle(TableStyle([
@@ -2260,9 +2267,10 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
         story.append(Paragraph("Nenhuma saída registada.", normal_style))
     story.append(Spacer(1, 1*cm))
 
+    # Tabela de Resumo Financeiro
     story.append(Paragraph("3. Resumo Financeiro da Unidade", heading_style))
     entradas_resumo = df_entradas['Total'].sum() if not df_entradas.empty else 0.0
-    saidas_resumo = data_saidas['totals']['saidas_total']
+    saidas_resumo = totals_gerais['saidas_total']
     saldo_resumo = entradas_resumo - saidas_resumo
     summary_data = [
         ["Total de Entradas", format_currency(entradas_resumo)],
@@ -2273,6 +2281,7 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
     tbl_summary.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,2), (-1,2), colors.lightcyan)]))
     story.append(tbl_summary)
 
+    # Assinaturas
     story.append(Spacer(1, 2.5*cm))
     assinaturas = ["Dirigente da Congregação", "Responsável pelas Ofertas"]
     for assinatura in assinaturas:
@@ -2282,6 +2291,8 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
 
     doc.build(story)
     return buf.getvalue()
+
+
 
 
 def page_relatorio_dizimistas(user: "User"):
