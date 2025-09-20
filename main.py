@@ -1709,6 +1709,7 @@ def page_lancamentos(user: "User"):
 
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
 
+        # Tipos de culto (inalterado)
         tipos_de_culto = [
             "Culto da Noite (Padrão)",
             "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)",
@@ -1846,70 +1847,35 @@ def page_lancamentos(user: "User"):
 
             df_logs = _load_service_logs(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
 
-            # ===================== ALERTA INLINE (robusto) =====================
-            # Compara Dízimo do resumo x "real" (nominais + transações Dízimo **sem contar ajuste**)
-            with SessionLocal() as _db_chk:
-                tithe_sub = (Tithe.sub_congregation_id.is_(None) if target_sub_cong_id is None else (Tithe.sub_congregation_id == target_sub_cong_id))
-                tx_sub    = (Transaction.sub_congregation_id.is_(None) if target_sub_cong_id is None else (Transaction.sub_congregation_id == target_sub_cong_id))
+            # ===================== AVISO ÚNICO (mês/unidade) =====================
+            # Requisito: soma(Dízimo nos resumos) == soma(Tithe nominal)
+            declarado_total = 0.0
+            if isinstance(df_logs, pd.DataFrame) and not df_logs.empty and ("Dízimo" in df_logs.columns):
+                try:
+                    declarado_total = float(df_logs["Dízimo"].sum() or 0.0)
+                except Exception:
+                    declarado_total = 0.0
 
-                # Tithes por data
-                t_rows = _db_chk.execute(
-                    select(Tithe.date, func.coalesce(func.sum(Tithe.amount), 0.0))
-                    .where(
+            with SessionLocal() as _db_chk:
+                tithe_sub_filter = (Tithe.sub_congregation_id.is_(None) if target_sub_cong_id is None
+                                    else (Tithe.sub_congregation_id == target_sub_cong_id))
+                real_total = float(_db_chk.scalar(
+                    select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
                         Tithe.congregation_id == parent_cong_obj.id,
                         Tithe.date >= start_tab, Tithe.date < end_tab,
-                        tithe_sub
+                        tithe_sub_filter
                     )
-                    .group_by(Tithe.date)
-                ).all()
-                by_tithe = {d: float(v or 0.0) for d, v in t_rows}
+                ) or 0.0)
 
-                # Transações de Dízimo por data (EXCLUINDO ajuste do resumo)
-                cat_diz = _db_chk.scalar(select(Category).where(func.lower(Category.name).in_(("dízimo", "dizimo"))))
-                by_tx = {}
-                if cat_diz:
-                    tx_rows = _db_chk.execute(
-                        select(Transaction.date, func.coalesce(func.sum(Transaction.amount), 0.0))
-                        .where(
-                            Transaction.congregation_id == parent_cong_obj.id,
-                            Transaction.date >= start_tab, Transaction.date < end_tab,
-                            Transaction.category_id == cat_diz.id,
-                            tx_sub,
-                            func.coalesce(Transaction.description, "") != ADJ_ENTRY_DESC
-                        )
-                        .group_by(Transaction.date)
-                    ).all()
-                    by_tx = {d: float(v or 0.0) for d, v in tx_rows}
-
-                # Real por data = maior entre (tithes) e (tx Dízimo sem ajuste)
-                real_by_date = {d: max(by_tithe.get(d, 0.0), by_tx.get(d, 0.0)) for d in (set(by_tithe) | set(by_tx))}
-                evidence_dates = set(by_tithe) | set(by_tx)
-
-            alertas = []
-            if not df_logs.empty:
-                for _, row in df_logs.iterrows():
-                    d = _to_date(row["Data do Culto"])
-                    declarado = float(row.get("Dízimo", 0.0) or 0.0)
-                    # Se houver evidência, compara; se não houver, ainda assim alerta se declarou > 0
-                    if d in evidence_dates:
-                        real = float(real_by_date.get(d, 0.0))
-                        delta = round(declarado - real, 2)
-                        if abs(delta) >= 0.01:
-                            alertas.append((d, declarado, real, delta))
-                    else:
-                        if declarado > 0.01:
-                            alertas.append((d, declarado, 0.0, declarado))
-
-            for d, declarado, real, delta in sorted(alertas):
+            diff_total = round(declarado_total - real_total, 2)
+            if abs(diff_total) >= 0.01:
+                # Uma linha (máx. duas) e direta ao ponto
                 st.markdown(f"""
 <div class="alert-danger">
-  <strong>Divergência de Dízimo — {d.strftime('%d/%m/%Y')}</strong><br>
-  Declarado no resumo do culto: <strong>{format_currency(declarado)}</strong><br>
-  Somatório real (nominais/lançamentos): <strong>{format_currency(real)}</strong><br>
-  Diferença: <strong>{format_currency(delta)}</strong>
+  <strong>Divergência de Dízimos no período</strong> — Declarado no resumo: <strong>{format_currency(declarado_total)}</strong> • Nominal (dizimistas): <strong>{format_currency(real_total)}</strong> • Diferença: <strong>{format_currency(diff_total)}</strong>
 </div>
 """, unsafe_allow_html=True)
-            # =================== FIM ALERTA INLINE ===================
+            # =================== FIM AVISO ÚNICO ===================
 
             if df_logs.empty:
                 df_logs = pd.DataFrame(
