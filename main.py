@@ -74,13 +74,58 @@ st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
 # ================== CSS do cartão de login (estilo ADRF) ==================
 # ================== LOGIN SEI: CSS/HTML (trabalhando com Streamlit) ==================
 # ================== LOGIN ADRF: CSS/HTML ==================
+ADRF_LOGIN_CSS = """
+<style>
+  :root{
+    --azul-1:#1f6feb; --azul-2:#185fcd; --azul-esc:#0b4b9a;
+    --cinza-bg:#f0f0f0; --cinza-borda:#dfe3ea; --cinza-ico:#e9ecef; --texto:#344054;
+  }
+  body{ background:var(--cinza-bg); }
+
+  .adrf-wrap{ min-height:calc(100vh - 0px); display:grid; place-items:center; padding:24px 12px; }
+  .adrf-card{ width:100%; max-width:540px; background:#fff; border:1px solid rgba(0,0,0,.07);
+              border-radius:.5rem; box-shadow:0 10px 26px rgba(16,24,40,.08); }
+  .adrf-card .body{ padding:26px 24px 18px; }
+
+  .adrf-logo{ display:flex; align-items:center; justify-content:center; margin:14px 0 18px; }
+  .adrf-logo img{ height:58px; }
+
+  .adrf-form .group{ display:flex; align-items:stretch; margin-bottom:12px; }
+  .adrf-form .ico{
+    flex:0 0 46px; display:flex; align-items:center; justify-content:center;
+    background:var(--cinza-ico); border:1px solid var(--cinza-borda);
+    border-right:none; border-radius:.25rem 0 0 .25rem; color:#6b7280; font-size:18px;
+  }
+  .adrf-form .field [data-testid="stTextInput"]>div>div>input,
+  .adrf-form .field [data-testid="stPassword"]>div>div>input,
+  .adrf-form .field [data-testid="stSelectbox"]>div>div>div>div{
+    height:44px; border:1px solid var(--cinza-borda); border-left:none; border-radius:0 .25rem .25rem 0 !important;
+    font-size:1rem;
+  }
+  .adrf-form .field [data-testid="stWidgetLabel"]{ display:none; }
+
+  .adrf-btn .stButton>button{
+    width:100%; height:44px; border:none; color:#fff; font-weight:700; letter-spacing:.3px; border-radius:.25rem;
+    background:linear-gradient(180deg, var(--azul-1) 0%, var(--azul-2) 100%);
+    box-shadow:0 6px 16px rgba(24,95,205,.25);
+  }
+  .adrf-btn .stButton>button:hover{
+    background:linear-gradient(180deg, var(--azul-2) 0%, var(--azul-esc) 100%);
+  }
+
+  .adrf-2fa{ text-align:right; margin-top:6px; }
+  .adrf-2fa a{ color:#0d6efd; font-size:.92rem; text-decoration:none; }
+  .adrf-2fa a:hover{ text-decoration:underline; }
+</style>
+"""
+
 CSS = """
 <style>
 /* ==================== BASE / TIPOGRAFIA ==================== */
 :root{
   --base-font: 17px;         /* aumente para 18/19/20px se quiser */
   --table-font-size: 1.90rem;   /* fonte das células */
-  --table-header-size: 1.08rem;  /* fonte dos cabeçalhos */
+  --table-header-size: 1.08rem;   /* fonte dos cabeçalhos */
 }
 
 html, body, [data-testid="stAppViewContainer"]{
@@ -185,6 +230,79 @@ hr{ opacity: .6; }
 
 </style>
 """
+
+# === Cores dos botões por formulário (compat com chamada antiga BUTTONS_CSS) ===
+# SUBSTITUA SEU CSS DE BOTÕES ANTIGO POR ESTE
+FORM_BUTTONS_CSS = """
+<style>
+/* --- ENTRADAS (VERDE) --- */
+.adrf-entrada [data-testid="stFormSubmitButton"] button {
+    background-color: #16a34a !important;
+    border-color: #16a34a !important;
+    color: white !important;
+}
+.adrf-entrada [data-testid="stFormSubmitButton"] button:hover {
+    background-color: #15803d !important;
+    border-color: #15803d !important;
+}
+
+/* --- DIZIMISTAS (AZUL) --- */
+.adrf-dizimo [data-testid="stFormSubmitButton"] button {
+    background-color: #1d4ed8 !important;
+    border-color: #1d4ed8 !important;
+    color: white !important;
+}
+.adrf-dizimo [data-testid="stFormSubmitButton"] button:hover {
+    background-color: #1e40af !important;
+    border-color: #1e40af !important;
+}
+
+/* --- SAÍDAS (VERMELHO) --- */
+.adrf-saida [data-testid="stFormSubmitButton"] button {
+    background-color: #dc2626 !important;
+    border-color: #dc2626 !important;
+    color: white !important;
+}
+.adrf-saida [data-testid="stFormSubmitButton"] button:hover {
+    background-color: #b91c1c !important;
+    border-color: #b91c1c !important;
+}
+</style>
+"""
+
+# Garanta que a linha abaixo esteja no seu código, após a definição acima
+st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)
+
+# Alias para manter compatibilidade com a linha 256
+BUTTONS_CSS = FORM_BUTTONS_CSS
+
+
+st.markdown(BUTTONS_CSS, unsafe_allow_html=True)
+
+CSS_TABLE_BOOST = """
+<style>
+/* Aumenta o tamanho da fonte APENAS do conteúdo das células */
+[data-testid="stDataFrame"] [role="gridcell"] *,
+[data-testid="stDataEditor"] [role="gridcell"] *{
+  font-size: 1.18rem !important;   /* ajuste aqui: 1.10–1.30rem */
+  line-height: 1.55 !important;
+}
+
+/* Cabeçalhos das colunas um pouco maiores e mais fortes */
+[data-testid="stDataFrame"] [role="columnheader"] *,
+[data-testid="stDataEditor"] [role="columnheader"] *{
+  font-size: 1.08rem !important;
+  font-weight: 700 !important;
+}
+</style>
+"""
+
+st.markdown(CSS_TABLE_BOOST, unsafe_allow_html=True)
+
+st.markdown(CSS, unsafe_allow_html=True)
+
+ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
 
 # ===================== LOCALE (fallback) =====================
 def _set_locale_ptbr():
@@ -2068,7 +2186,6 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
     styles = getSampleStyleSheet()
     start, end = month_bounds(ref)
 
-    # Estilos
     TA_RIGHT = 2
     title_style = ParagraphStyle('title', parent=styles['h1'], alignment=TA_CENTER, fontSize=16, spaceAfter=4)
     subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=11, spaceAfter=12)
@@ -2079,20 +2196,15 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
     
     story: List = []
 
-    # Cabeçalho do Documento
     story.append(Paragraph("Prestação de Contas Mensal", title_style))
     story.append(Paragraph(f"Unidade: {unit_name}", subtitle_style))
     story.append(Paragraph(f"Referente a: {ref.strftime('%B de %Y')}", subtitle_style))
     story.append(Spacer(1, 0.5*cm))
 
-    # Coleta de dados gerais (para Saídas e Resumo Final)
-    data_geral = _collect_month_data(db, cong_id, start, end, sub_cong_id=sub_cong_id)
-    totals_gerais = data_geral["totals"]
+    # Coleta de dados de saídas (que continua igual)
+    data_saidas = _collect_month_data(db, cong_id, start, end, sub_cong_id=sub_cong_id)
     
-    # ===== Tabela de Entradas (CORRIGIDA) =====
     story.append(Paragraph("1. Entradas (Resumo por Culto)", heading_style))
-    
-    # Usa a função correta para buscar os logs de serviço
     df_entradas = _load_service_logs(db, cong_id, start, end, sub_cong_id=sub_cong_id)
     
     if not df_entradas.empty:
@@ -2121,7 +2233,7 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
         tbl_in.setStyle(TableStyle([
             ('GRID', (0,0), (-1,-1), 1, colors.grey), ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
             ('ALIGN', (2,1), (-1,-1), 'RIGHT'), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('SPAN', (0,-1), (1,-1)), # Junta as duas primeiras células da linha de total
+            ('SPAN', (0,-1), (1,-1)),
             ('BACKGROUND', (0,-1), (-1,-1), colors.lightgreen)
         ]))
         story.append(tbl_in)
@@ -2129,14 +2241,13 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
         story.append(Paragraph("Nenhuma entrada registada.", normal_style))
     story.append(Spacer(1, 0.5*cm))
 
-    # Tabela de Saídas
     story.append(Paragraph("2. Saídas", heading_style))
-    if data_geral["tx_out"]:
+    if data_saidas["tx_out"]:
         data_out = [["Data", "Categoria", "Descrição", "Valor"]]
-        for t in data_geral["tx_out"]:
+        for t in data_saidas["tx_out"]:
             data_out.append([t.date.strftime("%d/%m/%Y"), t.category.name, t.description or "", format_currency(t.amount)])
         
-        data_out.append([Paragraph("<b>Total de Saídas:</b>", right_align_style), "", "", Paragraph(f"<b>{format_currency(totals_gerais['saidas_total'])}</b>", right_align_style)])
+        data_out.append([Paragraph("<b>Total de Saídas:</b>", right_align_style), "", "", Paragraph(f"<b>{format_currency(data_saidas['totals']['saidas_total'])}</b>", right_align_style)])
         
         tbl_out = Table(data_out, colWidths=[2.5*cm, 4.5*cm, 6.5*cm, 3*cm], repeatRows=1)
         tbl_out.setStyle(TableStyle([
@@ -2149,10 +2260,9 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
         story.append(Paragraph("Nenhuma saída registada.", normal_style))
     story.append(Spacer(1, 1*cm))
 
-    # Tabela de Resumo Financeiro
     story.append(Paragraph("3. Resumo Financeiro da Unidade", heading_style))
     entradas_resumo = df_entradas['Total'].sum() if not df_entradas.empty else 0.0
-    saidas_resumo = totals_gerais['saidas_total']
+    saidas_resumo = data_saidas['totals']['saidas_total']
     saldo_resumo = entradas_resumo - saidas_resumo
     summary_data = [
         ["Total de Entradas", format_currency(entradas_resumo)],
@@ -2163,7 +2273,6 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
     tbl_summary.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,2), (-1,2), colors.lightcyan)]))
     story.append(tbl_summary)
 
-    # Assinaturas
     story.append(Spacer(1, 2.5*cm))
     assinaturas = ["Dirigente da Congregação", "Responsável pelas Ofertas"]
     for assinatura in assinaturas:
@@ -2484,6 +2593,7 @@ def build_consolidated_pdf(congs_all: List[Congregation], ref: date, db: Session
     start, end = month_bounds(ref)
 
     # Estilos
+    TA_RIGHT = 2
     title_style = ParagraphStyle('title', parent=styles['h1'], alignment=TA_CENTER, fontSize=16, spaceAfter=8)
     subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=11, spaceAfter=16)
     heading_style = ParagraphStyle('heading', parent=styles['h2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
@@ -2496,72 +2606,69 @@ def build_consolidated_pdf(congs_all: List[Congregation], ref: date, db: Session
     grand_total_entradas = 0.0
     grand_total_saidas = 0.0
 
-    # --- Tabela 1: Resumo de Entradas Hierárquico ---
-    story.append(Paragraph("1. Resumo de Entradas por Unidade (Exceto Missões)", heading_style))
+    story.append(Paragraph("1. Resumo de Entradas por Unidade", heading_style))
     entry_data = [["Unidade", "Valor (R$)"]]
+    
+    # Lógica de Entradas corrigida para usar ServiceLog
     for cong in congs_all:
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id)).all()
-        principal_entradas = _collect_month_data(db, cong.id, start, end, sub_cong_id=None)["totals"]["entradas_total_sem_missoes"]
+        
+        principal_df = _load_service_logs(db, cong.id, start, end, sub_cong_id=None)
+        principal_entradas = principal_df['Total'].sum() if not principal_df.empty else 0.0
+        
         if not sub_congs:
             entry_data.append([Paragraph(cong.name, normal_style), format_currency(principal_entradas)])
             grand_total_entradas += principal_entradas
             continue
+
         subs_rows = []
         total_subs = 0.0
         for sub in sub_congs:
-            sub_entradas = _collect_month_data(db, cong.id, start, end, sub_cong_id=sub.id)["totals"]["entradas_total_sem_missoes"]
+            sub_df = _load_service_logs(db, cong.id, start, end, sub_cong_id=sub.id)
+            sub_entradas = sub_df['Total'].sum() if not sub_df.empty else 0.0
             subs_rows.append([Paragraph(f"↳ {sub.name}", normal_style), sub_entradas])
             total_subs += sub_entradas
+        
         subs_rows.sort(key=lambda x: x[1], reverse=True)
         for row in subs_rows: row[1] = format_currency(row[1])
+
         cong_total = principal_entradas + total_subs
         grand_total_entradas += cong_total
         entry_data.append([Paragraph(f"<b>{cong.name} (Total)</b>", normal_style), format_currency(cong_total)])
         entry_data.append([Paragraph(f"↳ {cong.name} (Principal)", normal_style), format_currency(principal_entradas)])
         entry_data.extend(subs_rows)
+
     entry_data.append([Paragraph("<b>Total Geral de Entradas</b>", normal_style), Paragraph(f"<b>{format_currency(grand_total_entradas)}</b>", normal_style)])
     tbl_in = Table(entry_data, colWidths=[12*cm, 4*cm])
     tbl_in.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)]))
     story.append(tbl_in)
     story.append(Spacer(1, 0.8*cm))
 
-    # --- Tabela 2: Detalhamento de Saídas por Categoria (LÓGICA CORRIGIDA) ---
-    story.append(Paragraph("2. Total de Saídas por Categoria (Geral, Exceto Missões)", heading_style))
+    # Lógica de Saídas (continua igual)
+    story.append(Paragraph("2. Total de Saídas por Categoria (Geral)", heading_style))
     exit_data = [["Categoria de Saída", "Valor Total (R$)"]]
-    
-    # Busca o ID da categoria de missões para excluí-la de forma segura
-    cat_miss_saida = db.scalar(select(Category).where(func.lower(Category.name) == 'missões (saída)'))
-    cat_miss_saida_id = cat_miss_saida.id if cat_miss_saida else -1
-
-    saidas_por_categoria_q = select(
-        Category.name, 
-        func.sum(Transaction.amount)
-    ).join(Transaction).where(
-        Transaction.date >= start, 
-        Transaction.date < end, 
-        Transaction.type == TYPE_OUT,
-        Transaction.category_id != cat_miss_saida_id # Exclui a categoria pelo ID
+    saidas_por_categoria_q = select(Category.name, func.sum(Transaction.amount)).join(Transaction).where(
+        Transaction.date >= start, Transaction.date < end, Transaction.type == "SAÍDA"
     ).group_by(Category.name).order_by(func.sum(Transaction.amount).desc())
     
     results = db.execute(saidas_por_categoria_q).all()
     for cat_name, total in results:
         exit_data.append([cat_name, format_currency(total)])
-        grand_total_saidas += total
+        grand_total_saidas += float(total or 0.0)
     
-    exit_data.append([Paragraph("<b>Total Geral de Saídas (Exceto Missões)</b>", normal_style), Paragraph(f"<b>{format_currency(grand_total_saidas)}</b>", normal_style)])
-
+    exit_data.append([Paragraph("<b>Total Geral de Saídas</b>", normal_style), Paragraph(f"<b>{format_currency(grand_total_saidas)}</b>", normal_style)])
     tbl_out = Table(exit_data, colWidths=[12*cm, 4*cm])
     tbl_out.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)]))
     story.append(tbl_out)
     story.append(Spacer(1, 0.8*cm))
 
-    # --- Tabela 3: Resumo Financeiro Geral ---
-    story.append(Paragraph("3. Resumo Financeiro Geral (Caixa Principal)", heading_style))
+    # Resumo Final
+    story.append(Paragraph("3. Resumo Financeiro Geral", heading_style))
     saldo_final = grand_total_entradas - grand_total_saidas
     summary_data = [
-        ["Total Geral de Entradas (Exceto Missões)", format_currency(grand_total_entradas)],
-        ["Total Geral de Saídas (Exceto Missões)", format_currency(grand_total_saidas)],
-        [Paragraph("<b>Saldo do Mês (Caixa Principal)</b>", normal_style), Paragraph(f"<b>{format_currency(saldo_final)}</b>", normal_style)]
+        ["Total Geral de Entradas", format_currency(grand_total_entradas)],
+        ["Total Geral de Saídas", format_currency(grand_total_saidas)],
+        [Paragraph("<b>Saldo do Mês</b>", normal_style), Paragraph(f"<b>{format_currency(saldo_final)}</b>", normal_style)]
     ]
     tbl_summary = Table(summary_data, colWidths=[8*cm, 8*cm])
     tbl_summary.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,2), (-1,2), colors.lightcyan)]))
