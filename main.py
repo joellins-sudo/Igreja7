@@ -1692,6 +1692,7 @@ def page_lancamentos(user: "User"):
         st.divider()
 
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
+        tipos_de_culto = ["Culto da Noite (Padrão)", "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)", "Evento Especial", "Outro"]
 
         if modo == "Formulário único":
             target_cong_obj = parent_cong_obj
@@ -1707,35 +1708,51 @@ def page_lancamentos(user: "User"):
             
             st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
             st.divider()
-            
-            with st.expander("➕ Lançar ENTRADA", expanded=True):
-                with st.form("form_entrada"):
-                    cats_in = [c for c in categories_for_type(db, "DOAÇÃO") if "ajuste" not in _norm(c.name)]
+
+            with st.expander("➕ Lançar ENTRADA (Resumo do Culto)", expanded=True):
+                st.markdown('<div class="adrf-entrada">', unsafe_allow_html=True)
+                with st.form("form_entrada_resumo"):
+                    ent_data = st.date_input("Data do Culto", value=today_bahia(), key="ent_data_form")
+                    ent_tipo = st.selectbox("Tipo de Culto", options=tipos_de_culto, key="ent_tipo_form")
                     c1, c2 = st.columns(2)
-                    with c1: ent_data = st.date_input("Data da Entrada", value=today_bahia(), key="ent_data")
-                    with c2: ent_cat_name = st.selectbox("Categoria", [c.name for c in cats_in] or ["—"], key="ent_cat")
-                    ent_desc = st.text_input("Descrição (opcional)", key="ent_desc")
-                    ent_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="ent_valor")
-                    
-                    if _submit_btn("Salvar ENTRADA", "form_entrada_btn", theme="entrada"):
-                        cat_obj = next((c for c in cats_in if c.name == ent_cat_name), None)
-                        if ent_valor > 0 and cat_obj:
-                            db.add(Transaction(date=ent_data, type="DOAÇÃO", category_id=cat_obj.id, amount=ent_valor, description=(ent_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
-                            db.commit(); st.success("Entrada registrada!"); st.rerun()
+                    ent_dizimo = c1.number_input("Valor do Dízimo", min_value=0.0, value=0.0, format="%.2f", key="ent_dizimo_form")
+                    ent_oferta = c2.number_input("Valor da Oferta", min_value=0.0, value=0.0, format="%.2f", key="ent_oferta_form")
+
+                    if st.form_submit_button("Salvar Entrada do Culto"):
+                        if ent_dizimo > 0 or ent_oferta > 0:
+                            log_existente = db.scalar(select(ServiceLog).where(ServiceLog.date == ent_data, ServiceLog.service_type == ent_tipo, ServiceLog.congregation_id == target_cong_obj.id, ServiceLog.sub_congregation_id == target_sub_cong_id))
+                            if log_existente:
+                                log_existente.dizimo += ent_dizimo
+                                log_existente.oferta += ent_oferta
+                                st.success("Valores adicionados ao registro do culto existente!")
+                            else:
+                                novo_log = ServiceLog(date=ent_data, service_type=ent_tipo, dizimo=ent_dizimo, oferta=ent_oferta, congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id)
+                                db.add(novo_log)
+                                st.success("Novo registro de culto salvo com sucesso!")
+                            db.commit()
+                            st.rerun()
+                        else:
+                            st.warning("Nenhum valor foi inserido.")
+                st.markdown('</div>', unsafe_allow_html=True)
 
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
+                st.markdown('<div class="adrf-dizimo">', unsafe_allow_html=True)
                 with st.form("form_dizimo"):
                     dz_data = st.date_input("Data do Dízimo", value=today_bahia(), key="dz_data")
                     dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
                     dz_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="dz_valor")
                     dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência"], key="dz_pay")
                     
-                    if _submit_btn("Salvar DIZIMISTA", "form_dizimo_btn", theme="dizimista"):
+                    if st.form_submit_button("Salvar DIZIMISTA"):
                         if dz_valor > 0 and dz_nome.strip():
                             db.add(Tithe(date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor, congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id, payment_method=dz_payment))
-                            db.commit(); st.success("Dízimo registrado!"); st.rerun()
+                            db.commit()
+                            st.success("Dízimo registrado!")
+                            st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
 
             with st.expander("➖ Lançar SAÍDA"):
+                st.markdown('<div class="adrf-saida">', unsafe_allow_html=True)
                 with st.form("form_saida"):
                     cats_out = categories_for_type(db, "SAÍDA")
                     c1, c2 = st.columns(2)
@@ -1744,11 +1761,14 @@ def page_lancamentos(user: "User"):
                     sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
                     sai_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="sai_valor")
 
-                    if _submit_btn("Salvar SAÍDA", "form_saida_btn", theme="saida"):
+                    if st.form_submit_button("Salvar SAÍDA"):
                         cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
                         if sai_valor > 0 and cat_obj:
                             db.add(Transaction(date=sai_data, type="SAÍDA", category_id=cat_obj.id, amount=sai_valor, description=(sai_desc or None), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
-                            db.commit(); st.success("Saída registrada!"); st.rerun()
+                            db.commit()
+                            st.success("Saída registrada!")
+                            st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
         
         elif modo == "Editar direto na tabela":
             contexto_tabela = f"{parent_cong_obj.name} (Principal)"
@@ -1765,61 +1785,71 @@ def page_lancamentos(user: "User"):
             start_tab, end_tab = month_bounds(ref_tab)
             
             # ===== NOVO BLOCO: VERIFICAÇÃO DE DIVERGÊNCIA DE DÍZIMOS =====
-            # Calcular total de dízimos lançados como Entrada
-            cat_diz_obj = db.scalar(select(Category).where(func.lower(Category.name).in_(("dizimo", "dízimo"))))
-            if cat_diz_obj:
-                tx_diz_filter = and_(
-                    Transaction.congregation_id == parent_cong_obj.id,
-                    Transaction.date >= start_tab, Transaction.date < end_tab,
-                    Transaction.sub_congregation_id == target_sub_cong_id,
-                    Transaction.category_id == cat_diz_obj.id
-                )
-                q_tx_dizimo = select(func.sum(Transaction.amount)).where(tx_diz_filter)
-                total_dizimo_entrada = db.scalar(q_tx_dizimo) or 0.0
-            else:
-                total_dizimo_entrada = 0.0
+            total_service_dizimo = db.scalar(select(func.sum(ServiceLog.dizimo)).where(
+                ServiceLog.congregation_id == parent_cong_obj.id,
+                ServiceLog.date >= start_tab, ServiceLog.date < end_tab,
+                ServiceLog.sub_congregation_id == target_sub_cong_id
+            )) or 0.0
 
-            # Calcular total de dízimos nominais (Tithe)
-            tithe_filter = and_(
+            total_nominal_dizimo = db.scalar(select(func.sum(Tithe.amount)).where(
                 Tithe.congregation_id == parent_cong_obj.id,
                 Tithe.date >= start_tab, Tithe.date < end_tab,
                 Tithe.sub_congregation_id == target_sub_cong_id
-            )
-            q_nominal_dizimo = select(func.sum(Tithe.amount)).where(tithe_filter)
-            total_nominal_dizimo = db.scalar(q_nominal_dizimo) or 0.0
+            )) or 0.0
 
-            # Comparar e exibir o alerta se houver diferença
-            # (usando uma pequena tolerância para evitar erros de ponto flutuante)
-            if abs(total_dizimo_entrada - total_nominal_dizimo) > 0.01:
-                diferenca = total_dizimo_entrada - total_nominal_dizimo
+            if not math.isclose(total_service_dizimo, total_nominal_dizimo):
+                diferenca = total_service_dizimo - total_nominal_dizimo
                 msg = (
-                    f"**Atenção: Divergência nos totais de Dízimos de {ref_tab.strftime('%B de %Y')}!**\n\n"
-                    f"- **Total de dízimos lançado nas entradas:** {format_currency(total_dizimo_entrada)}\n"
-                    f"- **Soma dos dízimos nominais (por dizimista):** {format_currency(total_nominal_dizimo)}\n\n"
-                    f"**Diferença:** {format_currency(diferenca)}"
+                    f"<strong>Atenção: Divergência nos Dízimos de {ref_tab.strftime('%B')}</strong><br>"
+                    f"Total nos Cultos: {format_currency(total_service_dizimo)} | "
+                    f"Total de Dizimistas: {format_currency(total_nominal_dizimo)} | "
+                    f"Diferença: {format_currency(diferenca)}"
                 )
-                st.warning(msg, icon="⚠️")
-            # ===== FIM DO BLOCO DE VERIFICAÇÃO =====
+                st.markdown(f'<div class="alert-discreet">{msg}</div>', unsafe_allow_html=True)
+            
+            st.markdown("##### Resumo de Entradas por Culto")
+            df_logs = _load_service_logs(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
 
-            st.markdown("##### Entradas (Dízimo e Oferta)")
-            df_entradas = _entrada_summary_df(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
-            if df_entradas.empty:
-                df_entradas = pd.DataFrame([{"Data do Culto": today_bahia(), "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0}])
+            if df_logs.empty:
+                df_logs = pd.DataFrame(
+                    [{"Data do Culto": today_bahia(), "Tipo de Culto": tipos_de_culto[0], "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0, "ID": None}]
+                )
+
+            edited_df = st.data_editor(
+                df_logs,
+                use_container_width=True, hide_index=True, num_rows="dynamic",
+                key=f"editor_service_logs_{parent_cong_obj.id}_{target_sub_cong_id}",
+                column_config={
+                    "ID": None,
+                    "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
+                    "Tipo de Culto": st.column_config.SelectboxColumn("Tipo de Culto", options=tipos_de_culto, required=True),
+                    "Dízimo": st.column_config.NumberColumn("Dízimo", format="R$ %.2f", required=True),
+                    "Oferta": st.column_config.NumberColumn("Oferta", format="R$ %.2f", required=True),
+                    "Total": st.column_config.NumberColumn("Total", help="Soma do Dízimo e Oferta.", format="R$ %.2f", disabled=True),
+                },
+                column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
+            )
             
-            edited_entradas = st.data_editor(df_entradas, use_container_width=True, hide_index=True, num_rows="dynamic", key=f"editor_entradas_{parent_cong_obj.id}_{target_sub_cong_id}")
-            
+            st.divider()
             try:
-                total_dizimo, total_oferta, total_geral = 0.0, 0.0, 0.0
-                if isinstance(edited_entradas, pd.DataFrame) and not edited_entradas.empty:
-                    df_calc = edited_entradas.copy(); df_calc["Dízimo"] = df_calc["Dízimo"].map(_to_float_brl); df_calc["Oferta"] = df_calc["Oferta"].map(_to_float_brl)
-                    total_dizimo = df_calc["Dízimo"].sum(); total_oferta = df_calc["Oferta"].sum(); total_geral = total_dizimo + total_oferta
-            except Exception: pass
+                total_dizimo = _to_float_brl(edited_df["Dízimo"].sum())
+                total_oferta = _to_float_brl(edited_df["Oferta"].sum())
+                total_geral = total_dizimo + total_oferta
+
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total Dízimos (na tabela)", format_currency(total_dizimo))
+                col2.metric("Total Ofertas (na tabela)", format_currency(total_oferta))
+                col3.metric("Total Geral (na tabela)", format_currency(total_geral))
+            except Exception:
+                st.caption("Calculando totais...")
             
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total Dízimos (tabela)", format_currency(total_dizimo))
-            col2.metric("Total Ofertas (tabela)", format_currency(total_oferta))
-            col3.metric("Total Geral (tabela)", format_currency(total_geral))
-            _save_btn(lambda: _apply_entrada_summary_changes(df_entradas, edited_entradas, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id), f"lan_tab_{parent_cong_obj.id}_{target_sub_cong_id}", "entrada")
+            def on_save_click():
+                _apply_service_log_changes(df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id)
+                st.rerun()
+
+            st.markdown('<div class="adrf-entrada">', unsafe_allow_html=True)
+            st.button("Salvar alterações na tabela", on_click=on_save_click, key=f"save_table_{parent_cong_obj.id}", type="primary")
+            st.markdown('</div>', unsafe_allow_html=True)
 
             st.markdown("---")
             tithes_query = select(Tithe).where(Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab, Tithe.sub_congregation_id == target_sub_cong_id)
@@ -1827,9 +1857,9 @@ def page_lancamentos(user: "User"):
             _editor_dizimos(tithes, f"Dizimistas - {contexto_tabela}", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
 
             st.markdown("---")
-            txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_OUT, Transaction.sub_congregation_id == target_sub_cong_id)
+            txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == "SAÍDA", Transaction.sub_congregation_id == target_sub_cong_id)
             txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
-            _editor_lancamentos(txs_out, f"Saídas - {contexto_tabela}", tx_type_hint=TYPE_OUT, force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
+            _editor_lancamentos(txs_out, f"Saídas - {contexto_tabela}", tx_type_hint="SAÍDA", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
 # ===== PÁGINA: LANÇAMENTOS (com modo Tabela + 3 editores) =====
 # ===== PÁGINA: LANÇAMENTOS (modo Tabela mostra total abaixo de cada uma) =====
 
