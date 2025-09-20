@@ -2598,7 +2598,7 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
     return buf.getvalue()
 
 def build_consolidated_pdf(congs_all: List[Congregation], ref: date, db: Session) -> bytes:
-    """Gera o PDF consolidado hierárquico para a Sede, conforme o modelo."""
+    """Gera o PDF consolidado hierárquico para a Sede, com o novo layout."""
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
     styles = getSampleStyleSheet()
@@ -2618,46 +2618,40 @@ def build_consolidated_pdf(congs_all: List[Congregation], ref: date, db: Session
     grand_total_entradas = 0.0
     grand_total_saidas = 0.0
 
-    # --- Tabela 1: Resumo de Entradas por Unidade ---
+    # --- Tabela 1: Resumo de Entradas Hierárquico ---
     story.append(Paragraph("1. Resumo de Entradas por Unidade", heading_style))
-    entry_data = [["Unidade", "Dízimos", "Ofertas", "Total (R$)"]]
+    entry_data = [["Unidade", "Valor (R$)"]]
     
-    all_units_entries = []
     for cong in congs_all:
-        # Principal
-        df_principal = _load_service_logs(db, cong.id, start, end, None)
-        dizimo_p = df_principal['Dízimo'].sum() if not df_principal.empty else 0.0
-        oferta_p = df_principal['Oferta'].sum() if not df_principal.empty else 0.0
-        all_units_entries.append({"cong_name": cong.name, "is_sub": False, "unit_name": cong.name, "dizimo": dizimo_p, "oferta": oferta_p, "total": dizimo_p + oferta_p})
-        
-        # Subs
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id)).all()
+        
+        df_principal = _load_service_logs(db, cong.id, start, end, None)
+        principal_entradas = df_principal['Total'].sum() if not df_principal.empty else 0.0
+        
+        if not sub_congs:
+            entry_data.append([Paragraph(cong.name, normal_style), format_currency(principal_entradas)])
+            grand_total_entradas += principal_entradas
+            continue
+            
+        subs_rows = []
+        total_subs = 0.0
         for sub in sub_congs:
             df_sub = _load_service_logs(db, cong.id, start, end, sub.id)
-            dizimo_s = df_sub['Dízimo'].sum() if not df_sub.empty else 0.0
-            oferta_s = df_sub['Oferta'].sum() if not df_sub.empty else 0.0
-            all_units_entries.append({"cong_name": cong.name, "is_sub": True, "unit_name": f"↳ {sub.name}", "dizimo": dizimo_s, "oferta": oferta_s, "total": dizimo_s + oferta_s})
-    
-    all_units_entries.sort(key=lambda x: x["total"], reverse=True)
-    
-    for unit_data in all_units_entries:
-        entry_data.append([
-            Paragraph(unit_data["unit_name"], normal_style),
-            format_currency(unit_data["dizimo"]),
-            format_currency(unit_data["oferta"]),
-            format_currency(unit_data["total"])
-        ])
-        grand_total_entradas += unit_data["total"]
+            sub_entradas = df_sub['Total'].sum() if not df_sub.empty else 0.0
+            subs_rows.append([Paragraph(f"↳ {sub.name}", normal_style), format_currency(sub_entradas)])
+            total_subs += sub_entradas
+        
+        cong_total = principal_entradas + total_subs
+        grand_total_entradas += cong_total
+        
+        # Adiciona na ordem: Principal, Subs, Total
+        entry_data.append([Paragraph(f"{cong.name} (Principal)", normal_style), format_currency(principal_entradas)])
+        entry_data.extend(subs_rows)
+        entry_data.append([Paragraph(f"<b>{cong.name} (Total)</b>", normal_style), Paragraph(f"<b>{format_currency(cong_total)}</b>", normal_style)])
 
-    entry_data.append([Paragraph("<b>Total Geral de Entradas</b>", normal_style), "", "", Paragraph(f"<b>{format_currency(grand_total_entradas)}</b>", normal_style)])
-    tbl_in = Table(entry_data, colWidths=[7*cm, 3*cm, 3*cm, 3*cm])
-    tbl_in.setStyle(TableStyle([
-        ('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-        ('ALIGN', (1,1), (-1,-1), 'RIGHT'),
-        ('SPAN', (0,-1), (2,-1)),
-        ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)
-    ]))
+    entry_data.append([Paragraph("<b>Total Geral de Entradas</b>", normal_style), Paragraph(f"<b>{format_currency(grand_total_entradas)}</b>", normal_style)])
+    tbl_in = Table(entry_data, colWidths=[12*cm, 4*cm])
+    tbl_in.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,-1), (-1,-1), colors.lightyellow)]))
     story.append(tbl_in)
     story.append(Spacer(1, 0.8*cm))
 
@@ -2698,6 +2692,37 @@ def build_consolidated_pdf(congs_all: List[Congregation], ref: date, db: Session
     tbl_summary = Table(summary_data, colWidths=[8*cm, 8*cm])
     tbl_summary.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 1, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('BACKGROUND', (0,2), (-1,2), colors.lightcyan)]))
     story.append(tbl_summary)
+
+    # --- Bloco de Assinaturas ---
+    story.append(Spacer(1, 2.5*cm))
+    signature_style = ParagraphStyle('signature', parent=styles['Normal'], alignment=TA_CENTER, spaceBefore=0)
+    
+    col_width = doc.width / 2.0 - 1*cm
+    
+    left_signatures_text = """
+    _________________________<br/>
+    Pastor Presidente<br/><br/><br/>
+    _________________________<br/>
+    Primeiro Tesoureiro<br/><br/><br/>
+    _________________________<br/>
+    Segundo Tesoureiro
+    """
+    
+    right_signatures_text = """
+    _________________________<br/>
+    Primeiro Conselho Fiscal<br/><br/><br/>
+    _________________________<br/>
+    Segundo Conselho Fiscal<br/><br/><br/>
+    _________________________<br/>
+    Terceiro Conselho Fiscal
+    """
+    
+    left_paragraph = Paragraph(left_signatures_text, signature_style)
+    right_paragraph = Paragraph(right_signatures_text, signature_style)
+    
+    signature_table = Table([[left_paragraph, right_paragraph]], colWidths=[col_width, col_width])
+    signature_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP')]))
+    story.append(signature_table)
 
     doc.build(story)
     return buf.getvalue()
@@ -2797,7 +2822,6 @@ def page_visao_geral(user: "User"):
                 key="dl_pdf_geral_consolidado"
             )
         
-        # O botão para o relatório individual continua aqui, como antes
         sel_cong_name = st.selectbox(
             "Selecione a congregação para gerar o relatório detalhado individual:",
             [c.name for c in display_congs],
