@@ -1832,8 +1832,8 @@ def page_lancamentos(user: "User"):
             return df[key].astype(str).str.contains(rx, na=False).any()
         except Exception:
             return False
-
-    def _render_aviso_missoes_inline_local():
+        
+def _render_aviso_missoes_inline_local():
     _style = (
         "background:#fff3cd !important;"        # amarelo suave (como antes)
         "border:1px solid #ffeeba !important;"  # borda amarela
