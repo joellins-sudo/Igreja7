@@ -356,13 +356,26 @@ def month_bounds(ref: date) -> Tuple[date, date]:
     end = date(start.year + (start.month == 12), (start.month % 12) + 1, 1)
     return start, end
 
-def get_month_selector(label: str = "Mês de referência") -> date:
+def get_month_selector(label: str = "Mês de referência", key_prefix: str = "main") -> date:
+    """Cria os seletores de mês e ano com uma chave única baseada no prefixo."""
     today = today_bahia()
     colm, coly = st.columns([2, 1])
     with colm:
-        m = st.selectbox(f"{label} — Mês", list(range(1, 13)), index=today.month-1, format_func=lambda i: MONTHS[i-1])
+        m = st.selectbox(
+            f"{label} — Mês", 
+            list(range(1, 13)), 
+            index=today.month-1, 
+            format_func=lambda i: MONTHS[i-1],
+            key=f"{key_prefix}_month_selector"  # Chave única
+        )
     with coly:
-        y = st.number_input("Ano", value=today.year, step=1, format="%d")
+        y = st.number_input(
+            "Ano", 
+            value=today.year, 
+            step=1, 
+            format="%d",
+            key=f"{key_prefix}_year_selector"   # Chave única
+        )
     return date(int(y), int(m), 1)
 
 def _confirm_ok(val: str) -> bool:
@@ -763,11 +776,7 @@ def order_congs_sede_first(congs: List[Congregation]) -> List[Congregation]:
     return (sede + others) if sede else others
 
 def sidebar_common(user: "User") -> str:
-    """
-    Desenha o menu lateral e retorna a página selecionada.
-    """
-    
-    # 1. Definições de Menu
+    """Desenha o menu lateral e retorna a página selecionada."""
     MENU_PAGES = {
         "Lançamentos": "📥", "Relatório de Entrada": "📊", "Relatório de Saída": "📉",
         "Relatório de Missões": "🌍", "Relatório de Dizimistas": "🧾", "Visão Geral": "🏁",
@@ -787,17 +796,15 @@ def sidebar_common(user: "User") -> str:
     menu_labels_pretty = [f"{MENU_PAGES.get(opt, '•')} {opt}" for opt in menu_options_plain]
     label_to_page = {label: page for label, page in zip(menu_labels_pretty, menu_options_plain)}
 
-    # 2. Determina o índice padrão para o st.radio
     session_key = "main_menu_page"  
-    current_page_name = st.session_state.get(session_key, "Visão Geral")
+    current_page_name = st.session_state.get(session_key, menu_options_plain[0])
     
     try:
         default_index = menu_options_plain.index(current_page_name)
     except ValueError:
-        default_index = 0 # Fallback se a página salva não estiver mais disponível
+        default_index = 0
 
     with st.sidebar:
-        # Identidade e Logo
         try:
             if os.path.exists(LOGO_PATH):
                 st.image(LOGO_PATH, use_column_width=True)
@@ -805,26 +812,16 @@ def sidebar_common(user: "User") -> str:
             pass
         st.write(f"👤 **{getattr(user, 'username', 'Usuário')}** — *{getattr(user, 'role', '')}*")
 
-        # 3. Desenha o menu
         sel_label = st.radio(
-            "Menu",
-            options=menu_labels_pretty,
-            index=default_index,
-            key=session_key,  # O widget usa a chave e atualiza o estado automaticamente
-            label_visibility="visible",
+            "Menu", options=menu_labels_pretty, index=default_index, 
+            key=session_key, label_visibility="collapsed"
         )
-
-        # 4. Converte o label selecionado de volta para o nome da página
-        page = label_to_page.get(sel_label, "Visão Geral")
-        
-        # A LINHA ABAIXO FOI REMOVIDA, POIS CAUSAVA O ERRO
-        # st.session_state[session_key] = page 
+        page = label_to_page.get(sel_label, menu_options_plain[0])
         
         st.divider()
-        if st.button("Sair", key=f"btn_logout_{getattr(user, 'id', 'anon')}"):
+        if st.button("Sair"):
             logout()
-            st.rerun()  
-
+            
     return page
 
 # ======= NOVO: helper padrão para botões 'Salvar alterações' =======
@@ -2967,38 +2964,310 @@ def build_missions_report_pdf(ref: date, entradas: list, saidas: list) -> bytes:
     doc.build(story)
     return buf.getvalue()
 
+def _build_missions_analytics(db: Session, year: int, month_name: str):
+    """
+    Busca e agrega as contribuições de missões, identificando os maiores contribuintes.
+    """
+    # Define o período da pesquisa (ano inteiro ou um mês específico)
+    month_num = None
+    if month_name != "Todos":
+        try:
+            month_num = MONTHS.index(month_name) + 1
+        except ValueError:
+            month_name = "Todos"
+    
+    start_date = date(year, month_num, 1) if month_num else date(year, 1, 1)
+    end_date = date(year + (1 if month_num == 12 else 0), (month_num % 12) + 1, 1) if month_num else date(year + 1, 1, 1)
+    
+    # Query para o período selecionado
+    q_period = select(
+        Congregation.name, func.sum(Transaction.amount)
+    ).join(Transaction).join(Category).where(
+        Transaction.date >= start_date, Transaction.date < end_date,
+        Transaction.type == "DOAÇÃO", func.lower(Category.name) == 'missões'
+    ).group_by(Congregation.name)
+
+    # Query separada para o ano inteiro, para encontrar o maior contribuinte anual
+    q_year = select(
+        Congregation.name, func.sum(Transaction.amount)
+    ).join(Transaction).join(Category).where(
+        Transaction.date >= date(year, 1, 1), Transaction.date < date(year + 1, 1, 1),
+        Transaction.type == "DOAÇÃO", func.lower(Category.name) == 'missões'
+    ).group_by(Congregation.name)
+
+    period_data = {name: val for name, val in db.execute(q_period).all()}
+    year_data = {name: val for name, val in db.execute(q_year).all()}
+    
+    all_congs = set(list(period_data.keys()) + list(year_data.keys()))
+    
+    report_rows = []
+    for cong_name in sorted(list(all_congs)):
+        report_rows.append({
+            "Congregação": cong_name,
+            "Total no Período (R$)": period_data.get(cong_name, 0.0),
+            "Total no Ano (R$)": year_data.get(cong_name, 0.0)
+        })
+
+    if not report_rows:
+        return pd.DataFrame(), 0, 0, None, None
+
+    df = pd.DataFrame(report_rows)
+    total_periodo = df["Total no Período (R$)"].sum()
+    num_congs_periodo = len(df[df["Total no Período (R$)"] > 0])
+
+    top_period_contributor = None
+    if num_congs_periodo > 0:
+        top_period_row = df.loc[df['Total no Período (R$)'].idxmax()]
+        top_period_contributor = (top_period_row['Congregação'], top_period_row['Total no Período (R$)'])
+
+    top_year_contributor = None
+    if not df[df["Total no Ano (R$)"] == 0].all():
+        top_year_row = df.loc[df['Total no Ano (R$)'].idxmax()]
+        top_year_contributor = (top_year_row['Congregação'], top_year_row['Total no Ano (R$)'])
+    
+    df_sorted = df.sort_values("Total no Período (R$)", ascending=False).reset_index(drop=True)
+    return df_sorted, total_periodo, num_congs_periodo, top_period_contributor, top_year_contributor
+
+def _build_missions_search_df(db: Session, year: int, month_name: str):
+    """
+    Busca e agrega as contribuições de missões, identificando o Top 5 de contribuintes.
+    """
+    month_num = None
+    if month_name != "Todos":
+        try:
+            month_num = MONTHS.index(month_name) + 1
+        except ValueError:
+            month_name = "Todos"
+    
+    start_date = date(year, month_num, 1) if month_num else date(year, 1, 1)
+    end_date = date(year + (1 if month_num == 12 else 0), (month_num % 12) + 1, 1) if month_num else date(year + 1, 1, 1)
+    
+    q_period = select(
+        Congregation.name, func.sum(Transaction.amount)
+    ).join(Transaction).join(Category).where(
+        Transaction.date >= start_date, Transaction.date < end_date,
+        Transaction.type == "DOAÇÃO", func.lower(Category.name) == 'missões'
+    ).group_by(Congregation.name)
+
+    q_year = select(
+        Congregation.name, func.sum(Transaction.amount)
+    ).join(Transaction).join(Category).where(
+        Transaction.date >= date(year, 1, 1), Transaction.date < date(year + 1, 1, 1),
+        Transaction.type == "DOAÇÃO", func.lower(Category.name) == 'missões'
+    ).group_by(Congregation.name)
+
+    period_data = {name: val for name, val in db.execute(q_period).all()}
+    year_data = {name: val for name, val in db.execute(q_year).all()}
+    
+    all_congs = set(list(period_data.keys()) + list(year_data.keys()))
+    
+    report_rows = []
+    for cong_name in sorted(list(all_congs)):
+        report_rows.append({
+            "Congregação": cong_name,
+            "Total no Período (R$)": period_data.get(cong_name, 0.0),
+            "Total no Ano (R$)": year_data.get(cong_name, 0.0)
+        })
+
+    if not report_rows:
+        return pd.DataFrame(), 0.0, 0, pd.DataFrame(), pd.DataFrame()
+
+    df = pd.DataFrame(report_rows)
+    total_periodo = df["Total no Período (R$)"].sum()
+    num_congs_periodo = len(df[df["Total no Período (R$)"] > 0])
+
+    # ===== NOVO: Calcula o Top 5 =====
+    df_top_period = df[df["Total no Período (R$)"] > 0].sort_values("Total no Período (R$)", ascending=False).head(5)
+    df_top_year = df[df["Total no Ano (R$)"] > 0].sort_values("Total no Ano (R$)", ascending=False).head(5)
+    
+    df_sorted = df.sort_values("Total no Período (R$)", ascending=False).reset_index(drop=True)
+    
+    return df_sorted, total_periodo, num_congs_periodo, df_top_period, df_top_year
+
 # ======== Páginas de Missões ========
 def page_relatorio_missoes(user: "User"):
+    """Página de gestão de Missões com abas para Lançamento e Relatório."""
     if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
-        st.warning("🔒 Acesso negado. Apenas usuários `SEDE` ou `TESOUREIRO MISSIONÁRIO` podem acessar este relatório.")
+        page_relatorio_missoes_congregacao(user)
         return
-    
+        
     ensure_seed()
     with SessionLocal() as db:
-        st.markdown("<h1 class='page-title'>Relatório de Missões</h1>", unsafe_allow_html=True)
-        ref = get_month_selector()
-        start, end = month_bounds(ref)
-
-        st.info("Escopo: **Todas as congregações**")
+        st.markdown("<h1 class='page-title'>Gestão de Missões</h1>", unsafe_allow_html=True)
         
-        congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+        tab1, tab2 = st.tabs(["Lançamentos (Editar)", "Relatório e Análise (Visualizar)"])
 
-        st.subheader("Entradas de Missões — por Congregação (editar na tabela)")
-        _editor_missions_entries_agg(congs_all, start, end, "missoes_entradas_agg")
+        with tab1:
+            # (O conteúdo desta aba permanece o mesmo)
+            st.subheader("Editar Lançamentos de Missões")
+            ref_lanc = get_month_selector("Mês para Lançamento", key_prefix="lanc_missions")
+            start_lanc, end_lanc = month_bounds(ref_lanc)
+            congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
 
-        st.subheader("Saídas de Missões (editar na tabela)")
-        _, saidas_missoes = _collect_missions_data(db, start, end)
-        _editor_missions_outflows(saidas_missoes, "missoes_saidas", congs_all)
+            st.markdown("###### Entradas de Missões — por Congregação")
+            _editor_missions_entries_agg(congs_all, start_lanc, end_lanc, "missoes_entradas_agg")
 
-        st.divider()
-        st.subheader("Gerar Relatório de Missões (PDF)")
-        entradas_missoes, saidas_missoes_pdf = _collect_missions_data(db, start, end)
-        st.download_button(
-            "⬇️ Baixar Relatório de Missões (PDF)",
-            data=build_missions_report_pdf(ref, entradas_missoes, saidas_missoes_pdf),
-            file_name=f"relatorio_missoes_{start.strftime('%Y-%m')}.pdf",
-            mime="application/pdf"
-        )
+            st.markdown("###### Saídas de Missões")
+            _, saidas_missoes = _collect_missions_data(db, start_lanc, end_lanc)
+            _editor_missions_outflows(saidas_missoes, "missoes_saidas", congs_all)
+            
+            st.divider()
+            st.subheader("Gerar Relatório de Missões (PDF)")
+            entradas_missoes_pdf, saidas_missoes_pdf = _collect_missions_data(db, start_lanc, end_lanc)
+            st.download_button(
+                "⬇️ Baixar PDF de Lançamentos de Missões",
+                data=build_missions_report_pdf(ref_lanc, entradas_missoes_pdf, saidas_missoes_pdf),
+                file_name=f"lancamentos_missoes_{start_lanc.strftime('%Y-%m')}.pdf",
+                mime="application/pdf"
+            )
+
+        with tab2:
+            st.subheader("Análise de Contribuições de Missões")
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                ano_pesq = st.number_input("Ano da Pesquisa", value=today_bahia().year, step=1, format="%d", key="missions_search_year")
+            with c2:
+                mes_opt = ["Todos"] + MONTHS
+                mes_sel = st.selectbox("Mês da Pesquisa", mes_opt, index=0, key="missions_search_month")
+
+            df_search, total_periodo, num_congs, df_top_period, df_top_year = _build_missions_search_df(db, ano_pesq, mes_sel)
+
+            st.divider()
+            
+            st.markdown("##### Destaques do Período Selecionado")
+            c1, c2 = st.columns(2)
+            c1.metric("Total de Entradas no Período", format_currency(total_periodo))
+            c2.metric("Nº de Congregações Contribuintes", f"{num_congs}")
+            
+            st.markdown("---")
+            
+            # ===== NOVO: Exibição do Top 5 =====
+            col_top1, col_top2 = st.columns(2)
+            with col_top1:
+                st.markdown(f"**Top 5 Contribuintes ({mes_sel if mes_sel != 'Todos' else 'Período'})**")
+                if not df_top_period.empty:
+                    st.dataframe(
+                        df_top_period[['Congregação', 'Total no Período (R$)']].style.format({"Total no Período (R$)": format_currency}),
+                        use_container_width=True, hide_index=True
+                    )
+                else:
+                    st.caption("Nenhum contribuinte no período.")
+            
+            with col_top2:
+                st.markdown(f"**Top 5 Contribuintes (Ano de {ano_pesq})**")
+                if not df_top_year.empty:
+                    st.dataframe(
+                        df_top_year[['Congregação', 'Total no Ano (R$)']].style.format({"Total no Ano (R$)": format_currency}),
+                        use_container_width=True, hide_index=True
+                    )
+                else:
+                    st.caption("Nenhum contribuinte no ano.")
+
+            st.divider()
+            st.markdown("###### Tabela Geral de Contribuições")
+            if not df_search.empty:
+                st.dataframe(
+                    df_search.style.format({"Total no Período (R$)": format_currency, "Total no Ano (R$)": format_currency}),
+                    use_container_width=True, hide_index=True
+                )
+            else:
+                st.caption("Nenhuma contribuição de missões encontrada para os filtros selecionados.")
+
+def page_relatorio_missoes(user: "User"):
+    """Página de gestão de Missões com abas para Lançamento e Relatório."""
+    if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
+        page_relatorio_missoes_congregacao(user)
+        return
+        
+    ensure_seed()
+    with SessionLocal() as db:
+        st.markdown("<h1 class='page-title'>Gestão de Missões</h1>", unsafe_allow_html=True)
+        
+        tab1, tab2 = st.tabs(["Lançamentos (Editar)", "Relatório e Análise (Visualizar)"])
+
+        with tab1:
+            # (O conteúdo desta aba permanece o mesmo)
+            st.subheader("Editar Lançamentos de Missões")
+            ref_lanc = get_month_selector("Mês para Lançamento", key_prefix="lanc_missions")
+            start_lanc, end_lanc = month_bounds(ref_lanc)
+            congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+
+            st.markdown("###### Entradas de Missões — por Congregação")
+            _editor_missions_entries_agg(congs_all, start_lanc, end_lanc, "missoes_entradas_agg")
+
+            st.markdown("###### Saídas de Missões")
+            _, saidas_missoes = _collect_missions_data(db, start_lanc, end_lanc)
+            _editor_missions_outflows(saidas_missoes, "missoes_saidas", congs_all)
+            
+            st.divider()
+            st.subheader("Gerar Relatório de Missões (PDF)")
+            entradas_missoes_pdf, saidas_missoes_pdf = _collect_missions_data(db, start_lanc, end_lanc)
+            st.download_button(
+                "⬇️ Baixar PDF de Lançamentos de Missões",
+                data=build_missions_report_pdf(ref_lanc, entradas_missoes_pdf, saidas_missoes_pdf),
+                file_name=f"lancamentos_missoes_{start_lanc.strftime('%Y-%m')}.pdf",
+                mime="application/pdf"
+            )
+
+        with tab2:
+            st.subheader("Análise de Contribuições de Missões")
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                ano_pesq = st.number_input("Ano da Pesquisa", value=today_bahia().year, step=1, format="%d", key="missions_search_year")
+            with c2:
+                mes_opt = ["Todos"] + MONTHS
+                mes_sel = st.selectbox("Mês da Pesquisa", mes_opt, index=0, key="missions_search_month")
+
+            df_search, total_periodo, num_congs, df_top_period, df_top_year = _build_missions_search_df(db, ano_pesq, mes_sel)
+
+            st.divider()
+            
+            # ===== ALTERAÇÃO DE LAYOUT AQUI =====
+            
+            # 1. Tabela Geral de Contribuições agora vem primeiro
+            st.markdown("###### Tabela Geral de Contribuições")
+            if not df_search.empty:
+                st.dataframe(
+                    df_search.style.format({"Total no Período (R$)": format_currency, "Total no Ano (R$)": format_currency}),
+                    use_container_width=True, hide_index=True
+                )
+            else:
+                st.caption("Nenhuma contribuição de missões encontrada para os filtros selecionados.")
+
+            # 2. Métricas vêm abaixo da tabela geral
+            st.markdown("##### Destaques do Período Selecionado")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total de Entradas no Mês", format_currency(total_periodo))
+            c2.metric("Nº de Congregações Contribuintes (mês)", f"{num_congs}")
+            c3.metric("Total de Entradas no Ano", format_currency(df_search["Total no Ano (R$)"].sum()))
+            
+            st.divider()
+            
+            # 3. Tabelas do Top 5 vêm por último
+            st.markdown("##### Maiores Contribuintes")
+            col_top1, col_top2 = st.columns(2)
+            with col_top1:
+                st.markdown(f"**Top 5 ({mes_sel if mes_sel != 'Todos' else 'Período'})**")
+                if not df_top_period.empty:
+                    st.dataframe(
+                        df_top_period[['Congregação', 'Total no Período (R$)']].style.format({"Total no Período (R$)": format_currency}),
+                        use_container_width=True, hide_index=True
+                    )
+                else:
+                    st.caption("Nenhum contribuinte no período.")
+            
+            with col_top2:
+                st.markdown(f"**Top 5 (Ano de {ano_pesq})**")
+                if not df_top_year.empty:
+                    st.dataframe(
+                        df_top_year[['Congregação', 'Total no Ano (R$)']].style.format({"Total no Ano (R$)": format_currency}),
+                        use_container_width=True, hide_index=True
+                    )
+                else:
+                    st.caption("Nenhum contribuinte no ano.")
+
 
 def page_relatorio_missoes_congregacao(user: "User"):
     """
