@@ -356,13 +356,26 @@ def month_bounds(ref: date) -> Tuple[date, date]:
     end = date(start.year + (start.month == 12), (start.month % 12) + 1, 1)
     return start, end
 
-def get_month_selector(label: str = "Mês de referência") -> date:
+def get_month_selector(label: str = "Mês de referência", key_prefix: str = "main") -> date:
+    """Cria os seletores de mês e ano com uma chave única baseada no prefixo."""
     today = today_bahia()
     colm, coly = st.columns([2, 1])
     with colm:
-        m = st.selectbox(f"{label} — Mês", list(range(1, 13)), index=today.month-1, format_func=lambda i: MONTHS[i-1])
+        m = st.selectbox(
+            f"{label} — Mês", 
+            list(range(1, 13)), 
+            index=today.month-1, 
+            format_func=lambda i: MONTHS[i-1],
+            key=f"{key_prefix}_month_selector"  # Chave única
+        )
     with coly:
-        y = st.number_input("Ano", value=today.year, step=1, format="%d")
+        y = st.number_input(
+            "Ano", 
+            value=today.year, 
+            step=1, 
+            format="%d",
+            key=f"{key_prefix}_year_selector"   # Chave única
+        )
     return date(int(y), int(m), 1)
 
 def _confirm_ok(val: str) -> bool:
@@ -3033,7 +3046,8 @@ def page_relatorio_missoes(user: "User"):
 
         with tab1:
             st.subheader("Editar Lançamentos de Missões")
-            ref_lanc = get_month_selector("Mês para Lançamento")
+            # Adiciona um prefixo de chave único para esta aba
+            ref_lanc = get_month_selector("Mês para Lançamento", key_prefix="lanc_missions")
             start_lanc, end_lanc = month_bounds(ref_lanc)
             congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
 
@@ -3056,7 +3070,8 @@ def page_relatorio_missoes(user: "User"):
 
         with tab2:
             st.subheader("Relatório e Análise de Missões")
-            ref_rel = get_month_selector("Mês para Relatório")
+            # Adiciona um prefixo de chave diferente para esta aba
+            ref_rel = get_month_selector("Mês para Relatório", key_prefix="report_missions")
             start_rel, end_rel = month_bounds(ref_rel)
 
             entradas, saidas = _collect_missions_data(db, start_rel, end_rel)
