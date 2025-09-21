@@ -3176,9 +3176,8 @@ def page_relatorio_missoes(user: "User"):
 
 def page_relatorio_missoes(user: "User"):
     """Página de gestão de Missões com abas para Lançamento e Relatório."""
-    # A verificação de perfil agora acontece dentro da página
     if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
-        page_relatorio_missoes_congregacao(user) # Direciona o tesoureiro comum para a página dele
+        page_relatorio_missoes_congregacao(user)
         return
         
     ensure_seed()
@@ -3220,7 +3219,7 @@ def page_relatorio_missoes(user: "User"):
                 mes_opt = ["Todos"] + MONTHS
                 mes_sel = st.selectbox("Mês da Pesquisa", mes_opt, index=0, key="missions_search_month")
 
-            df_search, total_periodo, num_congs, top_period, top_year = _build_missions_search_df(db, ano_pesq, mes_sel)
+            df_search, total_periodo, num_congs, df_top_period, df_top_year = _build_missions_search_df(db, ano_pesq, mes_sel)
 
             st.divider()
             
@@ -3229,13 +3228,33 @@ def page_relatorio_missoes(user: "User"):
             c1.metric("Total de Entradas no Período", format_currency(total_periodo))
             c2.metric("Nº de Congregações Contribuintes", f"{num_congs}")
             
-            if top_period:
-                st.metric(f"Principal Contribuinte ({mes_sel if mes_sel != 'Todos' else 'Período'})", top_period[0], f"{format_currency(top_period[1])}")
+            st.markdown("---")
             
-            if top_year:
-                 st.metric(f"Principal Contribuinte (Ano de {ano_pesq})", top_year[0], f"{format_currency(top_year[1])}")
+            col_top1, col_top2 = st.columns(2)
+            with col_top1:
+                st.markdown(f"**Top 5 Contribuintes ({mes_sel if mes_sel != 'Todos' else 'Período'})**")
+                # ===== CORREÇÃO AQUI =====
+                if not df_top_period.empty:
+                    st.dataframe(
+                        df_top_period[['Congregação', 'Total no Período (R$)']].style.format({"Total no Período (R$)": format_currency}),
+                        use_container_width=True, hide_index=True
+                    )
+                else:
+                    st.caption("Nenhum contribuinte no período.")
+            
+            with col_top2:
+                st.markdown(f"**Top 5 Contribuintes (Ano de {ano_pesq})**")
+                # ===== CORREÇÃO AQUI =====
+                if not df_top_year.empty:
+                    st.dataframe(
+                        df_top_year[['Congregação', 'Total no Ano (R$)']].style.format({"Total no Ano (R$)": format_currency}),
+                        use_container_width=True, hide_index=True
+                    )
+                else:
+                    st.caption("Nenhum contribuinte no ano.")
 
-            st.markdown("###### Tabela de Contribuições")
+            st.divider()
+            st.markdown("###### Tabela Geral de Contribuições")
             if not df_search.empty:
                 st.dataframe(
                     df_search.style.format({"Total no Período (R$)": format_currency, "Total no Ano (R$)": format_currency}),
@@ -3243,7 +3262,6 @@ def page_relatorio_missoes(user: "User"):
                 )
             else:
                 st.caption("Nenhuma contribuição de missões encontrada para os filtros selecionados.")
-
 
 
 def page_relatorio_missoes_congregacao(user: "User"):
