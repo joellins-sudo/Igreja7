@@ -766,17 +766,17 @@ def sidebar_common(user: "User") -> str:
     """Desenha o menu lateral e retorna a página selecionada."""
     MENU_PAGES = {
         "Lançamentos": "📥", "Relatório de Entrada": "📊", "Relatório de Saída": "📉",
-        "Lançamentos de Missões": "📥", "Relatório de Missões": "📊",
-        "Relatório de Dizimistas": "🧾", "Visão Geral": "🏁", "Cadastro": "🛠️",
+        "Relatório de Missões": "🌍", "Relatório de Dizimistas": "🧾", "Visão Geral": "🏁",
+        "Cadastro": "🛠️",
     }
     
     role = getattr(user, "role", "")
     if role == "SEDE":
-        menu_options_plain = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Lançamentos de Missões", "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Cadastro"]
+        menu_options_plain = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Cadastro"]
     elif role == "TESOUREIRO":
-        menu_options_plain = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Dizimistas", "Visão Geral"]
+        menu_options_plain = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"]
     elif role == "TESOUREIRO MISSIONÁRIO":
-        menu_options_plain = ["Lançamentos de Missões", "Relatório de Missões"]
+        menu_options_plain = ["Relatório de Missões"]
     else:
         menu_options_plain = ["Visão Geral"]
 
@@ -2985,7 +2985,7 @@ def _build_missions_analytics(db: Session, ref_date: date):
     all_congs = {**month_data, **year_data}.keys()
     
     report_rows = []
-    for cong_name in all_congs:
+    for cong_name in sorted(list(all_congs)):
         report_rows.append({
             "Congregação": cong_name,
             "Total no Mês (R$)": month_data.get(cong_name, 0.0),
@@ -3794,14 +3794,10 @@ def main():
             "Visão Geral": page_visao_geral,
             "Cadastro": page_cadastro,
         }
-
-        # Lógica de roteamento simplificada
+        
+        # O roteamento volta a ser simples
         if page_name in page_map:
-            # Caso especial para Tesoureiro comum na página de Missões
-            if page_name == "Relatório de Missões" and user.role == "TESOUREIRO":
-                page_relatorio_missoes_congregacao(user)
-            else:
-                page_map[page_name](user)
+            page_map[page_name](user)
         else:
             page_visao_geral(user)
 
