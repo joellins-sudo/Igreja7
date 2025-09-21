@@ -1707,9 +1707,6 @@ def _load_service_logs(db: Session, cong_id: int, start: date, end: date, sub_co
 # Substitua sua função _apply_service_log_changes inteira por esta
 # Substitua sua função _apply_service_log_changes inteira por esta
 def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, cong_id: int, sub_cong_id: Optional[int] = None):
-    """
-    Aplica as mudanças na tabela service_logs com a lógica de separar as ofertas de missões.
-    """
     oferta_de_missao_processada = False
     df_para_salvar = edited_df.copy()
 
@@ -1738,7 +1735,6 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 
         orig_ids = set(orig_df['ID'].dropna())
         edited_ids = set(df_para_salvar['ID'].dropna())
-
         to_delete = orig_ids - edited_ids
         to_update = orig_ids.intersection(edited_ids)
 
@@ -1768,9 +1764,8 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
         
         try:
             db.commit()
-            # <<< MUDANÇA AQUI >>>
-            # Agora, a mensagem de sucesso é a mesma em ambos os casos.
             if oferta_de_missao_processada:
+                # <-- SUA MENSAGEM ESTÁ AQUI
                 st.success("Atenção: As ofertas do Culto de Missões são lançadas automaticamente no menu 'Relatório de Missões'.")
             else:
                 st.toast("Alterações salvas com sucesso!", icon="✅")
@@ -1799,7 +1794,7 @@ def page_lancamentos(user: "User"):
             congs_all = order_congs_sede_first(cong_options_for(user, db))
             cong_sel_name = st.selectbox("Selecione a Congregação Principal:", [c.name for c in congs_all], key="lan_cong_sel_sede")
             parent_cong_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
-        else:  # TESOUREIRO
+        else:
             parent_cong_obj = db.get(Congregation, user.congregation_id)
 
         if not parent_cong_obj:
@@ -1817,13 +1812,7 @@ def page_lancamentos(user: "User"):
 
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
 
-        tipos_de_culto = [
-            "Culto da Noite (Padrão)",
-            "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)",
-            "Culto de Missões",
-            "Evento Especial",
-            "Outro"
-        ]
+        tipos_de_culto = ["Culto da Noite (Padrão)", "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)", "Culto de Missões", "Evento Especial", "Outro"]
 
         if modo == "Formulário único":
             target_cong_obj = parent_cong_obj
@@ -1876,7 +1865,7 @@ def page_lancamentos(user: "User"):
                                         congregation_id=target_cong_obj.id,
                                         sub_congregation_id=target_sub_cong_id
                                     ))
-                                # <<< MUDANÇA AQUI >>>
+                                # <-- SUA MENSAGEM ESTÁ AQUI
                                 st.success("Atenção: As ofertas do Culto de Missões são lançadas automaticamente no menu 'Relatório de Missões'.")
                             else:
                                 if log_existente:
@@ -1893,6 +1882,8 @@ def page_lancamentos(user: "User"):
                             db.commit()
                             st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
+            # ... (resto da função permanece igual) ...
+
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
                 st.markdown('<div class="adrf-dizimo">', unsafe_allow_html=True)
                 with st.form("form_dizimo"):
