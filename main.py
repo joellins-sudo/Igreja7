@@ -304,6 +304,18 @@ st.markdown(CSS, unsafe_allow_html=True)
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
 
+st.markdown("""
+<style>
+.inline-missoes-alert{
+  background: transparent !important;
+  border: none !important;
+  color: #b45309 !important;   /* âmbar escuro */
+  font-weight: 700 !important; /* negrito */
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 # ===================== LOCALE (fallback) =====================
 def _set_locale_ptbr():
     for loc in ("pt_BR.utf8", "pt_BR.UTF-8", "pt_BR", "Portuguese_Brazil.1252"):
