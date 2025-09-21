@@ -2953,6 +2953,8 @@ def build_missions_report_pdf(ref: date, entradas: list, saidas: list) -> bytes:
 
 # ===================== FUNÇÕES DE MISSÕES (NOVAS) =====================
 
+# ===================== FUNÇÕES DE MISSÕES (NOVAS) =====================
+
 def _build_missions_analytics(db: Session, ref_date: date):
     """Cria a análise de contribuições de missões por congregação para o mês e ano."""
     start_month, end_month = month_bounds(ref_date)
