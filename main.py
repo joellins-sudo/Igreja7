@@ -3006,48 +3006,76 @@ def _build_missions_analytics(db: Session, ref_date: date):
     return df, total_mes, total_ano, num_congs
 
 def page_relatorio_missoes(user: "User"):
-    """Nova página de relatório (vitrine) e análise para Missões."""
+    """Página de gestão de Missões com abas para Lançamento e Relatório."""
+    if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
+        st.warning("🔒 Acesso negado. Apenas usuários `SEDE` ou `TESOUREIRO MISSIONÁRIO` podem acessar este relatório.")
+        return
+        
     ensure_seed()
     with SessionLocal() as db:
-        st.markdown("<h1 class='page-title'>Relatório de Missões</h1>", unsafe_allow_html=True)
-        ref = get_month_selector()
-        start, end = month_bounds(ref)
-
-        entradas, saidas = _collect_missions_data(db, start, end)
-
-        st.subheader("Entradas de Missões (Visualização)")
-        if entradas:
-            df_in = pd.DataFrame([{
-                "Data": t.date, "Congregação": t.congregation.name, "Valor": t.amount, "Descrição": (t.description or "")
-            } for t in entradas])
-            st.dataframe(df_in.style.format({"Data": "{:%d/%m/%Y}", "Valor": format_currency}), use_container_width=True, hide_index=True)
-        else:
-            st.caption("Nenhuma entrada de missões registada para este período.")
+        st.markdown("<h1 class='page-title'>Gestão de Missões</h1>", unsafe_allow_html=True)
         
-        st.subheader("Saídas de Missões (Visualização)")
-        if saidas:
-            df_out = pd.DataFrame([{
-                "Data": t.date, "Congregação": t.congregation.name, "Valor": t.amount, "Descrição": (t.description or "")
-            } for t in saidas])
-            st.dataframe(df_out.style.format({"Data": "{:%d/%m/%Y}", "Valor": format_currency}), use_container_width=True, hide_index=True)
-        else:
-            st.caption("Nenhuma saída de missões registada para este período.")
+        tab1, tab2 = st.tabs(["Lançamentos (Editar)", "Relatório e Análise (Visualizar)"])
+
+        with tab1:
+            st.subheader("Editar Lançamentos de Missões")
+            ref_lanc = get_month_selector("Mês para Lançamento")
+            start_lanc, end_lanc = month_bounds(ref_lanc)
+            congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+
+            st.markdown("###### Entradas de Missões — por Congregação")
+            _editor_missions_entries_agg(congs_all, start_lanc, end_lanc, "missoes_entradas_agg")
+
+            st.markdown("###### Saídas de Missões")
+            _, saidas_missoes = _collect_missions_data(db, start_lanc, end_lanc)
+            _editor_missions_outflows(saidas_missoes, "missoes_saidas", congs_all)
             
-        st.divider()
-        
-        st.subheader("Análise de Contribuições de Missões")
-        df_analise, total_mes, total_ano, num_congs = _build_missions_analytics(db, ref)
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Total de Entradas no Mês", format_currency(total_mes))
-        c2.metric("Total de Entradas no Ano", format_currency(total_ano))
-        c3.metric("Congregações Contribuintes no Mês", f"{num_congs}")
-        
-        if not df_analise.empty:
-            st.dataframe(
-                df_analise.style.format({"Total no Mês (R$)": format_currency, "Total no Ano (R$)": format_currency}),
-                use_container_width=True, hide_index=True
+            st.divider()
+            st.subheader("Gerar Relatório de Missões (PDF)")
+            entradas_missoes_pdf, saidas_missoes_pdf = _collect_missions_data(db, start_lanc, end_lanc)
+            st.download_button(
+                "⬇️ Baixar PDF de Lançamentos de Missões",
+                data=build_missions_report_pdf(ref_lanc, entradas_missoes_pdf, saidas_missoes_pdf),
+                file_name=f"lancamentos_missoes_{start_lanc.strftime('%Y-%m')}.pdf",
+                mime="application/pdf"
             )
+
+        with tab2:
+            st.subheader("Relatório e Análise de Missões")
+            ref_rel = get_month_selector("Mês para Relatório")
+            start_rel, end_rel = month_bounds(ref_rel)
+
+            entradas, saidas = _collect_missions_data(db, start_rel, end_rel)
+
+            st.markdown("###### Entradas de Missões no Período")
+            if entradas:
+                df_in = pd.DataFrame([{"Data": t.date, "Congregação": t.congregation.name, "Valor": t.amount, "Descrição": (t.description or "")} for t in entradas])
+                st.dataframe(df_in.style.format({"Data": "{:%d/%m/%Y}", "Valor": format_currency}), use_container_width=True, hide_index=True)
+            else:
+                st.caption("Nenhuma entrada de missões registada para este período.")
+            
+            st.markdown("###### Saídas de Missões no Período")
+            if saidas:
+                df_out = pd.DataFrame([{"Data": t.date, "Congregação": t.congregation.name, "Valor": t.amount, "Descrição": (t.description or "")} for t in saidas])
+                st.dataframe(df_out.style.format({"Data": "{:%d/%m/%Y}", "Valor": format_currency}), use_container_width=True, hide_index=True)
+            else:
+                st.caption("Nenhuma saída de missões registada para este período.")
+                
+            st.divider()
+            
+            st.markdown("###### Análise de Contribuições")
+            df_analise, total_mes, total_ano, num_congs = _build_missions_analytics(db, ref_rel)
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total de Entradas no Mês", format_currency(total_mes))
+            c2.metric("Total de Entradas no Ano", format_currency(total_ano))
+            c3.metric("Congregações Contribuintes no Mês", f"{num_congs}")
+            
+            if not df_analise.empty:
+                st.dataframe(
+                    df_analise.style.format({"Total no Mês (R$)": format_currency, "Total no Ano (R$)": format_currency}),
+                    use_container_width=True, hide_index=True
+                )
 
 # ======== Páginas de Missões ========
 def page_lancamentos_missoes(user: "User"):
@@ -3759,23 +3787,26 @@ def main():
 
         page_name = sidebar_common(user)
 
+        # O page_map agora é mais simples
         page_map = {
             "Lançamentos": page_lancamentos,
             "Relatório de Entrada": page_relatorio_entrada,
             "Relatório de Saída": page_relatorio_saida,
-            "Lançamentos de Missões": page_lancamentos_missoes, # Página renomeada
-            "Relatório de Missões": page_relatorio_missoes,     # Página nova
+            "Relatório de Missões": page_relatorio_missoes,
             "Relatório de Dizimistas": page_relatorio_dizimistas,
             "Visão Geral": page_visao_geral,
             "Cadastro": page_cadastro,
         }
 
+        # Lógica de roteamento
         if page_name in page_map:
-            page_map[page_name](user)
+            # Caso especial para Tesoureiro comum na página de Missões
+            if page_name == "Relatório de Missões" and user.role == "TESOUREIRO":
+                page_relatorio_missoes_congregacao(user)
+            else:
+                page_map[page_name](user)
         else:
-            # Página padrão para o perfil, caso algo dê errado
-            default_page = "Lançamentos de Missões" if user.role == "TESOUREIRO MISSIONÁRIO" else "Visão Geral"
-            page_map[default_page](user)
+            page_visao_geral(user)
 
     except Exception as e:
         st.error("Ocorreu um erro crítico na aplicação.")
