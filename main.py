@@ -2964,55 +2964,69 @@ def build_missions_report_pdf(ref: date, entradas: list, saidas: list) -> bytes:
     doc.build(story)
     return buf.getvalue()
 
-def _build_missions_analytics(db: Session, ref_date: date):
-    """Cria a análise de contribuições de missões por congregação para o mês e ano."""
-    start_month, end_month = month_bounds(ref_date)
-    start_year = date(ref_date.year, 1, 1)
-    end_year = date(ref_date.year + 1, 1, 1)
-
-    # Query para o mês
-    q_month = select(
-        Congregation.name,
-        func.sum(Transaction.amount)
-    ).join(Transaction).join(Category).where(
-        Transaction.date >= start_month, Transaction.date < end_month,
-        Transaction.type == "DOAÇÃO",
-        func.lower(Category.name) == 'missões'
-    ).group_by(Congregation.name)
+def _build_missions_analytics(db: Session, year: int, month_name: str):
+    """
+    Busca e agrega as contribuições de missões, identificando os maiores contribuintes.
+    """
+    # Define o período da pesquisa (ano inteiro ou um mês específico)
+    month_num = None
+    if month_name != "Todos":
+        try:
+            month_num = MONTHS.index(month_name) + 1
+        except ValueError:
+            month_name = "Todos"
     
-    # Query para o ano
-    q_year = select(
-        Congregation.name,
-        func.sum(Transaction.amount)
+    start_date = date(year, month_num, 1) if month_num else date(year, 1, 1)
+    end_date = date(year + (1 if month_num == 12 else 0), (month_num % 12) + 1, 1) if month_num else date(year + 1, 1, 1)
+    
+    # Query para o período selecionado
+    q_period = select(
+        Congregation.name, func.sum(Transaction.amount)
     ).join(Transaction).join(Category).where(
-        Transaction.date >= start_year, Transaction.date < end_year,
-        Transaction.type == "DOAÇÃO",
-        func.lower(Category.name) == 'missões'
+        Transaction.date >= start_date, Transaction.date < end_date,
+        Transaction.type == "DOAÇÃO", func.lower(Category.name) == 'missões'
     ).group_by(Congregation.name)
 
-    month_data = {name: val for name, val in db.execute(q_month).all()}
+    # Query separada para o ano inteiro, para encontrar o maior contribuinte anual
+    q_year = select(
+        Congregation.name, func.sum(Transaction.amount)
+    ).join(Transaction).join(Category).where(
+        Transaction.date >= date(year, 1, 1), Transaction.date < date(year + 1, 1, 1),
+        Transaction.type == "DOAÇÃO", func.lower(Category.name) == 'missões'
+    ).group_by(Congregation.name)
+
+    period_data = {name: val for name, val in db.execute(q_period).all()}
     year_data = {name: val for name, val in db.execute(q_year).all()}
     
-    all_congs = {**month_data, **year_data}.keys()
+    all_congs = set(list(period_data.keys()) + list(year_data.keys()))
     
     report_rows = []
     for cong_name in sorted(list(all_congs)):
         report_rows.append({
             "Congregação": cong_name,
-            "Total no Mês (R$)": month_data.get(cong_name, 0.0),
+            "Total no Período (R$)": period_data.get(cong_name, 0.0),
             "Total no Ano (R$)": year_data.get(cong_name, 0.0)
         })
 
     if not report_rows:
-        return pd.DataFrame(), 0, 0, 0
+        return pd.DataFrame(), 0, 0, None, None
 
-    df = pd.DataFrame(report_rows).sort_values("Total no Ano (R$)", ascending=False).reset_index(drop=True)
+    df = pd.DataFrame(report_rows)
+    total_periodo = df["Total no Período (R$)"].sum()
+    num_congs_periodo = len(df[df["Total no Período (R$)"] > 0])
+
+    top_period_contributor = None
+    if num_congs_periodo > 0:
+        top_period_row = df.loc[df['Total no Período (R$)'].idxmax()]
+        top_period_contributor = (top_period_row['Congregação'], top_period_row['Total no Período (R$)'])
+
+    top_year_contributor = None
+    if not df[df["Total no Ano (R$)"] == 0].all():
+        top_year_row = df.loc[df['Total no Ano (R$)'].idxmax()]
+        top_year_contributor = (top_year_row['Congregação'], top_year_row['Total no Ano (R$)'])
     
-    total_mes = df["Total no Mês (R$)"].sum()
-    total_ano = df["Total no Ano (R$)"].sum()
-    num_congs = len(df[df["Total no Mês (R$)"] > 0])
-
-    return df, total_mes, total_ano, num_congs
+    df_sorted = df.sort_values("Total no Período (R$)", ascending=False).reset_index(drop=True)
+    return df_sorted, total_periodo, num_congs_periodo, top_period_contributor, top_year_contributor
 
 def _build_missions_search_df(db: Session, year: int, month_name: str):
     """Busca e agrega as contribuições de missões com base nos filtros de ano e mês."""
@@ -3127,7 +3141,75 @@ def page_relatorio_missoes(user: "User"):
                 st.dataframe(
                     df_analise.style.format({"Total no Mês (R$)": format_currency, "Total no Ano (R$)": format_currency}),
                     use_container_width=True, hide_index=True
+                )def page_relatorio_missoes(user: "User"):
+    """Página de gestão de Missões com abas para Lançamento e Relatório."""
+    # A verificação de perfil agora acontece dentro da página
+    if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
+        page_relatorio_missoes_congregacao(user) # Direciona o tesoureiro comum para a página dele
+        return
+        
+    ensure_seed()
+    with SessionLocal() as db:
+        st.markdown("<h1 class='page-title'>Gestão de Missões</h1>", unsafe_allow_html=True)
+        
+        tab1, tab2 = st.tabs(["Lançamentos (Editar)", "Relatório e Análise (Visualizar)"])
+
+        with tab1:
+            st.subheader("Editar Lançamentos de Missões")
+            ref_lanc = get_month_selector("Mês para Lançamento", key_prefix="lanc_missions")
+            start_lanc, end_lanc = month_bounds(ref_lanc)
+            congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+
+            st.markdown("###### Entradas de Missões — por Congregação")
+            _editor_missions_entries_agg(congs_all, start_lanc, end_lanc, "missoes_entradas_agg")
+
+            st.markdown("###### Saídas de Missões")
+            _, saidas_missoes = _collect_missions_data(db, start_lanc, end_lanc)
+            _editor_missions_outflows(saidas_missoes, "missoes_saidas", congs_all)
+            
+            st.divider()
+            st.subheader("Gerar Relatório de Missões (PDF)")
+            entradas_missoes_pdf, saidas_missoes_pdf = _collect_missions_data(db, start_lanc, end_lanc)
+            st.download_button(
+                "⬇️ Baixar PDF de Lançamentos de Missões",
+                data=build_missions_report_pdf(ref_lanc, entradas_missoes_pdf, saidas_missoes_pdf),
+                file_name=f"lancamentos_missoes_{start_lanc.strftime('%Y-%m')}.pdf",
+                mime="application/pdf"
+            )
+
+        with tab2:
+            st.subheader("Análise de Contribuições de Missões")
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                ano_pesq = st.number_input("Ano da Pesquisa", value=today_bahia().year, step=1, format="%d", key="missions_search_year")
+            with c2:
+                mes_opt = ["Todos"] + MONTHS
+                mes_sel = st.selectbox("Mês da Pesquisa", mes_opt, index=0, key="missions_search_month")
+
+            df_search, total_periodo, num_congs, top_period, top_year = _build_missions_search_df(db, ano_pesq, mes_sel)
+
+            st.divider()
+            
+            st.markdown("##### Destaques do Período Selecionado")
+            c1, c2 = st.columns(2)
+            c1.metric("Total de Entradas no Período", format_currency(total_periodo))
+            c2.metric("Nº de Congregações Contribuintes", f"{num_congs}")
+            
+            if top_period:
+                st.metric(f"Principal Contribuinte ({mes_sel if mes_sel != 'Todos' else 'Período'})", top_period[0], f"{format_currency(top_period[1])}")
+            
+            if top_year:
+                 st.metric(f"Principal Contribuinte (Ano de {ano_pesq})", top_year[0], f"{format_currency(top_year[1])}")
+
+            st.markdown("###### Tabela de Contribuições")
+            if not df_search.empty:
+                st.dataframe(
+                    df_search.style.format({"Total no Período (R$)": format_currency, "Total no Ano (R$)": format_currency}),
+                    use_container_width=True, hide_index=True
                 )
+            else:
+                st.caption("Nenhuma contribuição de missões encontrada para os filtros selecionados.")
 
 
 
