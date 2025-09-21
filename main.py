@@ -310,7 +310,7 @@ st.markdown("""
   background: transparent !important;
   border: none !important;
   color: #FCD34D !important;   /* âmbar escuro */
-  font-weight: 1000 !important; /* negrito */
+  font-weight: 1300 !important; /* negrito */
 }
 </style>
 """, unsafe_allow_html=True)
