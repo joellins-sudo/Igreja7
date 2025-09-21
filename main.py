@@ -309,8 +309,8 @@ st.markdown("""
 .inline-missoes-alert{
   background: transparent !important;
   border: none !important;
-  color: #FDE68A !important;   /* âmbar escuro */
-  font-weight: 800 !important; /* negrito */
+  color: #FCD34D !important;   /* âmbar escuro */
+  font-weight: 900 !important; /* negrito */
 }
 </style>
 """, unsafe_allow_html=True)
