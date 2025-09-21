@@ -3030,7 +3030,7 @@ def _build_missions_analytics(db: Session, year: int, month_name: str):
 
 def _build_missions_search_df(db: Session, year: int, month_name: str):
     """
-    Busca e agrega as contribuições de missões, identificando os maiores contribuintes.
+    Busca e agrega as contribuições de missões, identificando o Top 5 de contribuintes.
     """
     month_num = None
     if month_name != "Todos":
@@ -3070,26 +3070,19 @@ def _build_missions_search_df(db: Session, year: int, month_name: str):
         })
 
     if not report_rows:
-        return pd.DataFrame(), 0.0, 0, None, None
+        return pd.DataFrame(), 0.0, 0, pd.DataFrame(), pd.DataFrame()
 
     df = pd.DataFrame(report_rows)
     total_periodo = df["Total no Período (R$)"].sum()
     num_congs_periodo = len(df[df["Total no Período (R$)"] > 0])
 
-    top_period_contributor = None
-    if num_congs_periodo > 0:
-        top_period_row = df.loc[df['Total no Período (R$)'].idxmax()]
-        top_period_contributor = (top_period_row['Congregação'], top_period_row['Total no Período (R$)'])
-
-    top_year_contributor = None
-    # ===== CORREÇÃO AQUI =====
-    # A verificação agora é mais simples e direta: se a soma do ano for maior que zero.
-    if df["Total no Ano (R$)"].sum() > 0:
-        top_year_row = df.loc[df['Total no Ano (R$)'].idxmax()]
-        top_year_contributor = (top_year_row['Congregação'], top_year_row['Total no Ano (R$)'])
+    # ===== NOVO: Calcula o Top 5 =====
+    df_top_period = df[df["Total no Período (R$)"] > 0].sort_values("Total no Período (R$)", ascending=False).head(5)
+    df_top_year = df[df["Total no Ano (R$)"] > 0].sort_values("Total no Ano (R$)", ascending=False).head(5)
     
     df_sorted = df.sort_values("Total no Período (R$)", ascending=False).reset_index(drop=True)
-    return df_sorted, total_periodo, num_congs_periodo, top_period_contributor, top_year_contributor
+    
+    return df_sorted, total_periodo, num_congs_periodo, df_top_period, df_top_year
 
 # ======== Páginas de Missões ========
 def page_relatorio_missoes(user: "User"):
@@ -3105,6 +3098,7 @@ def page_relatorio_missoes(user: "User"):
         tab1, tab2 = st.tabs(["Lançamentos (Editar)", "Relatório e Análise (Visualizar)"])
 
         with tab1:
+            # (O conteúdo desta aba permanece o mesmo)
             st.subheader("Editar Lançamentos de Missões")
             ref_lanc = get_month_selector("Mês para Lançamento", key_prefix="lanc_missions")
             start_lanc, end_lanc = month_bounds(ref_lanc)
@@ -3137,24 +3131,41 @@ def page_relatorio_missoes(user: "User"):
                 mes_opt = ["Todos"] + MONTHS
                 mes_sel = st.selectbox("Mês da Pesquisa", mes_opt, index=0, key="missions_search_month")
 
-            df_search, total_periodo, num_congs, top_period, top_year = _build_missions_search_df(db, ano_pesq, mes_sel)
+            df_search, total_periodo, num_congs, df_top_period, df_top_year = _build_missions_search_df(db, ano_pesq, mes_sel)
 
             st.divider()
             
             st.markdown("##### Destaques do Período Selecionado")
-            c1, c2, c3 = st.columns(3)
+            c1, c2 = st.columns(2)
             c1.metric("Total de Entradas no Período", format_currency(total_periodo))
             c2.metric("Nº de Congregações Contribuintes", f"{num_congs}")
             
-            if top_period:
-                c3.metric(f"Principal Contribuinte ({mes_sel if mes_sel != 'Todos' else 'Período'})", top_period[0], f"{format_currency(top_period[1])}")
-            else:
-                c3.metric("Principal Contribuinte (Período)", "N/A")
+            st.markdown("---")
+            
+            # ===== NOVO: Exibição do Top 5 =====
+            col_top1, col_top2 = st.columns(2)
+            with col_top1:
+                st.markdown(f"**Top 5 Contribuintes ({mes_sel if mes_sel != 'Todos' else 'Período'})**")
+                if not df_top_period.empty:
+                    st.dataframe(
+                        df_top_period[['Congregação', 'Total no Período (R$)']].style.format({"Total no Período (R$)": format_currency}),
+                        use_container_width=True, hide_index=True
+                    )
+                else:
+                    st.caption("Nenhum contribuinte no período.")
+            
+            with col_top2:
+                st.markdown(f"**Top 5 Contribuintes (Ano de {ano_pesq})**")
+                if not df_top_year.empty:
+                    st.dataframe(
+                        df_top_year[['Congregação', 'Total no Ano (R$)']].style.format({"Total no Ano (R$)": format_currency}),
+                        use_container_width=True, hide_index=True
+                    )
+                else:
+                    st.caption("Nenhum contribuinte no ano.")
 
-            if top_year:
-                 st.metric(f"Principal Contribuinte (Ano de {ano_pesq})", top_year[0], f"{format_currency(top_year[1])}")
-
-            st.markdown("###### Tabela de Contribuições")
+            st.divider()
+            st.markdown("###### Tabela Geral de Contribuições")
             if not df_search.empty:
                 st.dataframe(
                     df_search.style.format({"Total no Período (R$)": format_currency, "Total no Ano (R$)": format_currency}),
