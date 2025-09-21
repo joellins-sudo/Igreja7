@@ -1703,9 +1703,26 @@ def _load_service_logs(db: Session, cong_id: int, start: date, end: date, sub_co
     
     return pd.DataFrame(data)
 
+# Substitua esta função inteira
 def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, cong_id: int, sub_cong_id: Optional[int] = None):
-    """Aplica as mudanças (cria, atualiza, deleta) na tabela service_logs."""
-    
+    """Aplica as mudanças (cria, atualiza, deleta) na tabela service_logs, com validação para Culto de Missões."""
+
+    # <<< INÍCIO DA NOVA LÓGICA DE VALIDAÇÃO >>>
+    # Antes de salvar, verifica se há alguma tentativa de lançar oferta de missões no caixa errado.
+    for index, row in edited_df.iterrows():
+        tipo_culto = str(row.get("Tipo de Culto", ""))
+        oferta_valor = _to_float_brl(row.get("Oferta", 0.0))
+
+        if tipo_culto == "Culto de Missões" and oferta_valor > 0:
+            data_culto = _to_date(row.get("Data do Culto", "Data não encontrada")).strftime("%d/%m/%Y")
+            st.error(
+                f"❌ Lançamento bloqueado na linha do dia {data_culto}!\n\n"
+                f"Ofertas de 'Culto de Missões' não podem ser lançadas nesta tabela, pois pertencem a outro caixa. "
+                f"Por favor, zere o valor da oferta nesta linha e lance-o na página 'Relatório de Missões'."
+            )
+            return # Impede o salvamento
+    # <<< FIM DA NOVA LÓGICA DE VALIDAÇÃO >>>
+
     orig_ids = set(orig_df['ID'].dropna())
     edited_ids = set(edited_df['ID'].dropna())
 
@@ -1713,11 +1730,9 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
     to_update = orig_ids.intersection(edited_ids)
     
     with SessionLocal() as db:
-        # Deletar logs que foram removidos
         if to_delete:
             db.query(ServiceLog).filter(ServiceLog.id.in_(to_delete)).delete(synchronize_session=False)
 
-        # Atualizar logs existentes
         for log_id in to_update:
             log = db.get(ServiceLog, int(log_id))
             if log:
@@ -1727,10 +1742,8 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
                 log.dizimo = _to_float_brl(row["Dízimo"])
                 log.oferta = _to_float_brl(row["Oferta"])
 
-        # Inserir novos logs
         new_rows = edited_df[edited_df['ID'].isna()]
         for _, row in new_rows.iterrows():
-            # Evita adicionar linhas vazias
             if _to_float_brl(row["Dízimo"]) > 0 or _to_float_brl(row["Oferta"]) > 0:
                 new_log = ServiceLog(
                     date=_to_date(row["Data do Culto"]),
@@ -1755,22 +1768,9 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 # ===================== PAGE: LANÇAMENTOS (com modo Tabela fora do form) =====================
 # APAGUE SUA FUNÇÃO page_lancamentos ANTIGA E SUBSTITUA POR ESTA VERSÃO FINAL
 
-# SUBSTITUA SUA page_lancamentos PELA VERSÃO FINAL ABAIXO
-
-# SUBSTITUA SUA page_lancamentos PELA VERSÃO FINAL ABAIXO
-
-# APAGUE SUA page_lancamentos ANTIGA E SUBSTITUA POR ESTA VERSÃO FINAL
-
-# SUBSTITUA SUA page_lancamentos INTEIRA POR ESTA VERSÃO CORRIGIDA
-
-# SUBSTITUA SUA page_lancamentos INTEIRA POR ESTA VERSÃO FINAL
-
-# SUBSTITUA SUA page_lancamentos INTEIRA POR ESTA VERSÃO FINAL
-
-# SUBSTITUA SUA page_lancamentos INTEIRA POR ESTA VERSÃO FINAL
-
 # Substitua sua função page_lancamentos inteira por esta versão
 # Substitua sua função page_lancamentos inteira por esta versão CORRIGIDA E TESTADA
+# Substitua esta função inteira
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1835,9 +1835,6 @@ def page_lancamentos(user: "User"):
                         if ent_dizimo <= 0 and ent_oferta <= 0:
                             st.warning("Nenhum valor foi inserido.")
                         else:
-                            # <<< INÍCIO DA LÓGICA CORRIGIDA E REVISADA >>>
-                            
-                            # Procura um registro de culto existente para a mesma data e tipo
                             log_existente = db.scalar(
                                 select(ServiceLog).where(
                                     ServiceLog.date == ent_data,
@@ -1848,7 +1845,6 @@ def page_lancamentos(user: "User"):
                             )
 
                             if ent_tipo == "Culto de Missões":
-                                # 1. Lança a OFERTA no caixa de Missões
                                 if ent_oferta > 0:
                                     cat_missoes = db.scalar(select(Category).where(func.lower(Category.name) == 'missões', Category.type == TYPE_IN))
                                     if cat_missoes:
@@ -1860,21 +1856,20 @@ def page_lancamentos(user: "User"):
                                         ))
                                     else:
                                         st.error("ERRO: Categoria 'Missões' não encontrada. A oferta não foi salva.")
-                                        db.rollback() # Impede que o dízimo seja salvo se a oferta falhar
-
-                                # 2. Lança o DÍZIMO no caixa geral (ServiceLog), com OFERTA ZERADA.
+                                        db.rollback()
+                                
                                 if log_existente:
                                     log_existente.dizimo += ent_dizimo
                                 else:
                                     db.add(ServiceLog(
                                         date=ent_data, service_type=ent_tipo,
-                                        dizimo=ent_dizimo, oferta=0.0, # GARANTE QUE A OFERTA SEJA ZERO
+                                        dizimo=ent_dizimo, oferta=0.0,
                                         congregation_id=target_cong_obj.id,
                                         sub_congregation_id=target_sub_cong_id
                                     ))
                                 st.success("Lançamento de Missões salvo! Dízimo no caixa geral, Oferta no caixa de Missões.")
 
-                            else: # Lógica para todos os outros cultos
+                            else:
                                 if log_existente:
                                     log_existente.dizimo += ent_dizimo
                                     log_existente.oferta += ent_oferta
@@ -1889,8 +1884,6 @@ def page_lancamentos(user: "User"):
 
                             db.commit()
                             st.rerun()
-                            # <<< FIM DA LÓGICA CORRIGIDA E REVISADA >>>
-
                 st.markdown('</div>', unsafe_allow_html=True)
 
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
@@ -1900,7 +1893,6 @@ def page_lancamentos(user: "User"):
                     dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
                     dz_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="dz_valor")
                     dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência"], key="dz_pay")
-
                     if st.form_submit_button("Salvar DIZIMISTA"):
                         if dz_valor > 0 and dz_nome.strip():
                             db.add(Tithe(
@@ -1925,7 +1917,6 @@ def page_lancamentos(user: "User"):
                         sai_cat_name = st.selectbox("Categoria", [c.name for c in cats_out] or ["—"], key="sai_cat")
                     sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
                     sai_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="sai_valor")
-
                     if st.form_submit_button("Salvar SAÍDA"):
                         cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
                         if sai_valor > 0 and cat_obj:
@@ -1956,6 +1947,12 @@ def page_lancamentos(user: "User"):
 
             st.markdown("##### Resumo de Entradas por Culto")
 
+            # <<< AVISO ADICIONADO AQUI >>>
+            st.warning(
+                "**Atenção:** Ofertas de **'Culto de Missões'** não devem ser lançadas ou editadas nesta tabela. "
+                "Use a página **Relatório de Missões** para gerenciar essas ofertas específicas."
+            )
+
             df_logs = _load_service_logs(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
 
             declarado_total = 0.0
@@ -1964,7 +1961,6 @@ def page_lancamentos(user: "User"):
                     declarado_total = float(df_logs["Dízimo"].sum() or 0.0)
                 except Exception:
                     declarado_total = 0.0
-
             with SessionLocal() as _db_chk:
                 tithe_sub_filter = (Tithe.sub_congregation_id.is_(None) if target_sub_cong_id is None else (Tithe.sub_congregation_id == target_sub_cong_id))
                 real_total = float(_db_chk.scalar(
@@ -1974,7 +1970,6 @@ def page_lancamentos(user: "User"):
                         tithe_sub_filter
                     )
                 ) or 0.0)
-
             diff_total = round(declarado_total - real_total, 2)
             if abs(diff_total) >= 0.01:
                 st.markdown(f"""
@@ -2005,7 +2000,6 @@ def page_lancamentos(user: "User"):
                 total_dizimo = _to_float_brl(edited_df["Dízimo"].sum())
                 total_oferta = _to_float_brl(edited_df["Oferta"].sum())
                 total_geral = total_dizimo + total_oferta
-
                 col1, col2, col3 = st.columns(3)
                 col1.metric("Total Dízimos (na tabela)", format_currency(total_dizimo))
                 col2.metric("Total Ofertas (na tabela)", format_currency(total_oferta))
@@ -2014,7 +2008,9 @@ def page_lancamentos(user: "User"):
                 st.caption("Calculando totais...")
 
             def on_save_click():
+                # A validação agora está DENTRO de _apply_service_log_changes
                 _apply_service_log_changes(df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id)
+                # O rerun só acontece se a validação passar
                 st.rerun()
 
             st.markdown('<div class="adrf-entrada">', unsafe_allow_html=True)
