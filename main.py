@@ -382,44 +382,36 @@ def get_month_selector(label: str = "Mês de referência", key_prefix: str = "ma
 import re
 
 def _has_culto_missoes_in_df(df: pd.DataFrame) -> bool:
-    """
-    Detecta se a tabela editável de 'Resumo de Entradas por Culto'
-    contém pelo menos uma linha cujo 'Tipo de Culto' é 'Culto de Missões'.
-    Não altera dados. Tolerante a variações de acento/maiúsculas.
-    """
+    """True se existir 'Culto de Missões' na coluna 'Tipo de Culto' (tolerante a acentos/caixa)."""
     try:
         if df is None or not isinstance(df, pd.DataFrame) or df.empty:
             return False
-        # procura coluna 'Tipo de Culto' (case-insensitive)
         cols_lc = {c.lower(): c for c in df.columns}
         key = cols_lc.get("tipo de culto") or cols_lc.get("tipo") or None
         if not key:
             return False
-
-        # normaliza e verifica ocorrência de "missoes/missões"
         rx = re.compile(r'\bmiss(ões|oes)\b', flags=re.IGNORECASE)
-        serie = df[key].astype(str)
-        return bool(serie.str.contains(rx, na=False).any())
+        return df[key].astype(str).str.contains(rx, na=False).any()
     except Exception:
         return False
 
-
-def render_aviso_culto_missoes(df: pd.DataFrame) -> None:
-    """
-    Exibe o aviso solicitado quando há 'Culto de Missões' na tabela.
-    Não interfere em salvamento ou cálculos.
-    """
-    try:
-        if _has_culto_missoes_in_df(df):
-            st.warning(
-                "### Atenção :\n"
-                "As **ofertas do culto de missões** são lançadas automaticamente no "
-                "**Menu _Relatório de Missões_** ao lado.",
-                icon="⚠️",
-            )
-    except Exception:
-        # falha silenciosa para jamais quebrar a página
-        pass
+def _render_aviso_missoes_inline():
+    """Renderiza o aviso numa linha, acima da tabela, sem quebrar layout."""
+    st.markdown("""
+    <style>
+      .inline-missoes-alert{
+        background:#fffbe6; border:1px solid #ffe58f; color:#614700;
+        padding:6px 10px; border-radius:8px; margin:8px 0 10px;
+        white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:.95rem;
+      }
+    </style>
+    """, unsafe_allow_html=True)
+    st.markdown(
+        "<div class='inline-missoes-alert'>⚠️ "
+        "Atenção : As ofertas do culto de missões são lançadas automaticamente no "
+        "Menu Relatório de Missões ao lado.</div>",
+        unsafe_allow_html=True
+    )
 
 def _confirm_ok(val: str) -> bool:
     return str(val or "").strip().upper() == "EXCLUIR"
