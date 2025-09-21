@@ -3187,6 +3187,7 @@ def page_relatorio_missoes(user: "User"):
         tab1, tab2 = st.tabs(["Lançamentos (Editar)", "Relatório e Análise (Visualizar)"])
 
         with tab1:
+            # (O conteúdo desta aba permanece o mesmo)
             st.subheader("Editar Lançamentos de Missões")
             ref_lanc = get_month_selector("Mês para Lançamento", key_prefix="lanc_missions")
             start_lanc, end_lanc = month_bounds(ref_lanc)
@@ -3223,13 +3224,9 @@ def page_relatorio_missoes(user: "User"):
 
             st.divider()
             
-            st.markdown("##### Destaques do Período Selecionado")
-            c1, c2 = st.columns(2)
-            c1.metric("Total de Entradas no Período", format_currency(total_periodo))
-            c2.metric("Nº de Congregações Contribuintes", f"{num_congs}")
-            
             # ===== ALTERAÇÃO DE LAYOUT AQUI =====
-            # Tabela Geral de Contribuições agora vem primeiro
+            
+            # 1. Tabela Geral de Contribuições agora vem primeiro
             st.markdown("###### Tabela Geral de Contribuições")
             if not df_search.empty:
                 st.dataframe(
@@ -3239,9 +3236,16 @@ def page_relatorio_missoes(user: "User"):
             else:
                 st.caption("Nenhuma contribuição de missões encontrada para os filtros selecionados.")
 
+            # 2. Métricas vêm abaixo da tabela geral
+            st.markdown("##### Destaques do Período Selecionado")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total de Entradas no Mês", format_currency(total_periodo))
+            c2.metric("Total de Entradas no Ano", format_currency(df_search["Total no Ano (R$)"].sum()))
+            c3.metric("Nº de Congregações Contribuintes", f"{num_congs}")
+            
             st.divider()
             
-            # Tabelas do Top 5 vêm depois
+            # 3. Tabelas do Top 5 vêm por último
             st.markdown("##### Maiores Contribuintes")
             col_top1, col_top2 = st.columns(2)
             with col_top1:
