@@ -1833,7 +1833,7 @@ def page_lancamentos(user: "User"):
         except Exception:
             return False
 
-    def _render_aviso_missoes_inline_local():
+def _render_aviso_missoes_inline_local():
     # Usa estilo inline + !important para não ser sobrescrito pelo tema
     _style = (
         "background:#fff3cd !important;"        # amarelo suave
