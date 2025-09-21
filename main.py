@@ -1783,8 +1783,7 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 def page_lancamentos(user: "User"):
     ensure_seed()
     
-    # <<< NOVO BLOCO PARA EXIBIR MENSAGENS >>>
-    # Este bloco verifica se há uma mensagem na memória da sessão para ser exibida.
+    # Bloco para exibir mensagens de status salvas na sessão
     if 'status_message' in st.session_state:
         msg_type, msg_text = st.session_state.status_message
         if msg_type == "success":
@@ -1793,7 +1792,6 @@ def page_lancamentos(user: "User"):
             st.error(msg_text)
         elif msg_type == "warning":
             st.warning(msg_text)
-        # Limpa a mensagem depois de exibi-la para não aparecer de novo
         del st.session_state.status_message
     
     with SessionLocal() as db:
@@ -1830,7 +1828,6 @@ def page_lancamentos(user: "User"):
                 target_sub_cong_id = opcoes[contexto_selecionado]
             st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
             st.divider()
-
             with st.expander("➕ Lançar ENTRADA (Resumo do Culto)", expanded=True):
                 st.markdown('<div class="adrf-entrada">', unsafe_allow_html=True)
                 with st.form("form_entrada_resumo"):
@@ -1839,12 +1836,10 @@ def page_lancamentos(user: "User"):
                     c1, c2 = st.columns(2)
                     ent_dizimo = c1.number_input("Valor do Dízimo", min_value=0.0, value=0.0, format="%.2f", key="ent_dizimo_form")
                     ent_oferta = c2.number_input("Valor da Oferta", min_value=0.0, value=0.0, format="%.2f", key="ent_oferta_form")
-                    
                     if st.form_submit_button("Salvar Entrada do Culto"):
                         if ent_dizimo <= 0 and ent_oferta <= 0:
                             st.session_state.status_message = ("warning", "Nenhum valor foi inserido.")
                         else:
-                            # ... Lógica de salvamento (ela permanece a mesma)...
                             log_existente = db.scalar(select(ServiceLog).where(ServiceLog.date == ent_data, ServiceLog.service_type == ent_tipo, ServiceLog.congregation_id == target_cong_obj.id, ServiceLog.sub_congregation_id == target_sub_cong_id))
                             if ent_tipo == "Culto de Missões":
                                 if ent_oferta > 0:
@@ -1868,14 +1863,58 @@ def page_lancamentos(user: "User"):
                                 st.session_state.status_message = ("success", "Registro de culto salvo com sucesso!")
                             db.commit()
                         st.rerun()
-
                 st.markdown('</div>', unsafe_allow_html=True)
             
-            # (O resto da lógica do modo "Formulário único" não precisa de mudanças)
+            # <<< CÓDIGO RESTAURADO AQUI >>>
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
-                # ... seu código aqui ...
+                st.markdown('<div class="adrf-dizimo">', unsafe_allow_html=True)
+                with st.form("form_dizimo"):
+                    dz_data = st.date_input("Data do Dízimo", value=today_bahia(), key="dz_data")
+                    dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
+                    dz_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="dz_valor")
+                    dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência"], key="dz_pay")
+                    if st.form_submit_button("Salvar DIZIMISTA"):
+                        if dz_valor > 0 and dz_nome.strip():
+                            db.add(Tithe(
+                                date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor,
+                                congregation_id=target_cong_obj.id,
+                                sub_congregation_id=target_sub_cong_id,
+                                payment_method=dz_payment
+                            ))
+                            db.commit()
+                            st.session_state.status_message = ("success", "Dízimo registrado com sucesso!")
+                        else:
+                            st.session_state.status_message = ("warning", "Preencha o nome e o valor do dízimo.")
+                        st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
+
+            # <<< CÓDIGO RESTAURADO AQUI >>>
             with st.expander("➖ Lançar SAÍDA"):
-                # ... seu código aqui ...
+                st.markdown('<div class="adrf-saida">', unsafe_allow_html=True)
+                with st.form("form_saida"):
+                    cats_out = categories_for_type(db, "SAÍDA")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        sai_data = st.date_input("Data da Saída", value=today_bahia(), key="sai_data")
+                    with c2:
+                        sai_cat_name = st.selectbox("Categoria", [c.name for c in cats_out] or ["—"], key="sai_cat")
+                    sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
+                    sai_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="sai_valor")
+                    if st.form_submit_button("Salvar SAÍDA"):
+                        cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
+                        if sai_valor > 0 and cat_obj:
+                            db.add(Transaction(
+                                date=sai_data, type="SAÍDA", category_id=cat_obj.id,
+                                amount=sai_valor, description=(sai_desc or None),
+                                congregation_id=target_cong_obj.id,
+                                sub_congregation_id=target_sub_cong_id
+                            ))
+                            db.commit()
+                            st.session_state.status_message = ("success", "Saída registrada com sucesso!")
+                        else:
+                            st.session_state.status_message = ("warning", "Preencha o valor e a categoria da saída.")
+                        st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
 
         elif modo == "Editar direto na tabela":
             contexto_tabela = f"{parent_cong_obj.name} (Principal)"
@@ -1894,18 +1933,53 @@ def page_lancamentos(user: "User"):
 
             df_logs = _load_service_logs(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
             
-            # (O resto do código de verificação de divergência e criação da tabela permanece igual)
-            # ...
-            
+            # Lógica de verificação de divergência (inalterada)
+            declarado_total = 0.0
+            if isinstance(df_logs, pd.DataFrame) and not df_logs.empty and ("Dízimo" in df_logs.columns):
+                try:
+                    declarado_total = float(df_logs["Dízimo"].sum() or 0.0)
+                except Exception:
+                    declarado_total = 0.0
+            with SessionLocal() as _db_chk:
+                tithe_sub_filter = (Tithe.sub_congregation_id.is_(None) if target_sub_cong_id is None else (Tithe.sub_congregation_id == target_sub_cong_id))
+                real_total = float(_db_chk.scalar(
+                    select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
+                        Tithe.congregation_id == parent_cong_obj.id,
+                        Tithe.date >= start_tab, Tithe.date < end_tab,
+                        tithe_sub_filter
+                    )
+                ) or 0.0)
+            diff_total = round(declarado_total - real_total, 2)
+            if abs(diff_total) >= 0.01:
+                st.markdown(f"""
+<div class="alert-danger">
+  <strong>Divergência de Dízimos no período</strong> — Declarado no resumo: <strong>{format_currency(declarado_total)}</strong> • Nominal (dizimistas): <strong>{format_currency(real_total)}</strong> • Diferença: <strong>{format_currency(diff_total)}</strong>
+</div>
+""", unsafe_allow_html=True)
+
+            if df_logs.empty:
+                df_logs = pd.DataFrame([{"Data do Culto": today_bahia(), "Tipo de Culto": tipos_de_culto[0], "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0, "ID": None}])
+
             edited_df = st.data_editor(
-                # ... configuração da tabela ...
+                df_logs, use_container_width=True, hide_index=True, num_rows="dynamic",
+                key=f"editor_service_logs_{parent_cong_obj.id}_{target_sub_cong_id}",
+                column_config={"ID": None, "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"), "Tipo de Culto": st.column_config.SelectboxColumn("Tipo de Culto", options=tipos_de_culto, required=True), "Dízimo": st.column_config.NumberColumn("Dízimo", format="R$ %.2f", required=True), "Oferta": st.column_config.NumberColumn("Oferta", format="R$ %.2f", required=True), "Total": st.column_config.NumberColumn("Total", help="Soma do Dízimo e Oferta. Atualiza após salvar.", format="R$ %.2f", disabled=True)},
+                column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
             )
 
-            # ... código das métricas ...
+            st.divider()
+            try:
+                total_dizimo = _to_float_brl(edited_df["Dízimo"].sum())
+                total_oferta = _to_float_brl(edited_df["Oferta"].sum())
+                total_geral = total_dizimo + total_oferta
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total Dízimos (na tabela)", format_currency(total_dizimo))
+                col2.metric("Total Ofertas (na tabela)", format_currency(total_oferta))
+                col3.metric("Total Geral (na tabela)", format_currency(total_geral))
+            except Exception:
+                st.caption("Calculando totais...")
 
             def on_save_click():
-                # <<< MUDANÇA NA FUNÇÃO DO BOTÃO >>>
-                # Agora ela usa o status retornado para definir a mensagem na sessão
                 result = _apply_service_log_changes(df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id)
                 if result == "missao_ok":
                     st.session_state.status_message = ("success", "Atenção: As ofertas do Culto de Missões são lançadas automaticamente no menu 'Relatório de Missões'.")
@@ -1917,8 +1991,28 @@ def page_lancamentos(user: "User"):
                     st.session_state.status_message = ("error", "ERRO CRÍTICO: Categoria 'Missões' (Entrada) não encontrada.")
                 elif result == "erro_geral":
                     st.session_state.status_message = ("error", "Ocorreu um erro inesperado ao salvar.")
-            
+                st.rerun() # Rerun é necessário aqui para atualizar a tabela após a edição
+
             st.button("Salvar alterações na tabela", on_click=on_save_click, key=f"save_table_{parent_cong_obj.id}", type="primary")
+
+            st.markdown("---")
+            tithes_query = select(Tithe).where(
+                Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab,
+                Tithe.sub_congregation_id == target_sub_cong_id
+            )
+            tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
+            _editor_dizimos(tithes, f"Dizimistas - {contexto_tabela}", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
+
+            st.markdown("---")
+            txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(
+                Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab,
+                Transaction.type == "SAÍDA", Transaction.sub_congregation_id == target_sub_cong_id
+            )
+            txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
+            _editor_lancamentos(
+                txs_out, f"Saídas - {contexto_tabela}", tx_type_hint="SAÍDA",
+                force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id
+            )
 
             # (O restante da página com as tabelas de Dizimistas e Saídas permanece igual)
             # ...
