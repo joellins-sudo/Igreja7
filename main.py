@@ -763,41 +763,35 @@ def order_congs_sede_first(congs: List[Congregation]) -> List[Congregation]:
     return (sede + others) if sede else others
 
 def sidebar_common(user: "User") -> str:
-    """
-    Desenha o menu lateral e retorna a página selecionada.
-    """
-    
-    # 1. Definições de Menu
+    """Desenha o menu lateral e retorna a página selecionada."""
     MENU_PAGES = {
         "Lançamentos": "📥", "Relatório de Entrada": "📊", "Relatório de Saída": "📉",
-        "Relatório de Missões": "🌍", "Relatório de Dizimistas": "🧾", "Visão Geral": "🏁",
-        "Cadastro": "🛠️",
+        "Lançamentos de Missões": "📥", "Relatório de Missões": "📊",
+        "Relatório de Dizimistas": "🧾", "Visão Geral": "🏁", "Cadastro": "🛠️",
     }
     
     role = getattr(user, "role", "")
     if role == "SEDE":
-        menu_options_plain = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Cadastro"]
+        menu_options_plain = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Lançamentos de Missões", "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Cadastro"]
     elif role == "TESOUREIRO":
-        menu_options_plain = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"]
+        menu_options_plain = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Dizimistas", "Visão Geral"]
     elif role == "TESOUREIRO MISSIONÁRIO":
-        menu_options_plain = ["Relatório de Missões"]
+        menu_options_plain = ["Lançamentos de Missões", "Relatório de Missões"]
     else:
         menu_options_plain = ["Visão Geral"]
 
     menu_labels_pretty = [f"{MENU_PAGES.get(opt, '•')} {opt}" for opt in menu_options_plain]
     label_to_page = {label: page for label, page in zip(menu_labels_pretty, menu_options_plain)}
 
-    # 2. Determina o índice padrão para o st.radio
     session_key = "main_menu_page"  
-    current_page_name = st.session_state.get(session_key, "Visão Geral")
+    current_page_name = st.session_state.get(session_key, menu_options_plain[0])
     
     try:
         default_index = menu_options_plain.index(current_page_name)
     except ValueError:
-        default_index = 0 # Fallback se a página salva não estiver mais disponível
+        default_index = 0
 
     with st.sidebar:
-        # Identidade e Logo
         try:
             if os.path.exists(LOGO_PATH):
                 st.image(LOGO_PATH, use_column_width=True)
@@ -805,26 +799,16 @@ def sidebar_common(user: "User") -> str:
             pass
         st.write(f"👤 **{getattr(user, 'username', 'Usuário')}** — *{getattr(user, 'role', '')}*")
 
-        # 3. Desenha o menu
         sel_label = st.radio(
-            "Menu",
-            options=menu_labels_pretty,
-            index=default_index,
-            key=session_key,  # O widget usa a chave e atualiza o estado automaticamente
-            label_visibility="visible",
+            "Menu", options=menu_labels_pretty, index=default_index, 
+            key=session_key, label_visibility="collapsed"
         )
-
-        # 4. Converte o label selecionado de volta para o nome da página
-        page = label_to_page.get(sel_label, "Visão Geral")
-        
-        # A LINHA ABAIXO FOI REMOVIDA, POIS CAUSAVA O ERRO
-        # st.session_state[session_key] = page 
+        page = label_to_page.get(sel_label, menu_options_plain[0])
         
         st.divider()
-        if st.button("Sair", key=f"btn_logout_{getattr(user, 'id', 'anon')}"):
+        if st.button("Sair"):
             logout()
-            st.rerun()  
-
+            
     return page
 
 # ======= NOVO: helper padrão para botões 'Salvar alterações' =======
@@ -2967,8 +2951,105 @@ def build_missions_report_pdf(ref: date, entradas: list, saidas: list) -> bytes:
     doc.build(story)
     return buf.getvalue()
 
-# ======== Páginas de Missões ========
+# ===================== FUNÇÕES DE MISSÕES (NOVAS) =====================
+
+def _build_missions_analytics(db: Session, ref_date: date):
+    """Cria a análise de contribuições de missões por congregação para o mês e ano."""
+    start_month, end_month = month_bounds(ref_date)
+    start_year = date(ref_date.year, 1, 1)
+    end_year = date(ref_date.year + 1, 1, 1)
+
+    # Query para o mês
+    q_month = select(
+        Congregation.name,
+        func.sum(Transaction.amount)
+    ).join(Transaction).join(Category).where(
+        Transaction.date >= start_month, Transaction.date < end_month,
+        Transaction.type == "DOAÇÃO",
+        func.lower(Category.name) == 'missões'
+    ).group_by(Congregation.name)
+    
+    # Query para o ano
+    q_year = select(
+        Congregation.name,
+        func.sum(Transaction.amount)
+    ).join(Transaction).join(Category).where(
+        Transaction.date >= start_year, Transaction.date < end_year,
+        Transaction.type == "DOAÇÃO",
+        func.lower(Category.name) == 'missões'
+    ).group_by(Congregation.name)
+
+    month_data = {name: val for name, val in db.execute(q_month).all()}
+    year_data = {name: val for name, val in db.execute(q_year).all()}
+    
+    all_congs = {**month_data, **year_data}.keys()
+    
+    report_rows = []
+    for cong_name in all_congs:
+        report_rows.append({
+            "Congregação": cong_name,
+            "Total no Mês (R$)": month_data.get(cong_name, 0.0),
+            "Total no Ano (R$)": year_data.get(cong_name, 0.0)
+        })
+
+    if not report_rows:
+        return pd.DataFrame(), 0, 0, 0
+
+    df = pd.DataFrame(report_rows).sort_values("Total no Ano (R$)", ascending=False).reset_index(drop=True)
+    
+    total_mes = df["Total no Mês (R$)"].sum()
+    total_ano = df["Total no Ano (R$)"].sum()
+    num_congs = len(df[df["Total no Mês (R$)"] > 0])
+
+    return df, total_mes, total_ano, num_congs
+
 def page_relatorio_missoes(user: "User"):
+    """Nova página de relatório (vitrine) e análise para Missões."""
+    ensure_seed()
+    with SessionLocal() as db:
+        st.markdown("<h1 class='page-title'>Relatório de Missões</h1>", unsafe_allow_html=True)
+        ref = get_month_selector()
+        start, end = month_bounds(ref)
+
+        entradas, saidas = _collect_missions_data(db, start, end)
+
+        st.subheader("Entradas de Missões (Visualização)")
+        if entradas:
+            df_in = pd.DataFrame([{
+                "Data": t.date, "Congregação": t.congregation.name, "Valor": t.amount, "Descrição": (t.description or "")
+            } for t in entradas])
+            st.dataframe(df_in.style.format({"Data": "{:%d/%m/%Y}", "Valor": format_currency}), use_container_width=True, hide_index=True)
+        else:
+            st.caption("Nenhuma entrada de missões registada para este período.")
+        
+        st.subheader("Saídas de Missões (Visualização)")
+        if saidas:
+            df_out = pd.DataFrame([{
+                "Data": t.date, "Congregação": t.congregation.name, "Valor": t.amount, "Descrição": (t.description or "")
+            } for t in saidas])
+            st.dataframe(df_out.style.format({"Data": "{:%d/%m/%Y}", "Valor": format_currency}), use_container_width=True, hide_index=True)
+        else:
+            st.caption("Nenhuma saída de missões registada para este período.")
+            
+        st.divider()
+        
+        st.subheader("Análise de Contribuições de Missões")
+        df_analise, total_mes, total_ano, num_congs = _build_missions_analytics(db, ref)
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total de Entradas no Mês", format_currency(total_mes))
+        c2.metric("Total de Entradas no Ano", format_currency(total_ano))
+        c3.metric("Congregações Contribuintes no Mês", f"{num_congs}")
+        
+        if not df_analise.empty:
+            st.dataframe(
+                df_analise.style.format({"Total no Mês (R$)": format_currency, "Total no Ano (R$)": format_currency}),
+                use_container_width=True, hide_index=True
+            )
+
+# ======== Páginas de Missões ========
+def page_lancamentos_missoes(user: "User"):
+    # ... código existente ...
     if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
         st.warning("🔒 Acesso negado. Apenas usuários `SEDE` ou `TESOUREIRO MISSIONÁRIO` podem acessar este relatório.")
         return
@@ -3664,61 +3745,36 @@ def page_relatorio_entrada(user: "User"):
 def main():
     try:
         ensure_seed()
+        
+        if 'uid' not in st.session_state or not st.session_state['uid']:
+            login_ui()
+            return
 
-        # Tenta carregar o usuário a partir da sessão ou dos cookies
         user = current_user()
         if not user:
-            try:
-                cm = get_cookie_manager()
-                tok = cm.get(COOKIE_NAME)
-                data = _read_token(tok)
-                if data:
-                    with SessionLocal() as db:
-                        u = db.get(User, int(data["uid"]))
-                        if u:
-                            st.session_state.uid = u.id
-                            st.rerun()
-            except Exception:
-                # Ignora erros do cookie manager se ele não estiver instalado
-                pass
+            logout()
+            st.rerun()
 
-        # Estrutura Lógica Principal: OU mostra o login, OU mostra o app.
-        if 'uid' not in st.session_state or not st.session_state.uid:
-            # ESTADO DESLOGADO: Mostra apenas a UI de login
-            login_ui()
+        page_name = sidebar_common(user)
+
+        page_map = {
+            "Lançamentos": page_lancamentos,
+            "Relatório de Entrada": page_relatorio_entrada,
+            "Relatório de Saída": page_relatorio_saida,
+            "Lançamentos de Missões": page_lancamentos_missoes, # Página renomeada
+            "Relatório de Missões": page_relatorio_missoes,     # Página nova
+            "Relatório de Dizimistas": page_relatorio_dizimistas,
+            "Visão Geral": page_visao_geral,
+            "Cadastro": page_cadastro,
+        }
+
+        if page_name in page_map:
+            page_map[page_name](user)
         else:
-            # ESTADO LOGADO: Carrega o usuário e mostra a interface principal
-            user = current_user()
-            if user:
-                page = sidebar_common(user)
-
-                # Roteamento de páginas
-                if page == "Lançamentos":
-                    page_lancamentos(user)
-                elif page == "Relatório de Entrada":
-                    page_relatorio_entrada(user)
-                elif page == "Relatório de Saída":
-                    page_relatorio_saida(user)
-                elif page == "Relatório de Dizimistas":
-                    page_relatorio_dizimistas(user)
-                elif page == "Relatório de Missões":
-                    if getattr(user, "role", "") == "TESOUREIRO":
-                        page_relatorio_missoes_congregacao(user)
-                    else:
-                        page_relatorio_missoes(user)
-                elif page == "Visão Geral":
-                    page_visao_geral(user)
-                elif page == "Cadastro":
-                    page_cadastro(user)
-                else:
-                    page_visao_geral(user)
-            else:
-                # Caso raro: UID na sessão mas usuário não encontrado no DB. Força logout.
-                logout()
+            # Página padrão para o perfil, caso algo dê errado
+            default_page = "Lançamentos de Missões" if user.role == "TESOUREIRO MISSIONÁRIO" else "Visão Geral"
+            page_map[default_page](user)
 
     except Exception as e:
         st.error("Ocorreu um erro crítico na aplicação.")
         st.exception(e)
-
-if __name__ == "__main__":
-    main()
