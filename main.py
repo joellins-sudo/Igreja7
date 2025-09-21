@@ -3032,7 +3032,6 @@ def _build_missions_search_df(db: Session, year: int, month_name: str):
     """
     Busca e agrega as contribuições de missões, identificando os maiores contribuintes.
     """
-    # Define o período da pesquisa (ano inteiro ou um mês específico)
     month_num = None
     if month_name != "Todos":
         try:
@@ -3043,7 +3042,6 @@ def _build_missions_search_df(db: Session, year: int, month_name: str):
     start_date = date(year, month_num, 1) if month_num else date(year, 1, 1)
     end_date = date(year + (1 if month_num == 12 else 0), (month_num % 12) + 1, 1) if month_num else date(year + 1, 1, 1)
     
-    # Query para o período selecionado
     q_period = select(
         Congregation.name, func.sum(Transaction.amount)
     ).join(Transaction).join(Category).where(
@@ -3051,7 +3049,6 @@ def _build_missions_search_df(db: Session, year: int, month_name: str):
         Transaction.type == "DOAÇÃO", func.lower(Category.name) == 'missões'
     ).group_by(Congregation.name)
 
-    # Query separada para o ano inteiro, para encontrar o maior contribuinte anual
     q_year = select(
         Congregation.name, func.sum(Transaction.amount)
     ).join(Transaction).join(Category).where(
@@ -3073,7 +3070,7 @@ def _build_missions_search_df(db: Session, year: int, month_name: str):
         })
 
     if not report_rows:
-        return pd.DataFrame(), 0.0, 0, None, None # CORRIGIDO: Retorna 5 valores
+        return pd.DataFrame(), 0.0, 0, None, None
 
     df = pd.DataFrame(report_rows)
     total_periodo = df["Total no Período (R$)"].sum()
@@ -3085,7 +3082,9 @@ def _build_missions_search_df(db: Session, year: int, month_name: str):
         top_period_contributor = (top_period_row['Congregação'], top_period_row['Total no Período (R$)'])
 
     top_year_contributor = None
-    if not df[df["Total no Ano (R$)"] == 0].all():
+    # ===== CORREÇÃO AQUI =====
+    # A verificação agora é mais simples e direta: se a soma do ano for maior que zero.
+    if df["Total no Ano (R$)"].sum() > 0:
         top_year_row = df.loc[df['Total no Ano (R$)'].idxmax()]
         top_year_contributor = (top_year_row['Congregação'], top_year_row['Total no Ano (R$)'])
     
@@ -3163,7 +3162,7 @@ def page_relatorio_missoes(user: "User"):
                 )
             else:
                 st.caption("Nenhuma contribuição de missões encontrada para os filtros selecionados.")
-                
+
 def page_relatorio_missoes(user: "User"):
     """Página de gestão de Missões com abas para Lançamento e Relatório."""
     # A verificação de perfil agora acontece dentro da página
