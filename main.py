@@ -1769,6 +1769,7 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 
 # SUBSTITUA SUA page_lancamentos INTEIRA POR ESTA VERSÃO FINAL
 
+# Substitua sua função page_lancamentos inteira por esta versão
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1797,11 +1798,10 @@ def page_lancamentos(user: "User"):
 
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
 
-        # Tipos de culto (inalterado)
         tipos_de_culto = [
             "Culto da Noite (Padrão)",
             "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)",
-            "Culto de missões(Registre a oferta no Relatório de Missões)",
+            "Culto de Missões",
             "Evento Especial",
             "Outro"
         ]
@@ -1831,34 +1831,67 @@ def page_lancamentos(user: "User"):
                     ent_oferta = c2.number_input("Valor da Oferta", min_value=0.0, value=0.0, format="%.2f", key="ent_oferta_form")
 
                     if st.form_submit_button("Salvar Entrada do Culto"):
-                        if ent_dizimo > 0 or ent_oferta > 0:
-                            log_existente = db.scalar(
-                                select(ServiceLog).where(
-                                    ServiceLog.date == ent_data,
-                                    ServiceLog.service_type == ent_tipo,
+                        if ent_dizimo <= 0 and ent_oferta <= 0:
+                            st.warning("Nenhum valor foi inserido.")
+                        else:
+                            # <<< INÍCIO DA NOVA LÓGICA >>>
+                            # Lógica para Culto de Missões: separa a oferta do caixa geral
+                            if ent_tipo == "Culto de Missões":
+                                # 1. Lança o DÍZIMO no caixa geral (ServiceLog)
+                                if ent_dizimo > 0:
+                                    log_existente = db.scalar(select(ServiceLog).where(
+                                        ServiceLog.date == ent_data, ServiceLog.service_type == ent_tipo,
+                                        ServiceLog.congregation_id == target_cong_obj.id,
+                                        ServiceLog.sub_congregation_id == target_sub_cong_id
+                                    ))
+                                    if log_existente:
+                                        log_existente.dizimo += ent_dizimo
+                                    else:
+                                        db.add(ServiceLog(
+                                            date=ent_data, service_type=ent_tipo,
+                                            dizimo=ent_dizimo, oferta=0.0, # Oferta é 0 aqui
+                                            congregation_id=target_cong_obj.id,
+                                            sub_congregation_id=target_sub_cong_id
+                                        ))
+                                
+                                # 2. Lança a OFERTA diretamente no caixa de Missões (Transaction)
+                                if ent_oferta > 0:
+                                    cat_missoes = db.scalar(select(Category).where(func.lower(Category.name) == 'missões', Category.type == TYPE_IN))
+                                    if not cat_missoes:
+                                        st.error("Erro: Categoria 'Missões' de entrada não encontrada. O lançamento da oferta falhou.")
+                                    else:
+                                        db.add(Transaction(
+                                            date=ent_data, type=TYPE_IN, category_id=cat_missoes.id,
+                                            amount=ent_oferta, description=f"Oferta do culto de missões em {ent_data.strftime('%d/%m')}",
+                                            congregation_id=target_cong_obj.id,
+                                            sub_congregation_id=target_sub_cong_id
+                                        ))
+                                
+                                st.success("Lançamento de Missões salvo! Dízimo foi para o caixa geral e a Oferta para o caixa de Missões.")
+
+                            # Lógica para os outros cultos (comportamento original)
+                            else:
+                                log_existente = db.scalar(select(ServiceLog).where(
+                                    ServiceLog.date == ent_data, ServiceLog.service_type == ent_tipo,
                                     ServiceLog.congregation_id == target_cong_obj.id,
                                     ServiceLog.sub_congregation_id == target_sub_cong_id
-                                )
-                            )
-                            if log_existente:
-                                log_existente.dizimo += ent_dizimo
-                                log_existente.oferta += ent_oferta
-                                st.success("Valores adicionados ao registro do culto existente!")
-                            else:
-                                novo_log = ServiceLog(
-                                    date=ent_data,
-                                    service_type=ent_tipo,
-                                    dizimo=ent_dizimo,
-                                    oferta=ent_oferta,
-                                    congregation_id=target_cong_obj.id,
-                                    sub_congregation_id=target_sub_cong_id
-                                )
-                                db.add(novo_log)
-                                st.success("Novo registro de culto salvo com sucesso!")
+                                ))
+                                if log_existente:
+                                    log_existente.dizimo += ent_dizimo
+                                    log_existente.oferta += ent_oferta
+                                else:
+                                    db.add(ServiceLog(
+                                        date=ent_data, service_type=ent_tipo,
+                                        dizimo=ent_dizimo, oferta=ent_oferta,
+                                        congregation_id=target_cong_obj.id,
+                                        sub_congregation_id=target_sub_cong_id
+                                    ))
+                                st.success("Registro de culto salvo com sucesso!")
+                            
                             db.commit()
                             st.rerun()
-                        else:
-                            st.warning("Nenhum valor foi inserido.")
+                            # <<< FIM DA NOVA LÓGICA >>>
+
                 st.markdown('</div>', unsafe_allow_html=True)
 
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
@@ -1936,7 +1969,6 @@ def page_lancamentos(user: "User"):
             df_logs = _load_service_logs(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
 
             # ===================== AVISO ÚNICO (mês/unidade) =====================
-            # Requisito: soma(Dízimo nos resumos) == soma(Tithe nominal)
             declarado_total = 0.0
             if isinstance(df_logs, pd.DataFrame) and not df_logs.empty and ("Dízimo" in df_logs.columns):
                 try:
@@ -1957,7 +1989,6 @@ def page_lancamentos(user: "User"):
 
             diff_total = round(declarado_total - real_total, 2)
             if abs(diff_total) >= 0.01:
-                # Uma linha (máx. duas) e direta ao ponto
                 st.markdown(f"""
 <div class="alert-danger">
   <strong>Divergência de Dízimos no período</strong> — Declarado no resumo: <strong>{format_currency(declarado_total)}</strong> • Nominal (dizimistas): <strong>{format_currency(real_total)}</strong> • Diferença: <strong>{format_currency(diff_total)}</strong>
