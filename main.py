@@ -307,18 +307,10 @@ LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
 st.markdown("""
 <style>
 .inline-missoes-alert{
-  background: #F3F4F6;   /* amarelo de fundo */
-  border: 1px solid #d97706; /* borda (um tom mais escuro do amarelo) */
-  color: #ffffff;         /* texto branco */
-  font-weight: 700;
-
-  padding: 6px 10px;
-  border-radius: 8px;
-  margin: 8px 0 10px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: .95rem;
+  background: transparent !important;
+  border: none !important;
+  color: #b45309 !important;   /* âmbar escuro */
+  font-weight: 700 !important; /* negrito */
 }
 </style>
 """, unsafe_allow_html=True)
