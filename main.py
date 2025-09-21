@@ -1784,6 +1784,7 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 # Substitua esta função inteira
 # Substitua sua função page_lancamentos inteira por esta
 # Substitua sua função page_lancamentos inteira por esta
+# Substitua sua função page_lancamentos inteira por esta
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1794,7 +1795,7 @@ def page_lancamentos(user: "User"):
             congs_all = order_congs_sede_first(cong_options_for(user, db))
             cong_sel_name = st.selectbox("Selecione a Congregação Principal:", [c.name for c in congs_all], key="lan_cong_sel_sede")
             parent_cong_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
-        else:
+        else:  # TESOUREIRO
             parent_cong_obj = db.get(Congregation, user.congregation_id)
 
         if not parent_cong_obj:
@@ -1812,7 +1813,13 @@ def page_lancamentos(user: "User"):
 
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
 
-        tipos_de_culto = ["Culto da Noite (Padrão)", "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)", "Culto de Missões", "Evento Especial", "Outro"]
+        tipos_de_culto = [
+            "Culto da Noite (Padrão)",
+            "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)",
+            "Culto de Missões",
+            "Evento Especial",
+            "Outro"
+        ]
 
         if modo == "Formulário único":
             target_cong_obj = parent_cong_obj
@@ -1865,7 +1872,6 @@ def page_lancamentos(user: "User"):
                                         congregation_id=target_cong_obj.id,
                                         sub_congregation_id=target_sub_cong_id
                                     ))
-                                # <-- SUA MENSAGEM ESTÁ AQUI
                                 st.success("Atenção: As ofertas do Culto de Missões são lançadas automaticamente no menu 'Relatório de Missões'.")
                             else:
                                 if log_existente:
@@ -1882,8 +1888,6 @@ def page_lancamentos(user: "User"):
                             db.commit()
                             st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
-            # ... (resto da função permanece igual) ...
-
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
                 st.markdown('<div class="adrf-dizimo">', unsafe_allow_html=True)
                 with st.form("form_dizimo"):
@@ -2000,7 +2004,9 @@ def page_lancamentos(user: "User"):
 
             def on_save_click():
                 _apply_service_log_changes(df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id)
-                st.rerun()
+                # <<< MUDANÇA IMPORTANTE AQUI >>>
+                # A linha st.rerun() foi REMOVIDA para permitir que a mensagem de sucesso apareça.
+                # st.rerun() 
 
             st.markdown('<div class="adrf-entrada">', unsafe_allow_html=True)
             st.button("Salvar alterações na tabela", on_click=on_save_click, key=f"save_table_{parent_cong_obj.id}", type="primary")
