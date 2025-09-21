@@ -307,7 +307,7 @@ LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
 st.markdown("""
 <style>
 .inline-missoes-alert{
-  background: #f59e0b;   /* amarelo de fundo */
+  background: #FFFBE6;   /* amarelo de fundo */
   border: 1px solid #d97706; /* borda (um tom mais escuro do amarelo) */
   color: #ffffff;         /* texto branco */
   font-weight: 700;
