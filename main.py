@@ -1835,9 +1835,9 @@ def page_lancamentos(user: "User"):
 
 def _render_aviso_missoes_inline_local():
     _style = (
-        "background:#fff3cd !important;"
-        "border:1px solid #ffeeba !important;"
-        "color:#856404 !important;"
+        "background:#fff3cd !important;"     # amarelo suave
+        "border:1px solid #ffeeba !important;"  # borda amarela
+        "color:#856404 !important;"           # texto amarelo-escuro
         "padding:6px 10px !important;"
         "border-radius:8px !important;"
         "margin:8px 0 10px !important;"
@@ -1847,12 +1847,13 @@ def _render_aviso_missoes_inline_local():
         "font-size:.95rem !important;"
         "display:inline-block !important;"
     )
-    st.markdown(  # <- com ponto
+    st.markdown(  # <- ponto, não underscore
         f"<div style='{_style}'>⚠️ "
         "Atenção : As ofertas do culto de missões são lançadas automaticamente no "
         "Menu Relatório de Missões ao lado.</div>",
         unsafe_allow_html=True
     )
+
 
     # ========================================================================
 
