@@ -1818,7 +1818,7 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 def page_lancamentos(user: "User"):
     ensure_seed()
 
-    # === Helpers locais só para o aviso acima da tabela (não alteram dados) ===
+    # === Helpers locais do aviso (apenas UI; não alteram dados) ===
     import re as _re
     def _has_culto_missoes_in_df_local(df: pd.DataFrame) -> bool:
         try:
@@ -1834,12 +1834,20 @@ def page_lancamentos(user: "User"):
             return False
 
     def _render_aviso_missoes_inline_local():
+        # Cartão AMARELO (como antes)
         st.markdown("""
         <style>
           .inline-missoes-alert{
-            background:#fffbe6; border:1px solid #ffe58f; color:#614700;
-            padding:6px 10px; border-radius:8px; margin:8px 0 10px;
-            white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:.95rem;
+            background:#fff3cd;           /* amarelo suave */
+            border:1px solid #ffeeba;     /* borda amarela */
+            color:#856404;                /* texto amarelo-escuro */
+            padding:6px 10px;
+            border-radius:8px;
+            margin:8px 0 10px;
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+            font-size:.95rem;
           }
         </style>
         """, unsafe_allow_html=True)
@@ -1860,7 +1868,7 @@ def page_lancamentos(user: "User"):
             st.error(msg_text)
         elif msg_type == "warning":
             st.warning(msg_text)
-        del st.session_state.status_message  # limpa após exibir
+        del st.session_state.status_message
 
     with SessionLocal() as db:
         st.markdown(f"<h1 class='page-title'>Lançamentos</h1>", unsafe_allow_html=True)
@@ -2134,7 +2142,7 @@ def page_lancamentos(user: "User"):
                 column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
             )
 
-            # Preenche o placeholder com o aviso em uma linha, se houver "Culto de Missões"
+            # Preenche o placeholder com o AVISO AMARELO (uma linha) se houver "Culto de Missões"
             try:
                 if _has_culto_missoes_in_df_local(edited_df):
                     with _aviso_top:
@@ -2217,9 +2225,7 @@ def page_lancamentos(user: "User"):
                 force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id
             )
 
-            # ... (demais seções permanecem iguais)
-
-
+        
             # (O restante da página com as tabelas de Dizimistas e Saídas permanece igual)
             # ...
 
