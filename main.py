@@ -3141,7 +3141,8 @@ def page_relatorio_missoes(user: "User"):
                 st.dataframe(
                     df_analise.style.format({"Total no Mês (R$)": format_currency, "Total no Ano (R$)": format_currency}),
                     use_container_width=True, hide_index=True
-                )def page_relatorio_missoes(user: "User"):
+                )
+def page_relatorio_missoes(user: "User"):
     """Página de gestão de Missões com abas para Lançamento e Relatório."""
     # A verificação de perfil agora acontece dentro da página
     if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
