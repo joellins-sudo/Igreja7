@@ -1912,7 +1912,6 @@ def page_lancamentos(user: "User"):
 
             # ---- ENTRADA (Resumo do Culto)
             with st.expander("➕ Lançar ENTRADA (Resumo do Culto)", expanded=True):
-                st.markdown('<div class="adrf-entrada">', unsafe_allow_html=True)
                 with st.form("form_entrada_resumo"):
                     ent_data = st.date_input("Data do Culto", value=today_bahia(), key="ent_data_form")
                     ent_tipo = st.selectbox("Tipo de Culto", options=tipos_de_culto, key="ent_tipo_form")
@@ -1920,7 +1919,7 @@ def page_lancamentos(user: "User"):
                     ent_dizimo = c1.number_input("Valor do Dízimo", min_value=0.0, value=0.0, format="%.2f", key="ent_dizimo_form")
                     ent_oferta = c2.number_input("Valor da Oferta", min_value=0.0, value=0.0, format="%.2f", key="ent_oferta_form")
 
-                    if st.form_submit_button("Salvar Entrada do Culto"):
+                    if _submit_btn("Salvar Entrada do Culto", "form_entrada_resumo_btn", theme="entrada"):
                         if ent_dizimo <= 0 and ent_oferta <= 0:
                             st.session_state.status_message = ("warning", "Nenhum valor foi inserido.")
                         else:
@@ -1985,7 +1984,6 @@ def page_lancamentos(user: "User"):
 
                             db.commit()
                         st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
 
             # ---- DÍZIMO NOMINAL
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
@@ -1995,7 +1993,7 @@ def page_lancamentos(user: "User"):
                     dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
                     dz_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="dz_valor")
                     dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência"], key="dz_pay")
-                    if st.form_submit_button("Salvar DIZIMISTA"):
+                    if _submit_btn("Salvar DIZIMISTA", "form_dizimo_btn", theme="dizimista"):
                         if dz_valor > 0 and dz_nome.strip():
                             db.add(Tithe(
                                 date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor,
@@ -2023,7 +2021,7 @@ def page_lancamentos(user: "User"):
                     sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
                     sai_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="sai_valor")
 
-                    if st.form_submit_button("Salvar SAÍDA"):
+                    if _submit_btn("Salvar SAÍDA", "form_saida_btn", theme="saida"):
                         cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
                         if sai_valor > 0 and cat_obj:
                             db.add(Transaction(
@@ -2173,12 +2171,13 @@ def page_lancamentos(user: "User"):
                     )
                 st.rerun()
 
-            st.button(
-                "Salvar alterações na tabela",
-                on_click=on_save_click,
-                key=f"save_table_{parent_cong_obj.id}",
-                type="primary"
-            )
+            _save_btn(
+    on_save_click,
+    key_suffix=f"save_table_{parent_cong_obj.id}",
+    theme="entrada",
+    label="Salvar alterações na tabela"
+)
+
 
             # Seções auxiliares (dizimistas e saídas) abaixo
             st.markdown("---")
