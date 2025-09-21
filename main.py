@@ -3240,8 +3240,8 @@ def page_relatorio_missoes(user: "User"):
             st.markdown("##### Destaques do Período Selecionado")
             c1, c2, c3 = st.columns(3)
             c1.metric("Total de Entradas no Mês", format_currency(total_periodo))
-            c2.metric("Total de Entradas no Ano", format_currency(df_search["Total no Ano (R$)"].sum()))
-            c3.metric("Nº de Congregações Contribuintes", f"{num_congs}")
+            c2.metric("Nº de Congregações Contribuintes (mês)", f"{num_congs}")
+            c3.metric("Total de Entradas no Ano", format_currency(df_search["Total no Ano (R$)"].sum()))
             
             st.divider()
             
