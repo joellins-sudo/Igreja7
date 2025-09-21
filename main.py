@@ -2967,38 +2967,129 @@ def build_missions_report_pdf(ref: date, entradas: list, saidas: list) -> bytes:
     doc.build(story)
     return buf.getvalue()
 
+def _build_missions_analytics(db: Session, ref_date: date):
+    """Cria a análise de contribuições de missões por congregação para o mês e ano."""
+    start_month, end_month = month_bounds(ref_date)
+    start_year = date(ref_date.year, 1, 1)
+    end_year = date(ref_date.year + 1, 1, 1)
+
+    # Query para o mês
+    q_month = select(
+        Congregation.name,
+        func.sum(Transaction.amount)
+    ).join(Transaction).join(Category).where(
+        Transaction.date >= start_month, Transaction.date < end_month,
+        Transaction.type == "DOAÇÃO",
+        func.lower(Category.name) == 'missões'
+    ).group_by(Congregation.name)
+    
+    # Query para o ano
+    q_year = select(
+        Congregation.name,
+        func.sum(Transaction.amount)
+    ).join(Transaction).join(Category).where(
+        Transaction.date >= start_year, Transaction.date < end_year,
+        Transaction.type == "DOAÇÃO",
+        func.lower(Category.name) == 'missões'
+    ).group_by(Congregation.name)
+
+    month_data = {name: val for name, val in db.execute(q_month).all()}
+    year_data = {name: val for name, val in db.execute(q_year).all()}
+    
+    all_congs = {**month_data, **year_data}.keys()
+    
+    report_rows = []
+    for cong_name in sorted(list(all_congs)):
+        report_rows.append({
+            "Congregação": cong_name,
+            "Total no Mês (R$)": month_data.get(cong_name, 0.0),
+            "Total no Ano (R$)": year_data.get(cong_name, 0.0)
+        })
+
+    if not report_rows:
+        return pd.DataFrame(), 0, 0, 0
+
+    df = pd.DataFrame(report_rows).sort_values("Total no Ano (R$)", ascending=False).reset_index(drop=True)
+    
+    total_mes = df["Total no Mês (R$)"].sum()
+    total_ano = df["Total no Ano (R$)"].sum()
+    num_congs = len(df[df["Total no Mês (R$)"] > 0])
+
+    return df, total_mes, total_ano, num_congs
+
 # ======== Páginas de Missões ========
 def page_relatorio_missoes(user: "User"):
+    """Página de gestão de Missões com abas para Lançamento e Relatório."""
     if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
-        st.warning("🔒 Acesso negado. Apenas usuários `SEDE` ou `TESOUREIRO MISSIONÁRIO` podem acessar este relatório.")
+        # Se for um tesoureiro normal, mostra a página antiga de missões da congregação dele
+        page_relatorio_missoes_congregacao(user)
         return
-    
+        
     ensure_seed()
     with SessionLocal() as db:
-        st.markdown("<h1 class='page-title'>Relatório de Missões</h1>", unsafe_allow_html=True)
-        ref = get_month_selector()
-        start, end = month_bounds(ref)
-
-        st.info("Escopo: **Todas as congregações**")
+        st.markdown("<h1 class='page-title'>Gestão de Missões</h1>", unsafe_allow_html=True)
         
-        congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+        tab1, tab2 = st.tabs(["Lançamentos (Editar)", "Relatório e Análise (Visualizar)"])
 
-        st.subheader("Entradas de Missões — por Congregação (editar na tabela)")
-        _editor_missions_entries_agg(congs_all, start, end, "missoes_entradas_agg")
+        with tab1:
+            st.subheader("Editar Lançamentos de Missões")
+            ref_lanc = get_month_selector("Mês para Lançamento")
+            start_lanc, end_lanc = month_bounds(ref_lanc)
+            congs_all = db.scalars(select(Congregation).order_by(Congregation.name)).all()
 
-        st.subheader("Saídas de Missões (editar na tabela)")
-        _, saidas_missoes = _collect_missions_data(db, start, end)
-        _editor_missions_outflows(saidas_missoes, "missoes_saidas", congs_all)
+            st.markdown("###### Entradas de Missões — por Congregação")
+            _editor_missions_entries_agg(congs_all, start_lanc, end_lanc, "missoes_entradas_agg")
 
-        st.divider()
-        st.subheader("Gerar Relatório de Missões (PDF)")
-        entradas_missoes, saidas_missoes_pdf = _collect_missions_data(db, start, end)
-        st.download_button(
-            "⬇️ Baixar Relatório de Missões (PDF)",
-            data=build_missions_report_pdf(ref, entradas_missoes, saidas_missoes_pdf),
-            file_name=f"relatorio_missoes_{start.strftime('%Y-%m')}.pdf",
-            mime="application/pdf"
-        )
+            st.markdown("###### Saídas de Missões")
+            _, saidas_missoes = _collect_missions_data(db, start_lanc, end_lanc)
+            _editor_missions_outflows(saidas_missoes, "missoes_saidas", congs_all)
+            
+            st.divider()
+            st.subheader("Gerar Relatório de Missões (PDF)")
+            entradas_missoes_pdf, saidas_missoes_pdf = _collect_missions_data(db, start_lanc, end_lanc)
+            st.download_button(
+                "⬇️ Baixar PDF de Lançamentos de Missões",
+                data=build_missions_report_pdf(ref_lanc, entradas_missoes_pdf, saidas_missoes_pdf),
+                file_name=f"lancamentos_missoes_{start_lanc.strftime('%Y-%m')}.pdf",
+                mime="application/pdf"
+            )
+
+        with tab2:
+            st.subheader("Relatório e Análise de Missões")
+            ref_rel = get_month_selector("Mês para Relatório")
+            start_rel, end_rel = month_bounds(ref_rel)
+
+            entradas, saidas = _collect_missions_data(db, start_rel, end_rel)
+
+            st.markdown("###### Entradas de Missões no Período")
+            if entradas:
+                df_in = pd.DataFrame([{"Data": t.date, "Congregação": t.congregation.name, "Valor": t.amount, "Descrição": (t.description or "")} for t in entradas])
+                st.dataframe(df_in.style.format({"Data": "{:%d/%m/%Y}", "Valor": format_currency}), use_container_width=True, hide_index=True)
+            else:
+                st.caption("Nenhuma entrada de missões registada para este período.")
+            
+            st.markdown("###### Saídas de Missões no Período")
+            if saidas:
+                df_out = pd.DataFrame([{"Data": t.date, "Congregação": t.congregation.name, "Valor": t.amount, "Descrição": (t.description or "")} for t in saidas])
+                st.dataframe(df_out.style.format({"Data": "{:%d/%m/%Y}", "Valor": format_currency}), use_container_width=True, hide_index=True)
+            else:
+                st.caption("Nenhuma saída de missões registada para este período.")
+                
+            st.divider()
+            
+            st.markdown("###### Análise de Contribuições")
+            df_analise, total_mes, total_ano, num_congs = _build_missions_analytics(db, ref_rel)
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total de Entradas no Mês", format_currency(total_mes))
+            c2.metric("Total de Entradas no Ano", format_currency(total_ano))
+            c3.metric("Congregações Contribuintes no Mês", f"{num_congs}")
+            
+            if not df_analise.empty:
+                st.dataframe(
+                    df_analise.style.format({"Total no Mês (R$)": format_currency, "Total no Ano (R$)": format_currency}),
+                    use_container_width=True, hide_index=True
+                )
 
 def page_relatorio_missoes_congregacao(user: "User"):
     """
