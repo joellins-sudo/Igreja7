@@ -1833,28 +1833,30 @@ def page_lancamentos(user: "User"):
         except Exception:
             return False
 
-def _render_aviso_missoes_inline_local():
-    # Usa estilo inline + !important para não ser sobrescrito pelo tema
-    _style = (
-        "background:#fff3cd !important;"        # amarelo suave
-        "border:1px solid #ffeeba !important;"  # borda amarela
-        "color:#856404 !important;"             # texto amarelo-escuro
-        "padding:6px 10px !important;"
-        "border-radius:8px !important;"
-        "margin:8px 0 10px !important;"
-        "white-space:nowrap !important;"
-        "overflow:hidden !important;"
-        "text-overflow:ellipsis !important;"
-        "font-size:.95rem !important;"
-        "display:inline-block !important;"      # fica só uma linha, sem ocupar toda a largura
-    )
-    st.markdown(
-        f"<div style='{_style}'>⚠️ "
-        "Atenção : As ofertas do culto de missões são lançadas automaticamente no "
-        "Menu Relatório de Missões ao lado.</div>",
-        unsafe_allow_html=True
-    )
-
+    def _render_aviso_missoes_inline_local():
+        # Cartão AMARELO (como antes)
+        st.markdown("""
+        <style>
+          .inline-missoes-alert{
+            background:#fff3cd;           /* amarelo suave */
+            border:1px solid #ffeeba;     /* borda amarela */
+            color:#856404;                /* texto amarelo-escuro */
+            padding:6px 10px;
+            border-radius:8px;
+            margin:8px 0 10px;
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+            font-size:.95rem;
+          }
+        </style>
+        """, unsafe_allow_html=True)
+        st.markdown(
+            "<div class='inline-missoes-alert'>⚠️ "
+            "Atenção : As ofertas do culto de missões são lançadas automaticamente no "
+            "Menu Relatório de Missões ao lado.</div>",
+            unsafe_allow_html=True
+        )
     # ========================================================================
 
     # Mensagens persistidas entre reruns
@@ -2223,7 +2225,9 @@ def _render_aviso_missoes_inline_local():
                 force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id
             )
 
-        
+            # ... (demais seções permanecem iguais)
+
+
             # (O restante da página com as tabelas de Dizimistas e Saídas permanece igual)
             # ...
 
