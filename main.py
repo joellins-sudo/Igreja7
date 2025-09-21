@@ -3052,6 +3052,7 @@ def _collect_missions_data(db: Session, start: date, end: date, only_cong_id: Op
     
     return entradas_missoes, saidas_missoes
 
+# Substitua sua função inteira por esta
 def build_missions_report_pdf(ref: date, entradas: list, saidas: list) -> bytes:
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
@@ -3062,14 +3063,15 @@ def build_missions_report_pdf(ref: date, entradas: list, saidas: list) -> bytes:
     subtitle_style = ParagraphStyle('subtitle', parent=styles['Normal'], alignment=TA_CENTER, fontSize=11, spaceAfter=12)
     heading_style = ParagraphStyle('heading', parent=styles['h2'], fontSize=12, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold")
     normal_style = styles['Normal']
+    right_align_style = ParagraphStyle('rightAlign', parent=styles['Normal'], alignment=TA_RIGHT)
     signature_style = ParagraphStyle('signature', parent=styles['Normal'], alignment=TA_CENTER, spaceBefore=0)
-    table_style = TableStyle([
+    
+    base_table_style = [
         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
         ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("ALIGN", (-1, 1), (-1, -1), "RIGHT"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-    ])
+    ]
     
     story: List = []
     
@@ -3077,14 +3079,49 @@ def build_missions_report_pdf(ref: date, entradas: list, saidas: list) -> bytes:
     story.append(Paragraph(f"Referente a: {ref.strftime('%B de %Y')}", subtitle_style))
     story.append(Spacer(1, 0.5*cm))
 
-    story.append(Paragraph("Entradas de Missões", heading_style))
+    story.append(Paragraph("Entradas de Missões por Congregação", heading_style))
+
+    total_entradas_missions = sum(float(t.amount) for t in entradas)
+
     if entradas:
-        entradas_data = [["Data", "Congregação", "Valor (R$)"]]
+        # <<< INÍCIO DA NOVA LÓGICA DE AGREGAÇÃO E ORDENAÇÃO >>>
+        
+        # 1. Agrega as entradas por congregação para obter o total de cada uma
+        agg_entradas = defaultdict(float)
         for t in entradas:
-            entradas_data.append([t.date.strftime("%d/%m/%Y"), t.congregation.name, format_currency(float(t.amount))])
-        tbl_in = Table(entradas_data, colWidths=[3*cm, 9*cm, 5*cm])
-        tbl_in.setStyle(table_style)
+            if t.congregation:
+                agg_entradas[t.congregation.name] += float(t.amount)
+
+        # 2. Separa a Sede das outras congregações
+        lista_entradas = list(agg_entradas.items())
+        sede_data = [item for item in lista_entradas if item[0] == "Sede"]
+        outras_data = [item for item in lista_entradas if item[0] != "Sede"]
+        
+        # 3. Ordena as outras congregações pelo valor, do maior para o menor
+        outras_data.sort(key=lambda x: x[1], reverse=True)
+        
+        # 4. Junta a lista final, com a Sede no topo
+        sorted_entradas = sede_data + outras_data
+        
+        # 5. Monta a tabela de dados para o PDF a partir da lista ordenada e agregada
+        entradas_data = [["Congregação", "Valor Total (R$)"]]
+        for cong_name, total_amount in sorted_entradas:
+            entradas_data.append([cong_name, format_currency(total_amount)])
+        
+        # Adiciona a linha de total
+        entradas_data.append([
+            Paragraph("<b>Total de Entradas</b>", normal_style),
+            Paragraph(f"<b>{format_currency(total_entradas_missions)}</b>", right_align_style)
+        ])
+
+        tbl_in = Table(entradas_data, colWidths=[12*cm, 4.5*cm])
+        style_in = TableStyle(base_table_style)
+        style_in.add('ALIGN', (1, 1), (1, -1), 'RIGHT')
+        style_in.add('BACKGROUND', (0, -1), (-1, -1), colors.lightgreen)
+        tbl_in.setStyle(style_in)
         story.append(tbl_in)
+        
+        # <<< FIM DA NOVA LÓGICA >>>
     else:
         story.append(Paragraph("Nenhuma entrada de missões registrada.", normal_style))
 
@@ -3094,21 +3131,21 @@ def build_missions_report_pdf(ref: date, entradas: list, saidas: list) -> bytes:
         saidas_data = [["Data", "Congregação", "Descrição", "Valor (R$)"]]
         for t in saidas:
             saidas_data.append([t.date.strftime("%d/%m/%Y"), t.congregation.name if t.congregation else "—", t.description or "—", format_currency(float(t.amount))])
-        tbl_out = Table(saidas_data, colWidths=[3*cm, 5*cm, 6*cm, 3*cm])
-        tbl_out.setStyle(table_style)
+        tbl_out = Table(saidas_data, colWidths=[2.5*cm, 5*cm, 6*cm, 3*cm])
+        tbl_out.setStyle(TableStyle(base_table_style))
         story.append(tbl_out)
     else:
         story.append(Paragraph("Nenhuma saída de missões registrada.", normal_style))
 
     story.append(Spacer(1, 1*cm))
-    total_entradas_missions = sum(float(t.amount) for t in entradas)
+    
     total_saidas_missions = sum(float(t.amount) for t in saidas)
     saldo_missions = total_entradas_missions - total_saidas_missions
     story.append(Paragraph("Resumo Financeiro de Missões", heading_style))
     summary_data = [
         ["Total de Entradas de Missões", format_currency(total_entradas_missions)],
         ["Total de Saídas de Missões", format_currency(total_saidas_missions)],
-        ["Saldo de Missões no Mês", format_currency(saldo_missions)],
+        [Paragraph("<b>Saldo de Missões no Mês</b>", styles['Normal']), Paragraph(f"<b>{format_currency(saldo_missions)}</b>", styles['Normal'])],
     ]
     summary_table = Table(summary_data, colWidths=[8*cm, 8.5*cm])
     summary_table.setStyle(TableStyle([
