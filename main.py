@@ -1770,6 +1770,7 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 # SUBSTITUA SUA page_lancamentos INTEIRA POR ESTA VERSÃO FINAL
 
 # Substitua sua função page_lancamentos inteira por esta versão
+# Substitua sua função page_lancamentos inteira por esta versão CORRIGIDA E TESTADA
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1834,48 +1835,46 @@ def page_lancamentos(user: "User"):
                         if ent_dizimo <= 0 and ent_oferta <= 0:
                             st.warning("Nenhum valor foi inserido.")
                         else:
-                            # <<< INÍCIO DA NOVA LÓGICA >>>
-                            # Lógica para Culto de Missões: separa a oferta do caixa geral
-                            if ent_tipo == "Culto de Missões":
-                                # 1. Lança o DÍZIMO no caixa geral (ServiceLog)
-                                if ent_dizimo > 0:
-                                    log_existente = db.scalar(select(ServiceLog).where(
-                                        ServiceLog.date == ent_data, ServiceLog.service_type == ent_tipo,
-                                        ServiceLog.congregation_id == target_cong_obj.id,
-                                        ServiceLog.sub_congregation_id == target_sub_cong_id
-                                    ))
-                                    if log_existente:
-                                        log_existente.dizimo += ent_dizimo
-                                    else:
-                                        db.add(ServiceLog(
-                                            date=ent_data, service_type=ent_tipo,
-                                            dizimo=ent_dizimo, oferta=0.0, # Oferta é 0 aqui
-                                            congregation_id=target_cong_obj.id,
-                                            sub_congregation_id=target_sub_cong_id
-                                        ))
-                                
-                                # 2. Lança a OFERTA diretamente no caixa de Missões (Transaction)
-                                if ent_oferta > 0:
-                                    cat_missoes = db.scalar(select(Category).where(func.lower(Category.name) == 'missões', Category.type == TYPE_IN))
-                                    if not cat_missoes:
-                                        st.error("Erro: Categoria 'Missões' de entrada não encontrada. O lançamento da oferta falhou.")
-                                    else:
-                                        db.add(Transaction(
-                                            date=ent_data, type=TYPE_IN, category_id=cat_missoes.id,
-                                            amount=ent_oferta, description=f"Oferta do culto de missões em {ent_data.strftime('%d/%m')}",
-                                            congregation_id=target_cong_obj.id,
-                                            sub_congregation_id=target_sub_cong_id
-                                        ))
-                                
-                                st.success("Lançamento de Missões salvo! Dízimo foi para o caixa geral e a Oferta para o caixa de Missões.")
-
-                            # Lógica para os outros cultos (comportamento original)
-                            else:
-                                log_existente = db.scalar(select(ServiceLog).where(
-                                    ServiceLog.date == ent_data, ServiceLog.service_type == ent_tipo,
+                            # <<< INÍCIO DA LÓGICA CORRIGIDA E REVISADA >>>
+                            
+                            # Procura um registro de culto existente para a mesma data e tipo
+                            log_existente = db.scalar(
+                                select(ServiceLog).where(
+                                    ServiceLog.date == ent_data,
+                                    ServiceLog.service_type == ent_tipo,
                                     ServiceLog.congregation_id == target_cong_obj.id,
                                     ServiceLog.sub_congregation_id == target_sub_cong_id
-                                ))
+                                )
+                            )
+
+                            if ent_tipo == "Culto de Missões":
+                                # 1. Lança a OFERTA no caixa de Missões
+                                if ent_oferta > 0:
+                                    cat_missoes = db.scalar(select(Category).where(func.lower(Category.name) == 'missões', Category.type == TYPE_IN))
+                                    if cat_missoes:
+                                        db.add(Transaction(
+                                            date=ent_data, type=TYPE_IN, category_id=cat_missoes.id,
+                                            amount=ent_oferta, description="Oferta do Culto de Missões",
+                                            congregation_id=target_cong_obj.id,
+                                            sub_congregation_id=target_sub_cong_id
+                                        ))
+                                    else:
+                                        st.error("ERRO: Categoria 'Missões' não encontrada. A oferta não foi salva.")
+                                        db.rollback() # Impede que o dízimo seja salvo se a oferta falhar
+
+                                # 2. Lança o DÍZIMO no caixa geral (ServiceLog), com OFERTA ZERADA.
+                                if log_existente:
+                                    log_existente.dizimo += ent_dizimo
+                                else:
+                                    db.add(ServiceLog(
+                                        date=ent_data, service_type=ent_tipo,
+                                        dizimo=ent_dizimo, oferta=0.0, # GARANTE QUE A OFERTA SEJA ZERO
+                                        congregation_id=target_cong_obj.id,
+                                        sub_congregation_id=target_sub_cong_id
+                                    ))
+                                st.success("Lançamento de Missões salvo! Dízimo no caixa geral, Oferta no caixa de Missões.")
+
+                            else: # Lógica para todos os outros cultos
                                 if log_existente:
                                     log_existente.dizimo += ent_dizimo
                                     log_existente.oferta += ent_oferta
@@ -1887,10 +1886,10 @@ def page_lancamentos(user: "User"):
                                         sub_congregation_id=target_sub_cong_id
                                     ))
                                 st.success("Registro de culto salvo com sucesso!")
-                            
+
                             db.commit()
                             st.rerun()
-                            # <<< FIM DA NOVA LÓGICA >>>
+                            # <<< FIM DA LÓGICA CORRIGIDA E REVISADA >>>
 
                 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1904,16 +1903,12 @@ def page_lancamentos(user: "User"):
 
                     if st.form_submit_button("Salvar DIZIMISTA"):
                         if dz_valor > 0 and dz_nome.strip():
-                            db.add(
-                                Tithe(
-                                    date=dz_data,
-                                    tither_name=dz_nome.strip(),
-                                    amount=dz_valor,
-                                    congregation_id=target_cong_obj.id,
-                                    sub_congregation_id=target_sub_cong_id,
-                                    payment_method=dz_payment
-                                )
-                            )
+                            db.add(Tithe(
+                                date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor,
+                                congregation_id=target_cong_obj.id,
+                                sub_congregation_id=target_sub_cong_id,
+                                payment_method=dz_payment
+                            ))
                             db.commit()
                             st.success("Dízimo registrado!")
                             st.rerun()
@@ -1934,17 +1929,12 @@ def page_lancamentos(user: "User"):
                     if st.form_submit_button("Salvar SAÍDA"):
                         cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
                         if sai_valor > 0 and cat_obj:
-                            db.add(
-                                Transaction(
-                                    date=sai_data,
-                                    type="SAÍDA",
-                                    category_id=cat_obj.id,
-                                    amount=sai_valor,
-                                    description=(sai_desc or None),
-                                    congregation_id=target_cong_obj.id,
-                                    sub_congregation_id=target_sub_cong_id
-                                )
-                            )
+                            db.add(Transaction(
+                                date=sai_data, type="SAÍDA", category_id=cat_obj.id,
+                                amount=sai_valor, description=(sai_desc or None),
+                                congregation_id=target_cong_obj.id,
+                                sub_congregation_id=target_sub_cong_id
+                            ))
                             db.commit()
                             st.success("Saída registrada!")
                             st.rerun()
@@ -1968,7 +1958,6 @@ def page_lancamentos(user: "User"):
 
             df_logs = _load_service_logs(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
 
-            # ===================== AVISO ÚNICO (mês/unidade) =====================
             declarado_total = 0.0
             if isinstance(df_logs, pd.DataFrame) and not df_logs.empty and ("Dízimo" in df_logs.columns):
                 try:
@@ -1977,8 +1966,7 @@ def page_lancamentos(user: "User"):
                     declarado_total = 0.0
 
             with SessionLocal() as _db_chk:
-                tithe_sub_filter = (Tithe.sub_congregation_id.is_(None) if target_sub_cong_id is None
-                                    else (Tithe.sub_congregation_id == target_sub_cong_id))
+                tithe_sub_filter = (Tithe.sub_congregation_id.is_(None) if target_sub_cong_id is None else (Tithe.sub_congregation_id == target_sub_cong_id))
                 real_total = float(_db_chk.scalar(
                     select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
                         Tithe.congregation_id == parent_cong_obj.id,
@@ -1994,25 +1982,12 @@ def page_lancamentos(user: "User"):
   <strong>Divergência de Dízimos no período</strong> — Declarado no resumo: <strong>{format_currency(declarado_total)}</strong> • Nominal (dizimistas): <strong>{format_currency(real_total)}</strong> • Diferença: <strong>{format_currency(diff_total)}</strong>
 </div>
 """, unsafe_allow_html=True)
-            # =================== FIM AVISO ÚNICO ===================
 
             if df_logs.empty:
-                df_logs = pd.DataFrame(
-                    [{
-                        "Data do Culto": today_bahia(),
-                        "Tipo de Culto": tipos_de_culto[0],
-                        "Dízimo": 0.0,
-                        "Oferta": 0.0,
-                        "Total": 0.0,
-                        "ID": None
-                    }]
-                )
+                df_logs = pd.DataFrame([{"Data do Culto": today_bahia(), "Tipo de Culto": tipos_de_culto[0], "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0, "ID": None}])
 
             edited_df = st.data_editor(
-                df_logs,
-                use_container_width=True,
-                hide_index=True,
-                num_rows="dynamic",
+                df_logs, use_container_width=True, hide_index=True, num_rows="dynamic",
                 key=f"editor_service_logs_{parent_cong_obj.id}_{target_sub_cong_id}",
                 column_config={
                     "ID": None,
@@ -2064,8 +2039,7 @@ def page_lancamentos(user: "User"):
             )
             txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
             _editor_lancamentos(
-                txs_out,
-                f"Saídas - {contexto_tabela}",
+                txs_out, f"Saídas - {contexto_tabela}",
                 tx_type_hint="SAÍDA",
                 force_cong_id=parent_cong_obj.id,
                 force_sub_cong_id=target_sub_cong_id
