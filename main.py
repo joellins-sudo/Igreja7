@@ -1705,31 +1705,25 @@ def _load_service_logs(db: Session, cong_id: int, start: date, end: date, sub_co
 
 # Substitua esta função inteira
 # Substitua sua função _apply_service_log_changes inteira por esta
+# Substitua sua função _apply_service_log_changes inteira por esta
 def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, cong_id: int, sub_cong_id: Optional[int] = None):
     """
     Aplica as mudanças na tabela service_logs com a lógica de separar as ofertas de missões.
     """
-    # Flag para controlar qual mensagem de sucesso exibir no final
     oferta_de_missao_processada = False
-    
-    # Faz uma cópia do dataframe editado para podermos modificar os valores de oferta antes de salvar
     df_para_salvar = edited_df.copy()
 
     with SessionLocal() as db:
-        # Primeiro, buscamos a categoria "Missões" para poder criar a transação correta.
         cat_missoes = db.scalar(select(Category).where(func.lower(Category.name) == 'missões', Category.type == TYPE_IN))
         if not cat_missoes:
             st.error("ERRO CRÍTICO: Categoria 'Missões' (Entrada) não encontrada. A operação foi cancelada para evitar erros.")
             return
 
-        # Itera sobre as linhas que o usuário editou
         for index, row in df_para_salvar.iterrows():
             tipo_culto = str(row.get("Tipo de Culto", ""))
             oferta_valor = _to_float_brl(row.get("Oferta", 0.0))
 
-            # Se for um culto de missões com uma oferta, aplicamos a lógica
             if tipo_culto == "Culto de Missões" and oferta_valor > 0:
-                # 1. Cria a transação separada para o caixa de Missões
                 db.add(Transaction(
                     date=_to_date(row["Data do Culto"]),
                     type=TYPE_IN,
@@ -1739,14 +1733,9 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
                     congregation_id=cong_id,
                     sub_congregation_id=sub_cong_id
                 ))
-                
-                # 2. Zera a oferta na linha que será salva no caixa geral (ServiceLog)
                 df_para_salvar.loc[index, 'Oferta'] = 0.0
-                
-                # 3. Ativa a flag para mostrar a mensagem especial
                 oferta_de_missao_processada = True
 
-        # Agora, o resto da função continua normalmente, mas usando o dataframe modificado (df_para_salvar)
         orig_ids = set(orig_df['ID'].dropna())
         edited_ids = set(df_para_salvar['ID'].dropna())
 
@@ -1763,26 +1752,26 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
                 log.date = _to_date(row["Data do Culto"])
                 log.service_type = str(row["Tipo de Culto"])
                 log.dizimo = _to_float_brl(row["Dízimo"])
-                log.oferta = _to_float_brl(row["Oferta"]) # Este valor já estará zerado para Culto de Missões
+                log.oferta = _to_float_brl(row["Oferta"])
 
         new_rows = df_para_salvar[df_para_salvar['ID'].isna()]
         for _, row in new_rows.iterrows():
             if _to_float_brl(row["Dízimo"]) > 0 or _to_float_brl(row["Oferta"]) > 0:
-                new_log = ServiceLog(
+                db.add(ServiceLog(
                     date=_to_date(row["Data do Culto"]),
                     service_type=str(row["Tipo de Culto"]),
                     dizimo=_to_float_brl(row["Dízimo"]),
-                    oferta=_to_float_brl(row["Oferta"]), # Este valor já estará zerado para Culto de Missões
+                    oferta=_to_float_brl(row["Oferta"]),
                     congregation_id=cong_id,
                     sub_congregation_id=sub_cong_id
-                )
-                db.add(new_log)
+                ))
         
         try:
             db.commit()
-            # Exibe a mensagem correta com base no que foi processado
+            # <<< MUDANÇA AQUI >>>
+            # Agora, a mensagem de sucesso é a mesma em ambos os casos.
             if oferta_de_missao_processada:
-                st.success("Atenção: as ofertas do Culto de Missões são lançadas automaticamente no menu Relatório de Missões.")
+                st.success("Atenção: As ofertas do Culto de Missões são lançadas automaticamente no menu 'Relatório de Missões'.")
             else:
                 st.toast("Alterações salvas com sucesso!", icon="✅")
         except IntegrityError:
@@ -1798,6 +1787,7 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 # Substitua sua função page_lancamentos inteira por esta versão
 # Substitua sua função page_lancamentos inteira por esta versão CORRIGIDA E TESTADA
 # Substitua esta função inteira
+# Substitua sua função page_lancamentos inteira por esta
 # Substitua sua função page_lancamentos inteira por esta
 def page_lancamentos(user: "User"):
     ensure_seed()
@@ -1836,7 +1826,6 @@ def page_lancamentos(user: "User"):
         ]
 
         if modo == "Formulário único":
-            # (Esta parte não mudou, continua funcionando como antes)
             target_cong_obj = parent_cong_obj
             contexto_selecionado = f"{parent_cong_obj.name} (Principal)"
             target_sub_cong_id = None
@@ -1887,7 +1876,8 @@ def page_lancamentos(user: "User"):
                                         congregation_id=target_cong_obj.id,
                                         sub_congregation_id=target_sub_cong_id
                                     ))
-                                st.success("Atenção: as ofertas do Culto de Missões são lançadas automaticamente no menu Relatório de Missões.")
+                                # <<< MUDANÇA AQUI >>>
+                                st.success("Atenção: As ofertas do Culto de Missões são lançadas automaticamente no menu 'Relatório de Missões'.")
                             else:
                                 if log_existente:
                                     log_existente.dizimo += ent_dizimo
@@ -1962,8 +1952,6 @@ def page_lancamentos(user: "User"):
             start_tab, end_tab = month_bounds(ref_tab)
 
             st.markdown("##### Resumo de Entradas por Culto")
-
-            # AVISO AMARELO FOI REMOVIDO DAQUI
 
             df_logs = _load_service_logs(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
 
