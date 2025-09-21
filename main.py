@@ -140,7 +140,7 @@ h3{ font-size: 1.25rem; font-weight: 700; }
 
 /* ==================== WIDGETS / TEXTOS ==================== */
 [data-testid="stSidebar"] *{ font-size: 1.02rem; }
-label, [data-testid="stWidgetLabel"]{ font-size: 1.02rem; }
+label, [data-testid="stWidgetLabel"]{ font size: 1.02rem; }
 
 /* Inputs (texto, número, data, selects) um pouco maiores */
 .stTextInput input,
@@ -276,7 +276,6 @@ st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)
 # Alias para manter compatibilidade com a linha 256
 BUTTONS_CSS = FORM_BUTTONS_CSS
 
-
 st.markdown(BUTTONS_CSS, unsafe_allow_html=True)
 
 CSS_TABLE_BOOST = """
@@ -304,16 +303,20 @@ st.markdown(CSS, unsafe_allow_html=True)
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
 
+# ====== AVISO INLINE (FUNDO AMARELO + TEXTO BRANCO) ======
 st.markdown("""
 <style>
 .inline-missoes-alert{
-  background: transparent !important;
-  border: none !important;
-  color: #b45309 !important;   /* âmbar escuro */
-  font-weight: 700 !important; /* negrito */
+  background: #f59e0b !important;   /* amarelo */
+  border: 1px solid #f59e0b !important;
+  color: #ffffff !important;         /* texto branco */
+  font-weight: 700 !important;       /* negrito */
+  padding: 6px 10px !important;
+  border-radius: 8px !important;
 }
 </style>
 """, unsafe_allow_html=True)
+
 
 
 # ===================== LOCALE (fallback) =====================
