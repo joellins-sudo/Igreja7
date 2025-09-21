@@ -3029,51 +3029,73 @@ def _build_missions_analytics(db: Session, year: int, month_name: str):
     return df_sorted, total_periodo, num_congs_periodo, top_period_contributor, top_year_contributor
 
 def _build_missions_search_df(db: Session, year: int, month_name: str):
-    """Busca e agrega as contribuições de missões com base nos filtros de ano e mês."""
-    
-    start_date = date(year, 1, 1)
-    end_date = date(year + 1, 1, 1)
-
-    # Converte o nome do mês para número, se não for "Todos"
+    """
+    Busca e agrega as contribuições de missões, identificando os maiores contribuintes.
+    """
+    # Define o período da pesquisa (ano inteiro ou um mês específico)
     month_num = None
     if month_name != "Todos":
         try:
             month_num = MONTHS.index(month_name) + 1
-            start_date = date(year, month_num, 1)
-            end_date = date(year + (1 if month_num == 12 else 0), (month_num % 12) + 1, 1)
         except ValueError:
-            pass # Mês inválido, usa o ano inteiro
-
-    # Query base
-    q = select(
-        Congregation.name,
-        func.sum(Transaction.amount)
+            month_name = "Todos"
+    
+    start_date = date(year, month_num, 1) if month_num else date(year, 1, 1)
+    end_date = date(year + (1 if month_num == 12 else 0), (month_num % 12) + 1, 1) if month_num else date(year + 1, 1, 1)
+    
+    # Query para o período selecionado
+    q_period = select(
+        Congregation.name, func.sum(Transaction.amount)
     ).join(Transaction).join(Category).where(
-        Transaction.date >= start_date,
-        Transaction.date < end_date,
-        Transaction.type == "DOAÇÃO",
-        func.lower(Category.name) == 'missões'
+        Transaction.date >= start_date, Transaction.date < end_date,
+        Transaction.type == "DOAÇÃO", func.lower(Category.name) == 'missões'
     ).group_by(Congregation.name)
 
-    results = db.execute(q).all()
-    
-    if not results:
-        return pd.DataFrame(), 0.0, 0
+    # Query separada para o ano inteiro, para encontrar o maior contribuinte anual
+    q_year = select(
+        Congregation.name, func.sum(Transaction.amount)
+    ).join(Transaction).join(Category).where(
+        Transaction.date >= date(year, 1, 1), Transaction.date < date(year + 1, 1, 1),
+        Transaction.type == "DOAÇÃO", func.lower(Category.name) == 'missões'
+    ).group_by(Congregation.name)
 
-    df = pd.DataFrame(
-        [{"Congregação": name, "Valor Total (R$)": val or 0.0} for name, val in results]
-    ).sort_values("Valor Total (R$)", ascending=False).reset_index(drop=True)
+    period_data = {name: val for name, val in db.execute(q_period).all()}
+    year_data = {name: val for name, val in db.execute(q_year).all()}
     
-    total_periodo = df["Valor Total (R$)"].sum()
-    num_congs = len(df)
+    all_congs = set(list(period_data.keys()) + list(year_data.keys()))
+    
+    report_rows = []
+    for cong_name in sorted(list(all_congs)):
+        report_rows.append({
+            "Congregação": cong_name,
+            "Total no Período (R$)": period_data.get(cong_name, 0.0),
+            "Total no Ano (R$)": year_data.get(cong_name, 0.0)
+        })
 
-    return df, total_periodo, num_congs
+    if not report_rows:
+        return pd.DataFrame(), 0.0, 0, None, None # CORRIGIDO: Retorna 5 valores
+
+    df = pd.DataFrame(report_rows)
+    total_periodo = df["Total no Período (R$)"].sum()
+    num_congs_periodo = len(df[df["Total no Período (R$)"] > 0])
+
+    top_period_contributor = None
+    if num_congs_periodo > 0:
+        top_period_row = df.loc[df['Total no Período (R$)'].idxmax()]
+        top_period_contributor = (top_period_row['Congregação'], top_period_row['Total no Período (R$)'])
+
+    top_year_contributor = None
+    if not df[df["Total no Ano (R$)"] == 0].all():
+        top_year_row = df.loc[df['Total no Ano (R$)'].idxmax()]
+        top_year_contributor = (top_year_row['Congregação'], top_year_row['Total no Ano (R$)'])
+    
+    df_sorted = df.sort_values("Total no Período (R$)", ascending=False).reset_index(drop=True)
+    return df_sorted, total_periodo, num_congs_periodo, top_period_contributor, top_year_contributor
 
 # ======== Páginas de Missões ========
 def page_relatorio_missoes(user: "User"):
     """Página de gestão de Missões com abas para Lançamento e Relatório."""
     if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
-        # Se for um tesoureiro normal, mostra a página antiga de missões da congregação dele
         page_relatorio_missoes_congregacao(user)
         return
         
@@ -3107,41 +3129,41 @@ def page_relatorio_missoes(user: "User"):
             )
 
         with tab2:
-            st.subheader("Relatório e Análise de Missões")
-            ref_rel = get_month_selector("Mês para Relatório", key_prefix="report_missions")
-            start_rel, end_rel = month_bounds(ref_rel)
-
-            entradas, saidas = _collect_missions_data(db, start_rel, end_rel)
-
-            st.markdown("###### Entradas de Missões no Período")
-            if entradas:
-                df_in = pd.DataFrame([{"Data": t.date, "Congregação": t.congregation.name, "Valor": t.amount, "Descrição": (t.description or "")} for t in entradas])
-                st.dataframe(df_in.style.format({"Data": "{:%d/%m/%Y}", "Valor": format_currency}), use_container_width=True, hide_index=True)
-            else:
-                st.caption("Nenhuma entrada de missões registada para este período.")
+            st.subheader("Análise de Contribuições de Missões")
             
-            st.markdown("###### Saídas de Missões no Período")
-            if saidas:
-                df_out = pd.DataFrame([{"Data": t.date, "Congregação": t.congregation.name, "Valor": t.amount, "Descrição": (t.description or "")} for t in saidas])
-                st.dataframe(df_out.style.format({"Data": "{:%d/%m/%Y}", "Valor": format_currency}), use_container_width=True, hide_index=True)
-            else:
-                st.caption("Nenhuma saída de missões registada para este período.")
-                
+            c1, c2 = st.columns(2)
+            with c1:
+                ano_pesq = st.number_input("Ano da Pesquisa", value=today_bahia().year, step=1, format="%d", key="missions_search_year")
+            with c2:
+                mes_opt = ["Todos"] + MONTHS
+                mes_sel = st.selectbox("Mês da Pesquisa", mes_opt, index=0, key="missions_search_month")
+
+            df_search, total_periodo, num_congs, top_period, top_year = _build_missions_search_df(db, ano_pesq, mes_sel)
+
             st.divider()
             
-            st.markdown("###### Análise de Contribuições")
-            df_analise, total_mes, total_ano, num_congs = _build_missions_analytics(db, ref_rel)
-
+            st.markdown("##### Destaques do Período Selecionado")
             c1, c2, c3 = st.columns(3)
-            c1.metric("Total de Entradas no Mês", format_currency(total_mes))
-            c2.metric("Total de Entradas no Ano", format_currency(total_ano))
-            c3.metric("Congregações Contribuintes no Mês", f"{num_congs}")
+            c1.metric("Total de Entradas no Período", format_currency(total_periodo))
+            c2.metric("Nº de Congregações Contribuintes", f"{num_congs}")
             
-            if not df_analise.empty:
+            if top_period:
+                c3.metric(f"Principal Contribuinte ({mes_sel if mes_sel != 'Todos' else 'Período'})", top_period[0], f"{format_currency(top_period[1])}")
+            else:
+                c3.metric("Principal Contribuinte (Período)", "N/A")
+
+            if top_year:
+                 st.metric(f"Principal Contribuinte (Ano de {ano_pesq})", top_year[0], f"{format_currency(top_year[1])}")
+
+            st.markdown("###### Tabela de Contribuições")
+            if not df_search.empty:
                 st.dataframe(
-                    df_analise.style.format({"Total no Mês (R$)": format_currency, "Total no Ano (R$)": format_currency}),
+                    df_search.style.format({"Total no Período (R$)": format_currency, "Total no Ano (R$)": format_currency}),
                     use_container_width=True, hide_index=True
                 )
+            else:
+                st.caption("Nenhuma contribuição de missões encontrada para os filtros selecionados.")
+                
 def page_relatorio_missoes(user: "User"):
     """Página de gestão de Missões com abas para Lançamento e Relatório."""
     # A verificação de perfil agora acontece dentro da página
