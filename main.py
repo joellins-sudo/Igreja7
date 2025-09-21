@@ -309,7 +309,7 @@ st.markdown("""
 .inline-missoes-alert{
   background: transparent !important;
   border: none !important;
-  color: #b45309 !important;   /* âmbar escuro */
+  color: #FFFBE6 !important;   /* âmbar escuro */
   font-weight: 700 !important; /* negrito */
 }
 </style>
