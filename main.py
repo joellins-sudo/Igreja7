@@ -2961,7 +2961,6 @@ def _build_missions_analytics(db: Session, ref_date: date):
     start_year = date(ref_date.year, 1, 1)
     end_year = date(ref_date.year + 1, 1, 1)
 
-    # Query para o mês
     q_month = select(
         Congregation.name,
         func.sum(Transaction.amount)
@@ -2971,7 +2970,6 @@ def _build_missions_analytics(db: Session, ref_date: date):
         func.lower(Category.name) == 'missões'
     ).group_by(Congregation.name)
     
-    # Query para o ano
     q_year = select(
         Congregation.name,
         func.sum(Transaction.amount)
@@ -3787,7 +3785,6 @@ def main():
 
         page_name = sidebar_common(user)
 
-        # O page_map agora é mais simples
         page_map = {
             "Lançamentos": page_lancamentos,
             "Relatório de Entrada": page_relatorio_entrada,
@@ -3798,7 +3795,7 @@ def main():
             "Cadastro": page_cadastro,
         }
 
-        # Lógica de roteamento
+        # Lógica de roteamento simplificada
         if page_name in page_map:
             # Caso especial para Tesoureiro comum na página de Missões
             if page_name == "Relatório de Missões" and user.role == "TESOUREIRO":
