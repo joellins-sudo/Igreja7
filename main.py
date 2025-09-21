@@ -1783,7 +1783,7 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 def page_lancamentos(user: "User"):
     ensure_seed()
     
-    # Bloco para exibir mensagens de status salvas na sessão
+    # Exibe a mensagem de status se ela existir no session_state
     if 'status_message' in st.session_state:
         msg_type, msg_text = st.session_state.status_message
         if msg_type == "success":
@@ -1792,6 +1792,7 @@ def page_lancamentos(user: "User"):
             st.error(msg_text)
         elif msg_type == "warning":
             st.warning(msg_text)
+        # Limpa a mensagem após exibi-la
         del st.session_state.status_message
     
     with SessionLocal() as db:
@@ -1864,8 +1865,6 @@ def page_lancamentos(user: "User"):
                             db.commit()
                         st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
-            
-            # <<< CÓDIGO RESTAURADO AQUI >>>
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
                 st.markdown('<div class="adrf-dizimo">', unsafe_allow_html=True)
                 with st.form("form_dizimo"):
@@ -1887,8 +1886,6 @@ def page_lancamentos(user: "User"):
                             st.session_state.status_message = ("warning", "Preencha o nome e o valor do dízimo.")
                         st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
-
-            # <<< CÓDIGO RESTAURADO AQUI >>>
             with st.expander("➖ Lançar SAÍDA"):
                 st.markdown('<div class="adrf-saida">', unsafe_allow_html=True)
                 with st.form("form_saida"):
@@ -1933,7 +1930,6 @@ def page_lancamentos(user: "User"):
 
             df_logs = _load_service_logs(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
             
-            # Lógica de verificação de divergência (inalterada)
             declarado_total = 0.0
             if isinstance(df_logs, pd.DataFrame) and not df_logs.empty and ("Dízimo" in df_logs.columns):
                 try:
@@ -1991,7 +1987,7 @@ def page_lancamentos(user: "User"):
                     st.session_state.status_message = ("error", "ERRO CRÍTICO: Categoria 'Missões' (Entrada) não encontrada.")
                 elif result == "erro_geral":
                     st.session_state.status_message = ("error", "Ocorreu um erro inesperado ao salvar.")
-                st.rerun() # Rerun é necessário aqui para atualizar a tabela após a edição
+                st.rerun()
 
             st.button("Salvar alterações na tabela", on_click=on_save_click, key=f"save_table_{parent_cong_obj.id}", type="primary")
 
