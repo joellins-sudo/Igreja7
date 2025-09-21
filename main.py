@@ -1704,52 +1704,75 @@ def _load_service_logs(db: Session, cong_id: int, start: date, end: date, sub_co
     return pd.DataFrame(data)
 
 # Substitua esta função inteira
+# Substitua sua função _apply_service_log_changes inteira por esta
 def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, cong_id: int, sub_cong_id: Optional[int] = None):
-    """Aplica as mudanças (cria, atualiza, deleta) na tabela service_logs, com validação para Culto de Missões."""
-
-    # <<< INÍCIO DA NOVA LÓGICA DE VALIDAÇÃO >>>
-    # Antes de salvar, verifica se há alguma tentativa de lançar oferta de missões no caixa errado.
-    for index, row in edited_df.iterrows():
-        tipo_culto = str(row.get("Tipo de Culto", ""))
-        oferta_valor = _to_float_brl(row.get("Oferta", 0.0))
-
-        if tipo_culto == "Culto de Missões" and oferta_valor > 0:
-            data_culto = _to_date(row.get("Data do Culto", "Data não encontrada")).strftime("%d/%m/%Y")
-            st.error(
-                f"❌ Lançamento bloqueado na linha do dia {data_culto}!\n\n"
-                f"Ofertas de 'Culto de Missões' não podem ser lançadas nesta tabela, pois pertencem a outro caixa. "
-                f"Por favor, zere o valor da oferta nesta linha e lance-o na página 'Relatório de Missões'."
-            )
-            return # Impede o salvamento
-    # <<< FIM DA NOVA LÓGICA DE VALIDAÇÃO >>>
-
-    orig_ids = set(orig_df['ID'].dropna())
-    edited_ids = set(edited_df['ID'].dropna())
-
-    to_delete = orig_ids - edited_ids
-    to_update = orig_ids.intersection(edited_ids)
+    """
+    Aplica as mudanças na tabela service_logs com a lógica de separar as ofertas de missões.
+    """
+    # Flag para controlar qual mensagem de sucesso exibir no final
+    oferta_de_missao_processada = False
     
+    # Faz uma cópia do dataframe editado para podermos modificar os valores de oferta antes de salvar
+    df_para_salvar = edited_df.copy()
+
     with SessionLocal() as db:
+        # Primeiro, buscamos a categoria "Missões" para poder criar a transação correta.
+        cat_missoes = db.scalar(select(Category).where(func.lower(Category.name) == 'missões', Category.type == TYPE_IN))
+        if not cat_missoes:
+            st.error("ERRO CRÍTICO: Categoria 'Missões' (Entrada) não encontrada. A operação foi cancelada para evitar erros.")
+            return
+
+        # Itera sobre as linhas que o usuário editou
+        for index, row in df_para_salvar.iterrows():
+            tipo_culto = str(row.get("Tipo de Culto", ""))
+            oferta_valor = _to_float_brl(row.get("Oferta", 0.0))
+
+            # Se for um culto de missões com uma oferta, aplicamos a lógica
+            if tipo_culto == "Culto de Missões" and oferta_valor > 0:
+                # 1. Cria a transação separada para o caixa de Missões
+                db.add(Transaction(
+                    date=_to_date(row["Data do Culto"]),
+                    type=TYPE_IN,
+                    category_id=cat_missoes.id,
+                    amount=oferta_valor,
+                    description="Oferta do Culto de Missões (lançada via tabela)",
+                    congregation_id=cong_id,
+                    sub_congregation_id=sub_cong_id
+                ))
+                
+                # 2. Zera a oferta na linha que será salva no caixa geral (ServiceLog)
+                df_para_salvar.loc[index, 'Oferta'] = 0.0
+                
+                # 3. Ativa a flag para mostrar a mensagem especial
+                oferta_de_missao_processada = True
+
+        # Agora, o resto da função continua normalmente, mas usando o dataframe modificado (df_para_salvar)
+        orig_ids = set(orig_df['ID'].dropna())
+        edited_ids = set(df_para_salvar['ID'].dropna())
+
+        to_delete = orig_ids - edited_ids
+        to_update = orig_ids.intersection(edited_ids)
+
         if to_delete:
             db.query(ServiceLog).filter(ServiceLog.id.in_(to_delete)).delete(synchronize_session=False)
 
         for log_id in to_update:
             log = db.get(ServiceLog, int(log_id))
             if log:
-                row = edited_df[edited_df['ID'] == log_id].iloc[0]
+                row = df_para_salvar[df_para_salvar['ID'] == log_id].iloc[0]
                 log.date = _to_date(row["Data do Culto"])
                 log.service_type = str(row["Tipo de Culto"])
                 log.dizimo = _to_float_brl(row["Dízimo"])
-                log.oferta = _to_float_brl(row["Oferta"])
+                log.oferta = _to_float_brl(row["Oferta"]) # Este valor já estará zerado para Culto de Missões
 
-        new_rows = edited_df[edited_df['ID'].isna()]
+        new_rows = df_para_salvar[df_para_salvar['ID'].isna()]
         for _, row in new_rows.iterrows():
             if _to_float_brl(row["Dízimo"]) > 0 or _to_float_brl(row["Oferta"]) > 0:
                 new_log = ServiceLog(
                     date=_to_date(row["Data do Culto"]),
                     service_type=str(row["Tipo de Culto"]),
                     dizimo=_to_float_brl(row["Dízimo"]),
-                    oferta=_to_float_brl(row["Oferta"]),
+                    oferta=_to_float_brl(row["Oferta"]), # Este valor já estará zerado para Culto de Missões
                     congregation_id=cong_id,
                     sub_congregation_id=sub_cong_id
                 )
@@ -1757,7 +1780,11 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
         
         try:
             db.commit()
-            st.toast("Alterações salvas com sucesso!", icon="✅")
+            # Exibe a mensagem correta com base no que foi processado
+            if oferta_de_missao_processada:
+                st.success("Atenção: as ofertas do Culto de Missões são lançadas automaticamente no menu Relatório de Missões.")
+            else:
+                st.toast("Alterações salvas com sucesso!", icon="✅")
         except IntegrityError:
             db.rollback()
             st.error("Erro: Tentativa de criar um lançamento duplicado (mesma data, tipo e congregação). Por favor, verifique os dados.")
@@ -1771,6 +1798,7 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 # Substitua sua função page_lancamentos inteira por esta versão
 # Substitua sua função page_lancamentos inteira por esta versão CORRIGIDA E TESTADA
 # Substitua esta função inteira
+# Substitua sua função page_lancamentos inteira por esta
 def page_lancamentos(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
@@ -1808,20 +1836,18 @@ def page_lancamentos(user: "User"):
         ]
 
         if modo == "Formulário único":
+            # (Esta parte não mudou, continua funcionando como antes)
             target_cong_obj = parent_cong_obj
             contexto_selecionado = f"{parent_cong_obj.name} (Principal)"
             target_sub_cong_id = None
-
             if sub_congs:
                 opcoes = {f"{parent_cong_obj.name} (Principal)": None}
                 for sub in sub_congs:
                     opcoes[sub.name] = sub.id
                 contexto_selecionado = st.selectbox("Lançar em:", list(opcoes.keys()), key="lan_sub_sel_context_form")
                 target_sub_cong_id = opcoes[contexto_selecionado]
-
             st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
             st.divider()
-
             with st.expander("➕ Lançar ENTRADA (Resumo do Culto)", expanded=True):
                 st.markdown('<div class="adrf-entrada">', unsafe_allow_html=True)
                 with st.form("form_entrada_resumo"):
@@ -1830,20 +1856,15 @@ def page_lancamentos(user: "User"):
                     c1, c2 = st.columns(2)
                     ent_dizimo = c1.number_input("Valor do Dízimo", min_value=0.0, value=0.0, format="%.2f", key="ent_dizimo_form")
                     ent_oferta = c2.number_input("Valor da Oferta", min_value=0.0, value=0.0, format="%.2f", key="ent_oferta_form")
-
                     if st.form_submit_button("Salvar Entrada do Culto"):
                         if ent_dizimo <= 0 and ent_oferta <= 0:
                             st.warning("Nenhum valor foi inserido.")
                         else:
-                            log_existente = db.scalar(
-                                select(ServiceLog).where(
-                                    ServiceLog.date == ent_data,
-                                    ServiceLog.service_type == ent_tipo,
-                                    ServiceLog.congregation_id == target_cong_obj.id,
-                                    ServiceLog.sub_congregation_id == target_sub_cong_id
-                                )
-                            )
-
+                            log_existente = db.scalar(select(ServiceLog).where(
+                                ServiceLog.date == ent_data, ServiceLog.service_type == ent_tipo,
+                                ServiceLog.congregation_id == target_cong_obj.id,
+                                ServiceLog.sub_congregation_id == target_sub_cong_id
+                            ))
                             if ent_tipo == "Culto de Missões":
                                 if ent_oferta > 0:
                                     cat_missoes = db.scalar(select(Category).where(func.lower(Category.name) == 'missões', Category.type == TYPE_IN))
@@ -1857,7 +1878,6 @@ def page_lancamentos(user: "User"):
                                     else:
                                         st.error("ERRO: Categoria 'Missões' não encontrada. A oferta não foi salva.")
                                         db.rollback()
-                                
                                 if log_existente:
                                     log_existente.dizimo += ent_dizimo
                                 else:
@@ -1867,8 +1887,7 @@ def page_lancamentos(user: "User"):
                                         congregation_id=target_cong_obj.id,
                                         sub_congregation_id=target_sub_cong_id
                                     ))
-                                st.success("Lançamento de Missões salvo! Dízimo no caixa geral, Oferta no caixa de Missões.")
-
+                                st.success("Atenção: as ofertas do Culto de Missões são lançadas automaticamente no menu Relatório de Missões.")
                             else:
                                 if log_existente:
                                     log_existente.dizimo += ent_dizimo
@@ -1881,11 +1900,9 @@ def page_lancamentos(user: "User"):
                                         sub_congregation_id=target_sub_cong_id
                                     ))
                                 st.success("Registro de culto salvo com sucesso!")
-
                             db.commit()
                             st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
-
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
                 st.markdown('<div class="adrf-dizimo">', unsafe_allow_html=True)
                 with st.form("form_dizimo"):
@@ -1905,7 +1922,6 @@ def page_lancamentos(user: "User"):
                             st.success("Dízimo registrado!")
                             st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
-
             with st.expander("➖ Lançar SAÍDA"):
                 st.markdown('<div class="adrf-saida">', unsafe_allow_html=True)
                 with st.form("form_saida"):
@@ -1947,11 +1963,7 @@ def page_lancamentos(user: "User"):
 
             st.markdown("##### Resumo de Entradas por Culto")
 
-            # <<< AVISO ADICIONADO AQUI >>>
-            st.warning(
-                "**Atenção:** Ofertas de **'Culto de Missões'** não devem ser lançadas ou editadas nesta tabela. "
-                "Use a página **Relatório de Missões** para gerenciar essas ofertas específicas."
-            )
+            # AVISO AMARELO FOI REMOVIDO DAQUI
 
             df_logs = _load_service_logs(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
 
@@ -2008,9 +2020,7 @@ def page_lancamentos(user: "User"):
                 st.caption("Calculando totais...")
 
             def on_save_click():
-                # A validação agora está DENTRO de _apply_service_log_changes
                 _apply_service_log_changes(df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id)
-                # O rerun só acontece se a validação passar
                 st.rerun()
 
             st.markdown('<div class="adrf-entrada">', unsafe_allow_html=True)
