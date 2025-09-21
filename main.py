@@ -883,35 +883,33 @@ def sidebar_common(user: "User") -> str:
 
 # ======= NOVO: helper padrão para botões 'Salvar alterações' =======
 # ====== CORES P/ BOTÕES ======
+# ====== CORES P/ BOTÕES ======
+# ====== CORES P/ BOTÕES ======
 BTN_COLORS = {
     "entrada":  "#16a34a",  # verde
     "dizimista":"#2563eb",  # azul
-    "saida":    "#dc2626",  # vermelha
-    "neutral":  "#1f6feb",  # fallback (azul padrão)
+    "saida":    "#dc2626",  # vermelho
+    "neutral":  "#1f6feb",  # fallback
 }
 
 def _save_btn(on_click, key_suffix: str, theme: str = "neutral", label: str = "Salvar alterações"):
     """
-    Botão 'Salvar alterações' com cor personalizada por tema:
-      - 'entrada'  -> verde
-      - 'dizimista'-> azul
-      - 'saida'    -> vermelho
-      - 'neutral'  -> cor padrão
+    Botão 'Salvar alterações' escopado: usa seletor CSS com '+' (irmão adjacente),
+    evitando que a cor vaze para outros botões.
     """
     color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
     with st.container():
-        # marcador p/ escopar o CSS desse botão apenas
         st.markdown(f'<div id="mark-{key_suffix}"></div>', unsafe_allow_html=True)
         st.button(label, key=f"btn_save_{key_suffix}", type="primary", on_click=on_click)
         st.markdown(
             f"""
             <style>
-              /* pinta SOMENTE o botão dentro deste bloco */
-              #mark-{key_suffix} ~ div[data-testid="stButton"] > button {{
+              /* estiliza SOMENTE o botão logo após o marcador */
+              #mark-{key_suffix} + div[data-testid="stButton"] > button {{
                 background: {color} !important;
                 border-color: {color} !important;
               }}
-              #mark-{key_suffix} ~ div[data-testid="stButton"] > button:hover {{
+              #mark-{key_suffix} + div[data-testid="stButton"] > button:hover {{
                 filter: brightness(0.93);
               }}
             </style>
@@ -921,7 +919,7 @@ def _save_btn(on_click, key_suffix: str, theme: str = "neutral", label: str = "S
 
 def _submit_btn(label: str, key_suffix: str, theme: str = "neutral") -> bool:
     """
-    Versão colorida para st.form_submit_button (forms de ENTRADA, DIZIMISTA, SAÍDA).
+    Versão escopada para st.form_submit_button — também com '+'.
     Retorna True quando o usuário clica.
     """
     color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
@@ -931,14 +929,12 @@ def _submit_btn(label: str, key_suffix: str, theme: str = "neutral") -> bool:
         st.markdown(
             f"""
             <style>
-              /* cobre tanto submit de form quanto um fallback de stButton */
-              #mark-{key_suffix} ~ div[data-testid="stFormSubmitButton"] > button,
-              #mark-{key_suffix} ~ div[data-testid="stButton"] > button {{
+              /* estiliza SOMENTE o submit logo após o marcador */
+              #mark-{key_suffix} + div[data-testid="stFormSubmitButton"] > button {{
                 background: {color} !important;
-                border-color: {color} !important
+                border-color: {color} !important;
               }}
-              #mark-{key_suffix} ~ div[data-testid="stFormSubmitButton"] > button:hover,
-              #mark-{key_suffix} ~ div[data-testid="stButton"] > button:hover {{
+              #mark-{key_suffix} + div[data-testid="stFormSubmitButton"] > button:hover {{
                 filter: brightness(0.93);
               }}
             </style>
@@ -946,6 +942,7 @@ def _submit_btn(label: str, key_suffix: str, theme: str = "neutral") -> bool:
             unsafe_allow_html=True
         )
     return clicked
+
 
 def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: str, default_cong_id: Optional[int], default_sub_cong_id: Optional[int] = None):
     def norm_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -1919,7 +1916,7 @@ def page_lancamentos(user: "User"):
                     ent_dizimo = c1.number_input("Valor do Dízimo", min_value=0.0, value=0.0, format="%.2f", key="ent_dizimo_form")
                     ent_oferta = c2.number_input("Valor da Oferta", min_value=0.0, value=0.0, format="%.2f", key="ent_oferta_form")
 
-                    if _submit_btn("Salvar Entrada do Culto", "form_entrada_resumo_btn", theme="entrada"):
+                    if _submit_btn("Salvar Entrada do Culto", "form_entrada_resumo", theme="entrada"):
                         if ent_dizimo <= 0 and ent_oferta <= 0:
                             st.session_state.status_message = ("warning", "Nenhum valor foi inserido.")
                         else:
@@ -1987,13 +1984,12 @@ def page_lancamentos(user: "User"):
 
             # ---- DÍZIMO NOMINAL
             with st.expander("👤 Lançar DÍZIMO (Nominal)"):
-                st.markdown('<div class="adrf-dizimo">', unsafe_allow_html=True)
                 with st.form("form_dizimo"):
                     dz_data = st.date_input("Data do Dízimo", value=today_bahia(), key="dz_data")
                     dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
                     dz_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="dz_valor")
                     dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência"], key="dz_pay")
-                    if _submit_btn("Salvar DIZIMISTA", "form_dizimo_btn", theme="dizimista"):
+                    if _submit_btn("Salvar DIZIMISTA", "form_dizimo", theme="dizimista"):
                         if dz_valor > 0 and dz_nome.strip():
                             db.add(Tithe(
                                 date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor,
@@ -2010,7 +2006,6 @@ def page_lancamentos(user: "User"):
 
             # ---- SAÍDAS
             with st.expander("➖ Lançar SAÍDA"):
-                st.markdown('<div class="adrf-saida">', unsafe_allow_html=True)
                 with st.form("form_saida"):
                     cats_out = categories_for_type(db, "SAÍDA")
                     c1, c2 = st.columns(2)
@@ -2021,7 +2016,7 @@ def page_lancamentos(user: "User"):
                     sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
                     sai_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="sai_valor")
 
-                    if _submit_btn("Salvar SAÍDA", "form_saida_btn", theme="saida"):
+                    if _submit_btn("Salvar SAÍDA", "form_saida", theme="saida"):
                         cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
                         if sai_valor > 0 and cat_obj:
                             db.add(Transaction(
