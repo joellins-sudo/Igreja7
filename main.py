@@ -1809,35 +1809,13 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 # APAGUE SUA FUNÇÃO page_lancamentos ANTIGA E SUBSTITUA POR ESTA VERSÃO FINAL
 
 # Substitua sua função page_lancamentos inteira por esta versão
-# Substitua sua função page_lancamentos inteira por esta versão CORRIGIDA E TESTADA
-# Substitua esta função inteira
-# Substitua sua função page_lancamentos inteira por esta
-# Substitua sua função page_lancamentos inteira por esta
-# Substitua sua função page_lancamentos inteira por esta
-# Substitua sua função page_lancamentos inteira por esta
-def page_lancamentos(user: "User"):
-    ensure_seed()
-
-    # === Helpers locais do aviso (apenas UI; não alteram dados) ===
-    import re as _re
-    def _has_culto_missoes_in_df_local(df: pd.DataFrame) -> bool:
-        try:
-            if df is None or not isinstance(df, pd.DataFrame) or df.empty:
-                return False
-            cols_lc = {c.lower(): c for c in df.columns}
-            key = cols_lc.get("tipo de culto") or cols_lc.get("tipo")
-            if not key:
-                return False
-            rx = _re.compile(r'\bmiss(ões|oes)\b', flags=_re.IGNORECASE)
-            return df[key].astype(str).str.contains(rx, na=False).any()
-        except Exception:
-            return False
 
 def _render_aviso_missoes_inline_local():
+    """Mostra o aviso amarelo em UMA LINHA, acima da tabela."""
     _style = (
-        "background:#fff3cd !important;"     # amarelo suave
+        "background:#fff3cd !important;"       # amarelo suave
         "border:1px solid #ffeeba !important;"  # borda amarela
-        "color:#856404 !important;"           # texto amarelo-escuro
+        "color:#856404 !important;"             # texto amarelo-escuro
         "padding:6px 10px !important;"
         "border-radius:8px !important;"
         "margin:8px 0 10px !important;"
@@ -1847,17 +1825,18 @@ def _render_aviso_missoes_inline_local():
         "font-size:.95rem !important;"
         "display:inline-block !important;"
     )
-    st.markdown(  # <- ponto, não underscore
+    st.markdown(
         f"<div style='{_style}'>⚠️ "
         "Atenção : As ofertas do culto de missões são lançadas automaticamente no "
         "Menu Relatório de Missões ao lado.</div>",
         unsafe_allow_html=True
     )
 
-
     # ========================================================================
+def page_lancamentos(user: "User"):
+    ensure_seed()
 
-    # Mensagens persistidas entre reruns
+    # ================== MENSAGENS PERSISTIDAS ENTRE RERUNS ==================
     if 'status_message' in st.session_state:
         msg_type, msg_text = st.session_state.status_message
         if msg_type == "success":
@@ -1869,9 +1848,9 @@ def _render_aviso_missoes_inline_local():
         del st.session_state.status_message
 
     with SessionLocal() as db:
-        st.markdown(f"<h1 class='page-title'>Lançamentos</h1>", unsafe_allow_html=True)
+        st.markdown("<h1 class='page-title'>Lançamentos</h1>", unsafe_allow_html=True)
 
-        # Seleção da congregação principal por perfil
+        # =============== SELEÇÃO DE CONGREGAÇÃO PRINCIPAL ====================
         parent_cong_obj = None
         if user.role == "SEDE":
             congs_all = order_congs_sede_first(cong_options_for(user, db))
@@ -1898,9 +1877,11 @@ def _render_aviso_missoes_inline_local():
         )
         st.divider()
 
+        # Sub-congregações (se houver)
         sub_congs = db.scalars(
             select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)
         ).all()
+
         tipos_de_culto = [
             "Culto da Noite (Padrão)",
             "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)",
@@ -1909,7 +1890,7 @@ def _render_aviso_missoes_inline_local():
             "Outro"
         ]
 
-        # ========================== FORMULÁRIO ÚNICO ==========================
+        # ========================= FORMULÁRIO ÚNICO ==========================
         if modo == "Formulário único":
             target_cong_obj = parent_cong_obj
             contexto_selecionado = f"{parent_cong_obj.name} (Principal)"
@@ -1951,6 +1932,7 @@ def _render_aviso_missoes_inline_local():
                             )
 
                             if ent_tipo == "Culto de Missões":
+                                # Oferta vai para TRANSACTIONS (categoria Missões)
                                 if ent_oferta > 0:
                                     cat_missoes = db.scalar(
                                         select(Category).where(
@@ -1973,6 +1955,7 @@ def _render_aviso_missoes_inline_local():
                                         )
                                         db.rollback()
 
+                                # Resumo mantém só o dízimo
                                 if log_existente:
                                     log_existente.dizimo += ent_dizimo
                                 else:
@@ -1988,6 +1971,7 @@ def _render_aviso_missoes_inline_local():
                                     "Atenção: As ofertas do Culto de Missões são lançadas automaticamente no menu 'Relatório de Missões'."
                                 )
                             else:
+                                # Demais cultos: dízimo e oferta ficam no resumo
                                 if log_existente:
                                     log_existente.dizimo += ent_dizimo
                                     log_existente.oferta += ent_oferta
@@ -2056,8 +2040,8 @@ def _render_aviso_missoes_inline_local():
                         st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
 
-        # ====================== EDITAR DIRETO NA TABELA =======================
-        elif modo == "Editar direto na tabela":
+        # ====================== EDITAR DIRETO NA TABELA ======================
+        else:
             contexto_tabela = f"{parent_cong_obj.name} (Principal)"
             target_sub_cong_id = None
             if sub_congs:
@@ -2082,13 +2066,8 @@ def _render_aviso_missoes_inline_local():
                 db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id
             )
 
-            # Divergência Dízimos (resumo x nominal)
-            declarado_total = 0.0
-            if isinstance(df_logs, pd.DataFrame) and not df_logs.empty and ("Dízimo" in df_logs.columns):
-                try:
-                    declarado_total = float(df_logs["Dízimo"].sum() or 0.0)
-                except Exception:
-                    declarado_total = 0.0
+            # Divergência (dízimos resumo x nominal) — opcional
+            declarado_total = float(df_logs["Dízimo"].sum() if not df_logs.empty else 0.0)
             with SessionLocal() as _db_chk:
                 tithe_sub_filter = (
                     Tithe.sub_congregation_id.is_(None)
@@ -2113,14 +2092,14 @@ def _render_aviso_missoes_inline_local():
             if df_logs.empty:
                 df_logs = pd.DataFrame([{
                     "Data do Culto": today_bahia(),
-                    "Tipo de Culto": tipos_de_culto[0],
+                    "Tipo de Culto": "Culto da Noite (Padrão)",
                     "Dízimo": 0.0,
                     "Oferta": 0.0,
                     "Total": 0.0,
                     "ID": None
                 }])
 
-            # --- Placeholder do aviso (fica ACIMA visualmente da tabela) ---
+            # Placeholder do AVISO (fica acima da tabela)
             _aviso_top = st.empty()
 
             edited_df = st.data_editor(
@@ -2140,7 +2119,7 @@ def _render_aviso_missoes_inline_local():
                 column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
             )
 
-            # Preenche o placeholder com o AVISO AMARELO (uma linha) se houver "Culto de Missões"
+            # Se houver "Culto de Missões", mostra o aviso AMARELO numa linha
             try:
                 if _has_culto_missoes_in_df_local(edited_df):
                     with _aviso_top:
@@ -2149,10 +2128,10 @@ def _render_aviso_missoes_inline_local():
                 pass
 
             st.divider()
-            # Totais rápidos da tabela
+            # Totais rápidos
             try:
-                total_dizimo = _to_float_brl(edited_df["Dízimo"].sum())
-                total_oferta = _to_float_brl(edited_df["Oferta"].sum())
+                total_dizimo = float(pd.to_numeric(edited_df["Dízimo"], errors="coerce").fillna(0).sum())
+                total_oferta = float(pd.to_numeric(edited_df["Oferta"], errors="coerce").fillna(0).sum())
                 total_geral = total_dizimo + total_oferta
                 col1, col2, col3 = st.columns(3)
                 col1.metric("Total Dízimos (na tabela)", format_currency(total_dizimo))
@@ -2161,7 +2140,7 @@ def _render_aviso_missoes_inline_local():
             except Exception:
                 st.caption("Calculando totais...")
 
-            # Botão salvar mudanças do resumo (ServiceLog + Missões automática)
+            # Botão salvar (aplica ServiceLog e trata oferta de missões)
             def on_save_click():
                 result = _apply_service_log_changes(
                     df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id
@@ -2197,7 +2176,7 @@ def _render_aviso_missoes_inline_local():
                 type="primary"
             )
 
-            # Seções auxiliares (dizimistas e saídas) abaixo
+            # Seções auxiliares (dizimistas / saídas) — mantidas
             st.markdown("---")
             tithes_query = select(Tithe).where(
                 Tithe.congregation_id == parent_cong_obj.id,
@@ -2222,12 +2201,6 @@ def _render_aviso_missoes_inline_local():
                 txs_out, f"Saídas - {contexto_tabela}", tx_type_hint="SAÍDA",
                 force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id
             )
-
-            # ... (demais seções permanecem iguais)
-
-
-            # (O restante da página com as tabelas de Dizimistas e Saídas permanece igual)
-            # ...
 
 # ===================== PAGE: RELATÓRIO DE SAÍDA =====================
 def page_relatorio_saida(user: "User"):
