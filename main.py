@@ -1834,29 +1834,26 @@ def page_lancamentos(user: "User"):
             return False
 
     def _render_aviso_missoes_inline_local():
-        # Cartão AMARELO (como antes)
-        st.markdown("""
-        <style>
-          .inline-missoes-alert{
-            background:#fff3cd;           /* amarelo suave */
-            border:1px solid #ffeeba;     /* borda amarela */
-            color:#856404;                /* texto amarelo-escuro */
-            padding:6px 10px;
-            border-radius:8px;
-            margin:8px 0 10px;
-            white-space:nowrap;
-            overflow:hidden;
-            text-overflow:ellipsis;
-            font-size:.95rem;
-          }
-        </style>
-        """, unsafe_allow_html=True)
-        st.markdown(
-            "<div class='inline-missoes-alert'>⚠️ "
-            "Atenção : As ofertas do culto de missões são lançadas automaticamente no "
-            "Menu Relatório de Missões ao lado.</div>",
-            unsafe_allow_html=True
-        )
+    _style = (
+        "background:#fff3cd !important;"        # amarelo suave (como antes)
+        "border:1px solid #ffeeba !important;"  # borda amarela
+        "color:#856404 !important;"             # texto amarelo-escuro
+        "padding:6px 10px !important;"
+        "border-radius:8px !important;"
+        "margin:8px 0 10px !important;"
+        "white-space:nowrap !important;"        # 1 linha só
+        "overflow:hidden !important;"
+        "text-overflow:ellipsis !important;"
+        "font-size:.95rem !important;"
+        "display:inline-block !important;"      # não ocupa a largura toda
+    )
+    st.markdown(
+        f"<div style='{_style}'>⚠️ "
+        "Atenção : As ofertas do culto de missões são lançadas automaticamente no "
+        "Menu Relatório de Missões ao lado.</div>",
+        unsafe_allow_html=True
+    )
+
     # ========================================================================
 
     # Mensagens persistidas entre reruns
