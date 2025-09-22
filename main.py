@@ -1688,6 +1688,7 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 def page_lancamentos(user: "User"):
     ensure_seed()
     
+    # Bloco para exibir mensagens de status salvas na sessão
     if 'status_message' in st.session_state:
         msg_type, msg_text = st.session_state.status_message
         if msg_type == "success":
@@ -1732,7 +1733,6 @@ def page_lancamentos(user: "User"):
                 target_sub_cong_id = opcoes[contexto_selecionado]
             st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
             st.divider()
-
             with st.expander("➕ Lançar ENTRADA (Resumo do Culto)", expanded=True):
                 with st.form("form_entrada_resumo"):
                     ent_data = st.date_input("Data do Culto", value=today_bahia(), key="ent_data_form")
@@ -1820,14 +1820,40 @@ def page_lancamentos(user: "User"):
             st.markdown("##### Resumo de Entradas por Culto")
 
             df_logs = _load_service_logs(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
-            
-            # (Aviso de divergência e outras partes da UI permanecem)
+
             if df_logs.empty:
                 df_logs = pd.DataFrame([{"Data do Culto": today_bahia(), "Tipo de Culto": tipos_de_culto[0], "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0, "ID": None}])
 
-            edited_df = st.data_editor(...) # seu código do data_editor completo aqui
+            # <<< CÓDIGO DO DATA EDITOR RESTAURADO AQUI >>>
+            edited_df = st.data_editor(
+                df_logs,
+                use_container_width=True,
+                hide_index=True,
+                num_rows="dynamic",
+                key=f"editor_service_logs_{parent_cong_obj.id}_{target_sub_cong_id}",
+                column_config={
+                    "ID": None,
+                    "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
+                    "Tipo de Culto": st.column_config.SelectboxColumn("Tipo de Culto", options=tipos_de_culto, required=True),
+                    "Dízimo": st.column_config.NumberColumn("Dízimo", format="R$ %.2f", required=True),
+                    "Oferta": st.column_config.NumberColumn("Oferta", format="R$ %.2f", required=True),
+                    "Total": st.column_config.NumberColumn("Total", help="Soma do Dízimo e Oferta. Atualiza após salvar.", format="R$ %.2f", disabled=True),
+                },
+                column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
+            )
             
-            # ... suas métricas
+            # (O resto do código da página continua abaixo, sem alterações)
+            st.divider()
+            try:
+                total_dizimo = _to_float_brl(edited_df["Dízimo"].sum())
+                total_oferta = _to_float_brl(edited_df["Oferta"].sum())
+                total_geral = total_dizimo + total_oferta
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total Dízimos (na tabela)", format_currency(total_dizimo))
+                col2.metric("Total Ofertas (na tabela)", format_currency(total_oferta))
+                col3.metric("Total Geral (na tabela)", format_currency(total_geral))
+            except Exception:
+                st.caption("Calculando totais...")
             
             if _save_btn("Salvar alterações na tabela", key=f"save_table_{parent_cong_obj.id}", theme="entrada"):
                 result = _apply_service_log_changes(df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id)
@@ -1835,18 +1861,32 @@ def page_lancamentos(user: "User"):
                     st.session_state.status_message = ("success", "Atenção: As ofertas do Culto de Missões são lançadas automaticamente no menu 'Relatório de Missões'.")
                 elif result == "geral_ok":
                     st.session_state.status_message = ("success", "Alterações salvas com sucesso!")
-                # ... outros resultados
+                elif result == "erro_integridade":
+                    st.session_state.status_message = ("error", "Erro: Tentativa de criar um lançamento duplicado. Verifique os dados.")
+                elif result == "erro_categoria":
+                    st.session_state.status_message = ("error", "ERRO CRÍTICO: Categoria 'Missões' (Entrada) não encontrada.")
+                elif result == "erro_geral":
+                    st.session_state.status_message = ("error", "Ocorreu um erro inesperado ao salvar.")
                 st.rerun()
 
             st.markdown("---")
-            tithes_query = select(Tithe).where(...)
+            tithes_query = select(Tithe).where(
+                Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab,
+                Tithe.sub_congregation_id == target_sub_cong_id
+            )
             tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
             _editor_dizimos(tithes, f"Dizimistas - {contexto_tabela}", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
 
             st.markdown("---")
-            txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(...)
+            txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(
+                Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab,
+                Transaction.type == "SAÍDA", Transaction.sub_congregation_id == target_sub_cong_id
+            )
             txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
-            _editor_lancamentos(txs_out, f"Saídas - {contexto_tabela}", tx_type_hint="SAÍDA", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
+            _editor_lancamentos(
+                txs_out, f"Saídas - {contexto_tabela}", tx_type_hint="SAÍDA",
+                force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id
+            )
             
             # (O resto da página com as outras tabelas não muda)
             # ...
