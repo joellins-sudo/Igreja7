@@ -893,10 +893,6 @@ BTN_COLORS = {
 }
 
 def _save_btn(on_click, key_suffix: str, theme: str = "neutral", label: str = "Salvar alterações"):
-    """
-    Botão 'Salvar alterações' escopado: usa seletor CSS com '+' (irmão adjacente),
-    evitando que a cor vaze para outros botões.
-    """
     color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
     with st.container():
         st.markdown(f'<div id="mark-{key_suffix}"></div>', unsafe_allow_html=True)
@@ -904,12 +900,13 @@ def _save_btn(on_click, key_suffix: str, theme: str = "neutral", label: str = "S
         st.markdown(
             f"""
             <style>
-              /* estiliza SOMENTE o botão logo após o marcador */
-              #mark-{key_suffix} + div[data-testid="stButton"] > button {{
+              /* pega QUALQUER wrapper depois do marcador e estiliza o botão lá dentro */
+              #mark-{key_suffix} + div [data-testid="stButton"] > button {{
                 background: {color} !important;
                 border-color: {color} !important;
+                color: #fff !important;
               }}
-              #mark-{key_suffix} + div[data-testid="stButton"] > button:hover {{
+              #mark-{key_suffix} + div [data-testid="stButton"] > button:hover {{
                 filter: brightness(0.93);
               }}
             </style>
@@ -918,10 +915,6 @@ def _save_btn(on_click, key_suffix: str, theme: str = "neutral", label: str = "S
         )
 
 def _submit_btn(label: str, key_suffix: str, theme: str = "neutral") -> bool:
-    """
-    Versão escopada para st.form_submit_button — também com '+'.
-    Retorna True quando o usuário clica.
-    """
     color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
     with st.container():
         st.markdown(f'<div id="mark-{key_suffix}"></div>', unsafe_allow_html=True)
@@ -929,12 +922,13 @@ def _submit_btn(label: str, key_suffix: str, theme: str = "neutral") -> bool:
         st.markdown(
             f"""
             <style>
-              /* estiliza SOMENTE o submit logo após o marcador */
-              #mark-{key_suffix} + div[data-testid="stFormSubmitButton"] > button {{
+              /* idem para o botão de submit de formulário */
+              #mark-{key_suffix} + div [data-testid="stFormSubmitButton"] > button {{
                 background: {color} !important;
                 border-color: {color} !important;
+                color: #fff !important;
               }}
-              #mark-{key_suffix} + div[data-testid="stFormSubmitButton"] > button:hover {{
+              #mark-{key_suffix} + div [data-testid="stFormSubmitButton"] > button:hover {{
                 filter: brightness(0.93);
               }}
             </style>
@@ -942,6 +936,7 @@ def _submit_btn(label: str, key_suffix: str, theme: str = "neutral") -> bool:
             unsafe_allow_html=True
         )
     return clicked
+
 
 
 def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: str, default_cong_id: Optional[int], default_sub_cong_id: Optional[int] = None):
@@ -2002,7 +1997,6 @@ def page_lancamentos(user: "User"):
                         else:
                             st.session_state.status_message = ("warning", "Preencha o nome e o valor do dízimo.")
                         st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
 
             # ---- SAÍDAS
             with st.expander("➖ Lançar SAÍDA"):
@@ -2030,7 +2024,6 @@ def page_lancamentos(user: "User"):
                         else:
                             st.session_state.status_message = ("warning", "Preencha o valor e a categoria da saída.")
                         st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
 
         # ====================== EDITAR DIRETO NA TABELA =======================
         elif modo == "Editar direto na tabela":
