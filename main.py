@@ -68,7 +68,7 @@ ADJ_HIER_OUT_DESC = "[Ajuste via Relatório Hierárquico (Saída)]"
 # ===================== ST CONFIG / THEME =====================
 # ===================== ST CONFIG / THEME =====================
 
-st.set_st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
+st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
 
 # ===================== BLUCO ÚNICO DE CSS =====================
 # Substitua todo o seu CSS por este bloco para garantir consistência
