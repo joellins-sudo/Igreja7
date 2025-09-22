@@ -892,57 +892,65 @@ BTN_COLORS = {
     "neutral":  "#1f6feb",  # fallback
 }
 
+import streamlit.components.v1 as components
+
 def _save_btn(on_click, key_suffix: str, theme: str = "neutral", label: str = "Salvar alterações"):
     color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
     with st.container():
-        # âncora para localizar o bloco do botão
+        # âncora de marcação (irmão anterior ao botão)
         st.markdown(f'<div id="mark-{key_suffix}"></div>', unsafe_allow_html=True)
         st.button(label, key=f"btn_save_{key_suffix}", type="primary", on_click=on_click)
 
-        # CSS amplo (pega várias versões de data-testid)
+        # 1) CSS robusto: usa ~ (irmão geral) e várias formas de localizar o botão
         st.markdown(
             f"""
             <style>
-              #mark-{key_suffix} + div [data-testid="stButton"] > button,
-              #mark-{key_suffix} + div [data-testid="stBaseButton-button"],
-              #mark-{key_suffix} + div button {{
+              #mark-{key_suffix} ~ div [data-testid="stButton"] > button,
+              #mark-{key_suffix} ~ div [data-testid="stBaseButton-button"],
+              #mark-{key_suffix} ~ div button {{
                 background: {color} !important;
                 border-color: {color} !important;
                 color: #fff !important;
               }}
-              #mark-{key_suffix} + div [data-testid="stButton"] > button:hover,
-              #mark-{key_suffix} + div [data-testid="stBaseButton-button"]:hover,
-              #mark-{key_suffix} + div button:hover {{
-                filter: brightness(0.93);
+              #mark-{key_suffix} ~ div [data-testid="stButton"] > button:hover,
+              #mark-{key_suffix} ~ div [data-testid="stBaseButton-button"]:hover,
+              #mark-{key_suffix} ~ div button:hover {{
+                filter: brightness(0.93) !important;
               }}
             </style>
             """,
             unsafe_allow_html=True
         )
 
-        # Fallback JS (garante mesmo se o CSS não casar com os testids)
-        st.markdown(
+        # 2) JS garantido via components.html (não é sanitizado)
+        components.html(
             f"""
+            <div id="js-mount-{key_suffix}"></div>
             <script>
-            (function() {{
-              const anchor = document.getElementById("mark-{key_suffix}");
-              if (!anchor) return;
-              // procura o primeiro botão dentro do próximo wrapper
-              const container = anchor.nextElementSibling;
-              if (!container) return;
-              const btn = container.querySelector("button");
-              if (!btn) return;
-              btn.style.background = "{color}";
-              btn.style.borderColor = "{color}";
-              btn.style.color = "#fff";
-              btn.onmouseenter = () => btn.style.filter = "brightness(0.93)";
-              btn.onmouseleave = () => btn.style.filter = "";
-            }})();
+              (function ensureBtnColor(){{
+                const anchor = window.parent.document.getElementById("mark-{key_suffix}");
+                if(!anchor) return;
+                // procura o primeiro botão após a âncora (pula quantos wrappers tiver)
+                let sib = anchor.nextElementSibling;
+                let btn = null;
+                for(let i=0;i<10 && sib && !btn;i++, sib = sib.nextElementSibling){{
+                  btn = sib.querySelector("button");
+                }}
+                if(btn){{
+                  btn.style.background = "{color}";
+                  btn.style.borderColor = "{color}";
+                  btn.style.color = "#fff";
+                  btn.onmouseenter = () => btn.style.filter = "brightness(0.93)";
+                  btn.onmouseleave = () => btn.style.filter = "";
+                }} else {{
+                  // tenta de novo após o layout hidratar
+                  setTimeout(ensureBtnColor, 120);
+                }}
+              }})();
             </script>
             """,
-            unsafe_allow_html=True
+            height=0, width=0
         )
-
 
 def _submit_btn(label: str, key_suffix: str, theme: str = "neutral") -> bool:
     color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
@@ -953,44 +961,51 @@ def _submit_btn(label: str, key_suffix: str, theme: str = "neutral") -> bool:
         st.markdown(
             f"""
             <style>
-              #mark-{key_suffix} + div [data-testid="stFormSubmitButton"] > button,
-              #mark-{key_suffix} + div [data-testid="stBaseButton-button"],
-              #mark-{key_suffix} + div button {{
+              #mark-{key_suffix} ~ div [data-testid="stFormSubmitButton"] > button,
+              #mark-{key_suffix} ~ div [data-testid="stBaseButton-button"],
+              #mark-{key_suffix} ~ div button {{
                 background: {color} !important;
                 border-color: {color} !important;
                 color: #fff !important;
               }}
-              #mark-{key_suffix} + div [data-testid="stFormSubmitButton"] > button:hover,
-              #mark-{key_suffix} + div [data-testid="stBaseButton-button"]:hover,
-              #mark-{key_suffix} + div button:hover {{
-                filter: brightness(0.93);
+              #mark-{key_suffix} ~ div [data-testid="stFormSubmitButton"] > button:hover,
+              #mark-{key_suffix} ~ div [data-testid="stBaseButton-button"]:hover,
+              #mark-{key_suffix} ~ div button:hover {{
+                filter: brightness(0.93) !important;
               }}
             </style>
             """,
             unsafe_allow_html=True
         )
 
-        st.markdown(
+        components.html(
             f"""
+            <div id="js-mount-submit-{key_suffix}"></div>
             <script>
-            (function() {{
-              const anchor = document.getElementById("mark-{key_suffix}");
-              if (!anchor) return;
-              const container = anchor.nextElementSibling;
-              if (!container) return;
-              const btn = container.querySelector("button");
-              if (!btn) return;
-              btn.style.background = "{color}";
-              btn.style.borderColor = "{color}";
-              btn.style.color = "#fff";
-              btn.onmouseenter = () => btn.style.filter = "brightness(0.93)";
-              btn.onmouseleave = () => btn.style.filter = "";
-            }})();
+              (function ensureSubmitColor(){{
+                const anchor = window.parent.document.getElementById("mark-{key_suffix}");
+                if(!anchor) return;
+                let sib = anchor.nextElementSibling;
+                let btn = null;
+                for(let i=0;i<10 && sib && !btn;i++, sib = sib.nextElementSibling){{
+                  btn = sib.querySelector("button");
+                }}
+                if(btn){{
+                  btn.style.background = "{color}";
+                  btn.style.borderColor = "{color}";
+                  btn.style.color = "#fff";
+                  btn.onmouseenter = () => btn.style.filter = "brightness(0.93)";
+                  btn.onmouseleave = () => btn.style.filter = "";
+                }} else {{
+                  setTimeout(ensureSubmitColor, 120);
+                }}
+              }})();
             </script>
             """,
-            unsafe_allow_html=True
+            height=0, width=0
         )
     return clicked
+
 
 
 
