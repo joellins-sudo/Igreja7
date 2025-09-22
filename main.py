@@ -1064,6 +1064,7 @@ def _editor_lancamentos(
     force_sub_cong_id: Optional[int] = None
 ):
     tx_type = tx_type_hint or (transactions[0].type if transactions else TYPE_IN)
+
     with SessionLocal() as db:
         cats = categories_for_type(db, tx_type)
         if tx_type == TYPE_IN:
@@ -1073,7 +1074,12 @@ def _editor_lancamentos(
     rows = []
     if transactions:
         for t in transactions:
-            rows.append({"ID": t.id, "Data": t.date, "Categoria": (t.category.name if t.category else ""),"Valor": float(t.amount), "Descrição": t.description or "", "_cong_id": int(t.congregation_id or 0)})
+            rows.append({
+                "ID": t.id, "Data": t.date,
+                "Categoria": (t.category.name if t.category else ""),
+                "Valor": float(t.amount), "Descrição": t.description or "",
+                "_cong_id": int(t.congregation_id or 0),
+            })
     else:
         rows = [{"ID": None, "Data": today_bahia(), "Categoria": (cat_names[0] if cat_names else ""), "Valor": 0.0, "Descrição": "", "_cong_id": int(force_cong_id or 0)}]
 
@@ -1083,7 +1089,13 @@ def _editor_lancamentos(
     st.markdown(f"**{titulo}**")
     edited_view = st.data_editor(
         df_view, use_container_width=True, hide_index=True, num_rows="dynamic",
-        column_config={"ID": st.column_config.Column("ID", disabled=True), "Data": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"), "Categoria": st.column_config.SelectboxColumn("Categoria", options=cat_names, required=True), "Valor": st.column_config.NumberColumn("Valor (R$)", min_value=0.0, step=1.0, format="R$ %.2f"), "Descrição": st.column_config.TextColumn("Descrição", max_chars=200)},
+        column_config={
+            "ID": st.column_config.Column("ID", disabled=True),
+            "Data": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
+            "Categoria": st.column_config.SelectboxColumn("Categoria", options=cat_names, required=True),
+            "Valor": st.column_config.NumberColumn("Valor (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
+            "Descrição": st.column_config.TextColumn("Descrição", max_chars=200),
+        },
         key=f"tx_editor_{titulo.replace(' ', '_')}_{force_cong_id}_{force_sub_cong_id}",
     )
 
@@ -1094,43 +1106,14 @@ def _editor_lancamentos(
     _label_total = "Total de Saídas (tabela)" if tx_type == TYPE_OUT else "Total de Entradas (tabela)"
     st.metric(_label_total, format_currency(_total_val))
 
+    # <<< LÓGICA DO BOTÃO CORRIGIDA AQUI >>>
     theme = "saida" if tx_type == TYPE_OUT else "entrada"
-    if _save_btn("Salvar alterações", key=f"save_tx_{titulo.replace(' ', '_')}", theme=theme):
+    if _save_btn("Salvar alterações", key=f"save_tx_{titulo.replace(' ', '_')}_{force_cong_id}", theme=theme):
         _apply_tx_changes(df_full, edited_view, tx_type, force_cong_id, force_sub_cong_id)
-        st.session_state.status_message = ("success", "Alterações de Lançamentos salvas!")
+        st.session_state.status_message = ("success", f"Alterações em '{titulo}' salvas com sucesso!")
         st.rerun()
 
 # Substitua a função _editor_dizimos
-def _editor_dizimos(tithes: List["Tithe"], titulo: str, force_cong_id: Optional[int] = None, force_sub_cong_id: Optional[int] = None):
-    rows = []
-    if tithes:
-        rows = [{"ID": t.id, "Data": t.date, "Dizimista": t.tither_name, "Valor": float(t.amount), "Forma de Pagamento": t.payment_method or "", "_cong_id": int(t.congregation_id or 0)} for t in tithes]
-    else:
-        rows = [{"ID": None, "Data": today_bahia(), "Dizimista": "", "Valor": 0.0, "Forma de Pagamento": "", "_cong_id": int(force_cong_id or 0)}]
-
-    df_full = pd.DataFrame(rows)
-    df_view = df_full.drop(columns=["_cong_id"])
-
-    st.markdown(f"**{titulo}**")
-    edited_view = st.data_editor(
-        df_view, use_container_width=True, hide_index=True, num_rows="dynamic",
-        column_config={"ID": st.column_config.Column("ID", disabled=True), "Data": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"), "Dizimista": st.column_config.TextColumn("Dizimista", max_chars=120, required=True), "Valor": st.column_config.NumberColumn("Valor (R$)", min_value=0.0, step=1.0, format="R$ %.2f"), "Forma de Pagamento": st.column_config.SelectboxColumn("Forma de Pagamento", options=["Dinheiro", "PIX", "Cartão", "Transferência", ""], required=False)},
-        key=f"tithe_editor_{titulo.replace(' ', '_')}_{force_cong_id}_{force_sub_cong_id}",
-    )
-
-    try:
-        _total_val = float(pd.Series(edited_view["Valor"]).map(_to_float_brl).sum())
-    except Exception:
-        _total_val = 0.0
-    st.metric("Total de DÍZIMOS (tabela)", format_currency(_total_val))
-
-    if _save_btn("Salvar alterações", key=f"save_tithe_{titulo.replace(' ', '_')}", theme="dizimista"):
-        _apply_tithe_changes(df_full, edited_view, force_cong_id, force_sub_cong_id)
-        st.session_state.status_message = ("success", "Alterações de Dizimistas salvas!")
-        st.rerun()
-
-# ===== EDITOR DE DÍZIMOS (com force_cong_id e linha vazia) =====
-# ===== EDITOR DE DÍZIMOS (com total abaixo da tabela) =====
 def _editor_dizimos(tithes: List["Tithe"], titulo: str, force_cong_id: Optional[int] = None, force_sub_cong_id: Optional[int] = None):
     rows = []
     if tithes:
@@ -1155,21 +1138,16 @@ def _editor_dizimos(tithes: List["Tithe"], titulo: str, force_cong_id: Optional[
     )
 
     try:
-        _total_val = 0.0
-        if isinstance(edited_view, pd.DataFrame) and not edited_view.empty and ("Valor" in edited_view.columns):
-            _ev = edited_view.copy()
-            _ev["Valor"] = _ev["Valor"].map(_to_float_brl)
-            _total_val = float(_ev["Valor"].sum())
+        _total_val = float(pd.Series(edited_view["Valor"]).map(_to_float_brl).sum())
     except Exception:
         _total_val = 0.0
     st.metric("Total de DÍZIMOS (tabela)", format_currency(_total_val))
 
-    def _save():
+    # <<< LÓGICA DO BOTÃO CORRIGIDA AQUI >>>
+    if _save_btn("Salvar alterações", key=f"save_tithe_{titulo.replace(' ', '_')}_{force_cong_id}", theme="dizimista"):
         _apply_tithe_changes(df_full, edited_view, force_cong_id, force_sub_cong_id)
-        st.toast("💾 Alterações salvas.", icon="✅")
+        st.session_state.status_message = ("success", f"Alterações em '{titulo}' salvas com sucesso!")
         st.rerun()
-
-    _save_btn(_save, f"tithe_{titulo.replace(' ', '_')}_{force_cong_id}_{force_sub_cong_id}", theme="dizimista")
 
 # ===== MISSÕES: Editores específicos =====
 def _editor_missions_outflows(saidas: List["Transaction"], titulo: str, congs_all: List["Congregation"]):
