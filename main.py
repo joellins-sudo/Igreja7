@@ -764,40 +764,30 @@ def sidebar_common(user: "User") -> str:
 
 # Dicionário de cores para os temas dos botões
 # SUBSTITUA TODAS AS SUAS FUNÇÕES DE AJUDA DE BOTÃO POR ESTE BLOCO
+# ===================== FUNÇÕES DE AJUDA PARA BOTÕES (ADICIONE ESTE BLOCO) =====================
+
+# Dicionário de cores para os temas dos botões
 BTN_COLORS = {
     "entrada":   "#16a34a",  # Verde
     "dizimista": "#2563eb",  # Azul
     "saida":     "#dc2626",  # Vermelho
 }
 
-def render_colored_button(label: str, key: str, theme: str, is_submit: bool = False):
-    """Renderiza um botão colorido (normal ou de formulário) usando a técnica de âncora + CSS."""
-    color = BTN_COLORS.get(theme, "#1f6feb") # Usa azul padrão como fallback
-    
-    st.markdown(f"""
-    <style>
-        /* Encontra a âncora pelo ID e estiliza o botão no elemento irmão seguinte */
-        #{key} + div button {{
-            background-color: {color} !important;
-            border-color: {color} !important;
-            color: white !important;
-        }}
-        #{key} + div button:hover {{
-            filter: brightness(0.9);
-            color: white !important;
-        }}
-        #{key} + div button:active {{
-            filter: brightness(0.8);
-            border-color: {color} !important;
-        }}
-    </style>
-    """, unsafe_allow_html=True)
-    
-    st.markdown(f'<div id="{key}"></div>', unsafe_allow_html=True)
-    if is_submit:
-        return st.form_submit_button(label)
-    else:
-        return st.button(label, key=key)
+def _submit_btn(label: str, theme: str = "neutral") -> bool:
+    """Renderiza um st.form_submit_button colorido."""
+    st.markdown(f'<div class="adrf-{theme}">', unsafe_allow_html=True)
+    clicked = st.form_submit_button(label)
+    st.markdown('</div>', unsafe_allow_html=True)
+    return clicked
+
+def _save_btn(label: str, key: str, theme: str = "neutral") -> bool:
+    """Renderiza um st.button colorido e retorna True se clicado."""
+    st.markdown(f'<div class="adrf-{theme}">', unsafe_allow_html=True)
+    clicked = st.button(label, key=key)
+    st.markdown('</div>', unsafe_allow_html=True)
+    return clicked
+
+# =========================================================================================
 
 
 def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: str, default_cong_id: Optional[int], default_sub_cong_id: Optional[int] = None):
