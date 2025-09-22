@@ -1829,6 +1829,7 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 def page_lancamentos(user: "User"):
     ensure_seed()
     
+    # Bloco para exibir mensagens de status salvas na sessão
     if 'status_message' in st.session_state:
         msg_type, msg_text = st.session_state.status_message
         if msg_type == "success":
@@ -1882,7 +1883,6 @@ def page_lancamentos(user: "User"):
                     ent_dizimo = c1.number_input("Valor do Dízimo", min_value=0.0, value=0.0, format="%.2f", key="ent_dizimo_form")
                     ent_oferta = c2.number_input("Valor da Oferta", min_value=0.0, value=0.0, format="%.2f", key="ent_oferta_form")
                     
-                    # <<< BOTÃO ATUALIZADO AQUI >>>
                     if _submit_btn("Salvar Entrada do Culto", "submit_entrada", theme="entrada"):
                         if ent_dizimo <= 0 and ent_oferta <= 0:
                             st.session_state.status_message = ("warning", "Nenhum valor foi inserido.")
@@ -1917,8 +1917,6 @@ def page_lancamentos(user: "User"):
                     dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
                     dz_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="dz_valor")
                     dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência"], key="dz_pay")
-                    
-                    # <<< BOTÃO ATUALIZADO AQUI >>>
                     if _submit_btn("Salvar DIZIMISTA", "submit_dizimo", theme="dizimista"):
                         if dz_valor > 0 and dz_nome.strip():
                             db.add(Tithe(date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor, congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id, payment_method=dz_payment))
@@ -1938,8 +1936,6 @@ def page_lancamentos(user: "User"):
                         sai_cat_name = st.selectbox("Categoria", [c.name for c in cats_out] or ["—"], key="sai_cat")
                     sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
                     sai_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="sai_valor")
-                    
-                    # <<< BOTÃO ATUALIZADO AQUI >>>
                     if _submit_btn("Salvar SAÍDA", "submit_saida", theme="saida"):
                         cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
                         if sai_valor > 0 and cat_obj:
@@ -1967,23 +1963,93 @@ def page_lancamentos(user: "User"):
 
             df_logs = _load_service_logs(db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
             
-            # ... (código de divergência restaurado) ...
-            
-            edited_df = st.data_editor(...) # seu código do data_editor
-            
-            # ... (código das métricas) ...
+            declarado_total = 0.0
+            if isinstance(df_logs, pd.DataFrame) and not df_logs.empty and ("Dízimo" in df_logs.columns):
+                try:
+                    declarado_total = float(df_logs["Dízimo"].sum() or 0.0)
+                except Exception:
+                    declarado_total = 0.0
+            with SessionLocal() as _db_chk:
+                tithe_sub_filter = (Tithe.sub_congregation_id.is_(None) if target_sub_cong_id is None else (Tithe.sub_congregation_id == target_sub_cong_id))
+                real_total = float(_db_chk.scalar(
+                    select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
+                        Tithe.congregation_id == parent_cong_obj.id,
+                        Tithe.date >= start_tab, Tithe.date < end_tab,
+                        tithe_sub_filter
+                    )
+                ) or 0.0)
+            diff_total = round(declarado_total - real_total, 2)
+            if abs(diff_total) >= 0.01:
+                st.markdown(f"""
+<div class="alert-danger">
+  <strong>Divergência de Dízimos no período</strong> — Declarado no resumo: <strong>{format_currency(declarado_total)}</strong> • Nominal (dizimistas): <strong>{format_currency(real_total)}</strong> • Diferença: <strong>{format_currency(diff_total)}</strong>
+</div>
+""", unsafe_allow_html=True)
 
-            def on_save_click():
+            if df_logs.empty:
+                df_logs = pd.DataFrame([{"Data do Culto": today_bahia(), "Tipo de Culto": tipos_de_culto[0], "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0, "ID": None}])
+
+            edited_df = st.data_editor(
+                df_logs,
+                use_container_width=True,
+                hide_index=True,
+                num_rows="dynamic",
+                key=f"editor_service_logs_{parent_cong_obj.id}_{target_sub_cong_id}",
+                column_config={
+                    "ID": None,
+                    "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
+                    "Tipo de Culto": st.column_config.SelectboxColumn("Tipo de Culto", options=tipos_de_culto, required=True),
+                    "Dízimo": st.column_config.NumberColumn("Dízimo", format="R$ %.2f", required=True),
+                    "Oferta": st.column_config.NumberColumn("Oferta", format="R$ %.2f", required=True),
+                    "Total": st.column_config.NumberColumn("Total", help="Soma do Dízimo e Oferta. Atualiza após salvar.", format="R$ %.2f", disabled=True),
+                },
+                column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
+            )
+
+            st.divider()
+            try:
+                total_dizimo = _to_float_brl(edited_df["Dízimo"].sum())
+                total_oferta = _to_float_brl(edited_df["Oferta"].sum())
+                total_geral = total_dizimo + total_oferta
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total Dízimos (na tabela)", format_currency(total_dizimo))
+                col2.metric("Total Ofertas (na tabela)", format_currency(total_oferta))
+                col3.metric("Total Geral (na tabela)", format_currency(total_geral))
+            except Exception:
+                st.caption("Calculando totais...")
+
+            if st.button("Salvar alterações na tabela", key=f"save_table_{parent_cong_obj.id}", type="primary"):
                 result = _apply_service_log_changes(df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id)
                 if result == "missao_ok":
                     st.session_state.status_message = ("success", "Atenção: As ofertas do Culto de Missões são lançadas automaticamente no menu 'Relatório de Missões'.")
                 elif result == "geral_ok":
                     st.session_state.status_message = ("success", "Alterações salvas com sucesso!")
-                # ... (outros resultados) ...
+                elif result == "erro_integridade":
+                    st.session_state.status_message = ("error", "Erro: Tentativa de criar um lançamento duplicado. Verifique os dados.")
+                elif result == "erro_categoria":
+                    st.session_state.status_message = ("error", "ERRO CRÍTICO: Categoria 'Missões' (Entrada) não encontrada.")
+                elif result == "erro_geral":
+                    st.session_state.status_message = ("error", "Ocorreu um erro inesperado ao salvar.")
                 st.rerun()
-            
-            # <<< BOTÃO ATUALIZADO AQUI >>>
-            _save_btn(on_save_click, key_suffix=f"save_table_{parent_cong_obj.id}", theme="entrada", label="Salvar alterações na tabela")
+
+            st.markdown("---")
+            tithes_query = select(Tithe).where(
+                Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab,
+                Tithe.sub_congregation_id == target_sub_cong_id
+            )
+            tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
+            _editor_dizimos(tithes, f"Dizimistas - {contexto_tabela}", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
+
+            st.markdown("---")
+            txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(
+                Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab,
+                Transaction.type == "SAÍDA", Transaction.sub_congregation_id == target_sub_cong_id
+            )
+            txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
+            _editor_lancamentos(
+                txs_out, f"Saídas - {contexto_tabela}", tx_type_hint="SAÍDA",
+                force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id
+            )
             
             # (O resto da página com as outras tabelas não muda)
             # ...
