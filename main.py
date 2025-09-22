@@ -317,6 +317,52 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# === FORÇA DE CORES DOS BOTÕES (SEM ALTERAR FUNÇÕES) ===
+SCOPED_BUTTON_FIX = """
+<style>
+/* Regras gerais: garante texto branco */
+[id^="mark-"] ~ div [data-testid="stButton"] > button,
+[id^="mark-"] ~ div [data-testid="stFormSubmitButton"] > button{
+  color: #fff !important;
+}
+
+/* Botão SALVAR da TABELA (verde) — marcadores que começam com 'mark-save_table_' */
+[id^="mark-save_table_"] ~ div [data-testid="stButton"] > button,
+[id^="mark-save_table_"] ~ div [data-testid="stFormSubmitButton"] > button{
+  background: #16a34a !important;   /* verde */
+  border-color: #16a34a !important;
+}
+
+/* Botões de DIZIMISTAS (azul) — marcadores que começam com 'mark-tithe_' */
+[id^="mark-tithe_"] ~ div [data-testid="stButton"] > button,
+[id^="mark-tithe_"] ~ div [data-testid="stFormSubmitButton"] > button{
+  background: #2563eb !important;   /* azul */
+  border-color: #2563eb !important;
+}
+
+/* Botões de SAÍDAS (vermelho) — marcadores que contêm 'tx_Saidas' ou 'tx_Saídas' */
+[id*="mark-tx_Saidas"] ~ div [data-testid="stButton"] > button,
+[id*="mark-tx_Saídas"] ~ div [data-testid="stButton"] > button,
+[id*="mark-tx_Saidas"] ~ div [data-testid="stFormSubmitButton"] > button,
+[id*="mark-tx_Saídas"] ~ div [data-testid="stFormSubmitButton"] > button{
+  background: #dc2626 !important;   /* vermelho */
+  border-color: #dc2626 !important;
+}
+
+/* Hover consistente */
+[id^="mark-save_table_"] ~ div [data-testid="stButton"] > button:hover,
+[id^="mark-save_table_"] ~ div [data-testid="stFormSubmitButton"] > button:hover,
+[id^="mark-tithe_"] ~ div [data-testid="stButton"] > button:hover,
+[id^="mark-tithe_"] ~ div [data-testid="stFormSubmitButton"] > button:hover,
+[id*="mark-tx_Saidas"] ~ div [data-testid="stButton"] > button:hover,
+[id*="mark-tx_Saídas"] ~ div [data-testid="stButton"] > button:hover,
+[id*="mark-tx_Saidas"] ~ div [data-testid="stFormSubmitButton"] > button:hover,
+[id*="mark-tx_Saídas"] ~ div [data-testid="stFormSubmitButton"] > button:hover{
+  filter: brightness(0.93) !important;
+}
+</style>
+"""
+st.markdown(SCOPED_BUTTON_FIX, unsafe_allow_html=True)
 
 
 # ===================== LOCALE (fallback) =====================
