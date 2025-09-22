@@ -1106,7 +1106,6 @@ def _editor_lancamentos(
     _label_total = "Total de Saídas (tabela)" if tx_type == TYPE_OUT else "Total de Entradas (tabela)"
     st.metric(_label_total, format_currency(_total_val))
 
-    # <<< LÓGICA DO BOTÃO CORRIGIDA AQUI >>>
     theme = "saida" if tx_type == TYPE_OUT else "entrada"
     if _save_btn("Salvar alterações", key=f"save_tx_{titulo.replace(' ', '_')}_{force_cong_id}", theme=theme):
         _apply_tx_changes(df_full, edited_view, tx_type, force_cong_id, force_sub_cong_id)
@@ -1143,7 +1142,6 @@ def _editor_dizimos(tithes: List["Tithe"], titulo: str, force_cong_id: Optional[
         _total_val = 0.0
     st.metric("Total de DÍZIMOS (tabela)", format_currency(_total_val))
 
-    # <<< LÓGICA DO BOTÃO CORRIGIDA AQUI >>>
     if _save_btn("Salvar alterações", key=f"save_tithe_{titulo.replace(' ', '_')}_{force_cong_id}", theme="dizimista"):
         _apply_tithe_changes(df_full, edited_view, force_cong_id, force_sub_cong_id)
         st.session_state.status_message = ("success", f"Alterações em '{titulo}' salvas com sucesso!")
