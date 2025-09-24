@@ -304,6 +304,18 @@ st.markdown(CSS, unsafe_allow_html=True)
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
 
+st.markdown("""
+<style>
+.inline-missoes-alert{
+  background: transparent !important;
+  border: none !important;
+  color: #b45309 !important;   /* âmbar escuro */
+  font-weight: 700 !important; /* negrito */
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 # ===================== LOCALE (fallback) =====================
 def _set_locale_ptbr():
     for loc in ("pt_BR.utf8", "pt_BR.UTF-8", "pt_BR", "Portuguese_Brazil.1252"):
@@ -381,13 +393,15 @@ def get_month_selector(label: str = "Mês de referência", key_prefix: str = "ma
 # === AVISO VISUAL PARA CULTO DE MISSÕES (apenas UI, sem alterar dados) ===
 import re
 
+import re
+
 def _has_culto_missoes_in_df(df: pd.DataFrame) -> bool:
-    """True se existir 'Culto de Missões' na coluna 'Tipo de Culto' (tolerante a acentos/caixa)."""
+    """True se existir 'Culto de Missões' na coluna 'Tipo de Culto'."""
     try:
         if df is None or not isinstance(df, pd.DataFrame) or df.empty:
             return False
         cols_lc = {c.lower(): c for c in df.columns}
-        key = cols_lc.get("tipo de culto") or cols_lc.get("tipo") or None
+        key = cols_lc.get("tipo de culto") or cols_lc.get("tipo")
         if not key:
             return False
         rx = re.compile(r'\bmiss(ões|oes)\b', flags=re.IGNORECASE)
@@ -396,13 +410,17 @@ def _has_culto_missoes_in_df(df: pd.DataFrame) -> bool:
         return False
 
 def _render_aviso_missoes_inline():
-    """Renderiza o aviso numa linha, acima da tabela, sem quebrar layout."""
+    """Aviso amarelo em UMA LINHA (acima da tabela)."""
     st.markdown("""
     <style>
       .inline-missoes-alert{
-        background:#fffbe6; border:1px solid #ffe58f; color:#614700;
-        padding:6px 10px; border-radius:8px; margin:8px 0 10px;
-        white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:.95rem;
+        background:#fff3cd;           /* amarelo suave */
+        border:1px solid #ffeeba;     /* borda amarela */
+        color:#856404;                /* texto amarelo-escuro */
+        padding:6px 10px; border-radius:8px;
+        margin:8px 0 10px;
+        white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+        font-size:.95rem;
       }
     </style>
     """, unsafe_allow_html=True)
@@ -412,6 +430,7 @@ def _render_aviso_missoes_inline():
         "Menu Relatório de Missões ao lado.</div>",
         unsafe_allow_html=True
     )
+
 
 def _confirm_ok(val: str) -> bool:
     return str(val or "").strip().upper() == "EXCLUIR"
@@ -544,7 +563,7 @@ class Tithe(Base):
 # ===================== ENGINE / SESSION =====================
 @st.cache_resource
 def get_engine():
-    db_url = st.secrets.get("DATABASE_URL", os.environ.get("DATABASE_URL"))
+    db_url = os.environ.get("DATABASE_URL")
     if not db_url:
         db_url = "sqlite:///database.db"
     return create_engine(db_url, pool_pre_ping=True)
@@ -573,8 +592,8 @@ def verify_password(password: str, stored_hash: str) -> bool:
 # ===================== AUTH COOKIE =====================
 COOKIE_NAME = "chms_auth"
 LAST_COOKIE = "chms_last"
-APP_SECRET = st.secrets.get("APP_SECRET") or os.environ.get("APP_SECRET") or "troque-esta-chave"
-INACTIVITY_MINUTES = int(os.environ.get("INACTIVITY_MINUTES", st.secrets.get("INACTIVITY_MINUTES", 20)))
+APP_SECRET = os.environ.get("APP_SECRET") or "troque-esta-chave"
+INACTIVITY_MINUTES = int(os.environ.get("INACTIVITY_MINUTES", 20))
 
 def _make_token(payload: dict, exp_days: int = 30) -> str:
     data = payload.copy()
@@ -1818,47 +1837,6 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 def page_lancamentos(user: "User"):
     ensure_seed()
 
-    # === Helpers locais do aviso (apenas UI; não alteram dados) ===
-    import re as _re
-    def _has_culto_missoes_in_df_local(df: pd.DataFrame) -> bool:
-        try:
-            if df is None or not isinstance(df, pd.DataFrame) or df.empty:
-                return False
-            cols_lc = {c.lower(): c for c in df.columns}
-            key = cols_lc.get("tipo de culto") or cols_lc.get("tipo")
-            if not key:
-                return False
-            rx = _re.compile(r'\bmiss(ões|oes)\b', flags=_re.IGNORECASE)
-            return df[key].astype(str).str.contains(rx, na=False).any()
-        except Exception:
-            return False
-
-    def _render_aviso_missoes_inline_local():
-        # Cartão AMARELO (como antes)
-        st.markdown("""
-        <style>
-          .inline-missoes-alert{
-            background:#fff3cd;           /* amarelo suave */
-            border:1px solid #ffeeba;     /* borda amarela */
-            color:#856404;                /* texto amarelo-escuro */
-            padding:6px 10px;
-            border-radius:8px;
-            margin:8px 0 10px;
-            white-space:nowrap;
-            overflow:hidden;
-            text-overflow:ellipsis;
-            font-size:.95rem;
-          }
-        </style>
-        """, unsafe_allow_html=True)
-        st.markdown(
-            "<div class='inline-missoes-alert'>⚠️ "
-            "Atenção : As ofertas do culto de missões são lançadas automaticamente no "
-            "Menu Relatório de Missões ao lado.</div>",
-            unsafe_allow_html=True
-        )
-    # ========================================================================
-
     # Mensagens persistidas entre reruns
     if 'status_message' in st.session_state:
         msg_type, msg_text = st.session_state.status_message
@@ -2142,11 +2120,11 @@ def page_lancamentos(user: "User"):
                 column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
             )
 
-            # Preenche o placeholder com o AVISO AMARELO (uma linha) se houver "Culto de Missões"
+            # AVISO AMARELO: aparece se existir "Culto de Missões" na tabela
             try:
-                if _has_culto_missoes_in_df_local(edited_df):
+                if _has_culto_missoes_in_df(edited_df):
                     with _aviso_top:
-                        _render_aviso_missoes_inline_local()
+                        _render_aviso_missoes_inline()
             except Exception:
                 pass
 
@@ -2224,6 +2202,7 @@ def page_lancamentos(user: "User"):
                 txs_out, f"Saídas - {contexto_tabela}", tx_type_hint="SAÍDA",
                 force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id
             )
+
 
             # ... (demais seções permanecem iguais)
 
