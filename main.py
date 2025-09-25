@@ -1089,8 +1089,6 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
     new_ids = set(int(x) for x in n["ID"].tolist() if pd.notna(x) and x > 0)
     to_delete = list(old_ids - new_ids)
 
-    old_map = {int(r["ID"]): r for _, r in o.iterrows() if pd.notna(r["ID"])}
-
     with SessionLocal() as db:
         if to_delete:
             db.query(Tithe).filter(Tithe.id.in_(to_delete)).delete(synchronize_session=False)
@@ -1104,11 +1102,8 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
             if t.date != new["Data"]: t.date = new["Data"]; changed = True
             if t.tither_name != new["Dizimista"]: t.tither_name = new["Dizimista"]; changed = True
             
-            # --- INÍCIO DA CORREÇÃO ---
-            # Convertemos o valor para float normal antes de comparar e salvar
             new_valor_float = float(new["Valor"])
             if t.amount != new_valor_float: t.amount = new_valor_float; changed = True
-            # --- FIM DA CORREÇÃO ---
             
             if (t.payment_method or "") != (new["Forma de Pagamento"] or ""): t.payment_method = new["Forma de Pagamento"] or None; changed = True
             if changed: db.add(t)
@@ -1121,18 +1116,16 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
             db.add(Tithe(
                 date=row["Data"], 
                 tither_name=row["Dizimista"], 
-                # --- INÍCIO DA CORREÇÃO ---
-                # Convertemos o valor para float aqui também
                 amount=float(row["Valor"]),
-                # --- FIM DA CORREÇÃO ---
                 congregation_id=int(default_cong_id), 
-                sub_cong_regation_id=default_sub_cong_id,
+                # --- A CORREÇÃO ESTÁ AQUI ---
+                sub_congregation_id=default_sub_cong_id, # Corrigido de 'sub_cong_regation_id'
+                # --- FIM DA CORREÇÃO ---
                 payment_method=(row.get("Forma de Pagamento") or None)
             ))
         db.commit()
         # ================================================================
 
-# ===================== RELATÓRIO DE ENTRADA — TABELA ÚNICA (EDIT SUMÁRIO) =====================
 # ===================== RELATÓRIO DE ENTRADA — TABELA ÚNICA (EDIT SUMÁRIO) =====================
 @st.cache_data
 def _entrada_summary_df(_db: Session, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
