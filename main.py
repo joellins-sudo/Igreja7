@@ -3611,7 +3611,7 @@ def display_entry_hierarchy(user: User, congs_all: List[Congregation], start: da
     for cong in congs_all:
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id).order_by(SubCongregation.name)).all()
         
-        principal_totals = _collect_month_data(c.id, start, end, sub_cong_id=None)["totals"]
+        principal_totals = _collect_month_data(cong.id, start, end, sub_cong_id=None)["totals"]
         principal_entradas = principal_totals["entradas_total_sem_missoes"]
         
         # Adiciona a linha da congregação principal
@@ -3713,7 +3713,7 @@ def display_exit_hierarchy(user: User, congs_all: List[Congregation], start: dat
     for cong in congs_all:
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id).order_by(SubCongregation.name)).all()
         
-        principal_totals = _collect_month_data(c.id, start, end, sub_cong_id=None)["totals"]
+        principal_totals = _collect_month_data(cong.id, start, end, sub_cong_id=None)["totals"]
         principal_saidas = principal_totals["saidas_total"]
         
         report_data.append({
