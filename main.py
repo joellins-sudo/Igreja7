@@ -4518,6 +4518,7 @@ def main():
 # ===================== PAGE: ASSISTENTE IA (COM RESUMO RÁPIDO E ANÁLISE LIVRE) =====================
 # ===================== PAGE: ASSISTENTE IA (COM ENTRADA DE VOZ) =====================
 # ===================== PAGE: ASSISTENTE IA (ORDEM DE EXECUÇÃO CORRIGIDA) =====================
+# ===================== PAGE: ASSISTENTE IA (VERSÃO ESTÁVEL E FINAL) =====================
 def page_assistente_ia(user: "User"):
     # Verificação de permissão geral
     if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
@@ -4525,19 +4526,21 @@ def page_assistente_ia(user: "User"):
         return
 
     st.markdown("<h1 class='page-title'>🤖 Assistente Financeiro IA</h1>", unsafe_allow_html=True)
-    st.info("Selecione um contexto, clique no botão 'Falar' para fazer sua pergunta por voz ou simplesmente digite no campo abaixo.")
+    st.info("Selecione um contexto (congregação e período) e faça sua pergunta em linguagem natural sobre os dados financeiros.")
 
     with SessionLocal() as db:
+        # --- SEÇÃO UNIFICADA DE FILTROS ---
         st.markdown("#### 1. Selecione o Contexto da Análise")
         congs_all = order_congs_sede_first(cong_options_for(user, db))
+        
         col_cong, col_filtros = st.columns([2, 3])
         
         with col_cong:
-            cong_sel_name = st.selectbox("Congregação", [c.name for c in congs_all], key="ia_cong_sel_unified")
+            cong_sel_name = st.selectbox("Congregação", [c.name for c in congs_all], key="ia_cong_sel_stable")
             cong_selecionada_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
 
         with col_filtros:
-            ref = get_month_selector("Mês de Referência", key_prefix="ia_ref_unified")
+            ref = get_month_selector("Mês de Referência", key_prefix="ia_ref_stable")
         
         start, end = month_bounds(ref)
 
@@ -4548,44 +4551,36 @@ def page_assistente_ia(user: "User"):
         st.markdown("---")
         st.markdown("#### 2. Faça sua Pergunta")
         
-        # --- INÍCIO DA CORREÇÃO DE ORDEM (LÓGICA DE VOZ) ---
+        placeholder_text = "Ex: Qual o total de dízimos? Liste as 3 maiores saídas. Quem foi o dizimista com maior valor?"
+        pergunta = st.text_area("Sua pergunta:", key="ia_pergunta_stable", height=120, placeholder=placeholder_text)
         
-        # 1. Primeiro, posicionamos o botão de voz e obtemos o resultado
-        transcribed_text = voice_input_ui()
-
-        # 2. Se a voz retornou um texto, nós ATUALIZAMOS o estado ANTES de desenhar a caixa de texto
-        if transcribed_text and st.session_state.get("ia_pergunta_unified", "") != transcribed_text:
-            st.session_state.ia_pergunta_unified = transcribed_text
-            # O st.rerun() não é mais necessário aqui, pois a atualização será refletida no mesmo ciclo
-        
-        placeholder_text = "Clique em 'Falar' acima ou digite sua pergunta aqui..."
-        
-        # 3. SÓ DEPOIS, nós desenhamos a caixa de texto. Ela já vai pegar o valor atualizado do estado.
-        pergunta = st.text_area("Sua pergunta:", key="ia_pergunta_unified", height=120, placeholder=placeholder_text)
-        
-        # --- FIM DA CORREÇÃO DE ORDEM ---
-
         if st.button("Analisar com IA", type="primary", use_container_width=True):
-            if st.session_state.ia_pergunta_unified and st.session_state.ia_pergunta_unified.strip():
+            if pergunta.strip():
                 with st.spinner("Buscando e preparando os dados..."):
-                    # (Toda a sua lógica de busca de dados permanece a mesma)
+                    
                     dados_para_ia_df = pd.DataFrame()
                     contexto_str = f"{cong_selecionada_obj.name} - {ref.strftime('%B de %Y')}"
-                    # ... (código omitido para brevidade) ...
-                    dados_completos = _collect_month_data(cong_selecionada_obj.id, start, end)
-                    # ... (código omitido para brevidade) ...
-                    combined_rows = []
-                    for t in dados_completos.get("tx_in", []):
-                        combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
-                    for t in dados_completos.get("tithes", []):
-                        combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": "Dízimo Nominal", "Descricao": f"Dizimista: {t.tither_name}, Pgto: {t.payment_method}", "Valor": t.amount})
-                    for t in dados_completos.get("tx_out", []):
-                        combined_rows.append({"Data": t.date, "Tipo": "Saída", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
-                    dados_para_ia_df = pd.DataFrame(combined_rows)
+                    
+                    # Prepara dados de forma diferente para cada perfil
+                    if user.role == 'SEDE':
+                        dados_completos = _collect_month_data(cong_selecionada_obj.id, start, end)
+                        # Lógica de preparação de dados robusta para SEDE
+                        combined_rows = []
+                        for t in dados_completos.get("tx_in", []):
+                            combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
+                        for t in dados_completos.get("tithes", []):
+                            combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": "Dízimo Nominal", "Descricao": f"Dizimista: {t.tither_name}, Pgto: {t.payment_method}", "Valor": t.amount})
+                        for t in dados_completos.get("tx_out", []):
+                            combined_rows.append({"Data": t.date, "Tipo": "Saída", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
+                        dados_para_ia_df = pd.DataFrame(combined_rows)
+
+                    elif user.role == 'TESOUREIRO MISSIONÁRIO':
+                        dados_para_ia_df = get_missions_data_for_ia(cong_selecionada_obj.id, start, end)
+                        contexto_str = f"Dados de Missões de {cong_selecionada_obj.name} - {ref.strftime('%B de %Y')}"
 
                 with st.spinner("O assistente está analisando os dados e elaborando uma resposta..."):
                     resposta = responder_pergunta_financeira(
-                        pergunta_usuario=st.session_state.ia_pergunta_unified,
+                        pergunta_usuario=pergunta,
                         dados_df=dados_para_ia_df,
                         contexto=contexto_str
                     )
@@ -4593,7 +4588,7 @@ def page_assistente_ia(user: "User"):
                     st.markdown(f"#### Resposta do Assistente")
                     st.info(resposta)
             else:
-                st.warning("Por favor, digite ou fale uma pergunta.")
+                st.warning("Por favor, digite uma pergunta.")
 
             # ... (O restante do código para o Tesoureiro Missionário permanece o mesmo)
             # ...
