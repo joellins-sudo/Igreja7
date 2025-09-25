@@ -4314,6 +4314,7 @@ def main():
 # ===================== PAGE: ASSISTENTE IA (COM REGRAS DE NEGÓCIO CORRIGIDAS) =====================
 # ===================== PAGE: ASSISTENTE IA (VERSÃO FINAL COM PERFIS) =====================
 # ===================== PAGE: ASSISTENTE IA (LÓGICA DE DADOS FINAL) =====================
+# ===================== PAGE: ASSISTENTE IA (LÓGICA DE DADOS FINAL E PRECISA) =====================
 def page_assistente_ia(user: "User"):
     # Verificação de permissão geral
     if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
@@ -4344,59 +4345,69 @@ def page_assistente_ia(user: "User"):
         st.markdown("---")
         st.markdown("#### 2. Faça sua Pergunta")
         
-        # --- INÍCIO DA NOVA LÓGICA DE PREPARAÇÃO DE DADOS ---
-        
-        # Define o placeholder da pergunta baseado no perfil
-        placeholder_text = ""
-        if user.role == 'SEDE':
-            placeholder_text = "Ex: Qual foi o total de dízimos (culto)? Liste os dízimos nominais. Qual o total de saídas com transporte?"
-        elif user.role == 'TESOUREIRO MISSIONÁRIO':
-            placeholder_text = "Ex: Qual o total de entradas de missões? E o de saídas?"
-
-        # Interface de pergunta
+        placeholder_text = "Ex: Qual o total de dízimos? Liste as 3 maiores saídas. Quem foi o dizimista com maior valor?"
         pergunta = st.text_area("Sua pergunta:", key="ia_pergunta_final", height=100, placeholder=placeholder_text)
         
         if st.button("Analisar com IA", type="primary", use_container_width=True):
             if pergunta.strip():
                 with st.spinner("Buscando e preparando os dados..."):
                     
-                    dados_para_ia_df = pd.DataFrame()
-                    contexto_str = f"{cong_selecionada_obj.name} - {ref.strftime('%B de %Y')}"
+                    dados_completos = _collect_month_data(cong_selecionada_obj.id, start, end)
+                    
+                    # --- INÍCIO DA NOVA LÓGICA DE PREPARAÇÃO DE DADOS ---
+                    
+                    # 1. Calcula os totais de dízimo das duas fontes
+                    total_dizimo_transacao = sum(float(t.amount) for t in dados_completos.get("tx_in", []) if t.category and _norm(t.category.name) in ("dizimo", "dízimo"))
+                    total_dizimo_nominal = sum(float(t.amount) for t in dados_completos.get("tithes", []))
+                    
+                    # 2. Aplica a REGRA DE NEGÓCIO: pega o maior valor
+                    total_dizimo_correto = max(total_dizimo_transacao, total_dizimo_nominal)
+                    
+                    # 3. Monta a lista de dados para a IA, agora com dados limpos e precisos
+                    combined_rows = []
 
-                    if user.role == 'SEDE':
-                        dados_completos = _collect_month_data(cong_selecionada_obj.id, start, end)
-                        combined_rows = []
+                    # Adiciona uma única linha consolidada para o Dízimo, com o valor já correto
+                    if total_dizimo_correto > 0:
+                        combined_rows.append({
+                            "Data": start, 
+                            "Tipo": "Entrada", 
+                            "Categoria": "Dízimo (Total Consolidado)", 
+                            "Descricao": "Valor total de dízimos do período, aplicando a regra de equivalência.", 
+                            "Valor": total_dizimo_correto
+                        })
+                    
+                    # Adiciona detalhes do dízimo nominal para que a IA possa responder sobre nomes
+                    for t in dados_completos.get("tithes", []):
+                        combined_rows.append({
+                            "Data": t.date, "Tipo": "Entrada", "Categoria": "Detalhe Dízimo Nominal", 
+                            "Descricao": f"Dizimista: {t.tither_name}, Pgto: {t.payment_method}", 
+                            "Valor": t.amount
+                        })
 
-                        # 1. Adiciona Dízimos de Transação (o padrão)
-                        for t in dados_completos.get("tx_in", []):
-                            if t.category and _norm(t.category.name) in ("dizimo", "dízimo"):
-                                combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": "Dízimo (Culto)", "Descricao": t.description, "Valor": t.amount})
+                    # Adiciona outras entradas (sem Dízimo e sem Missões)
+                    for t in dados_completos.get("tx_in", []):
+                        if t.category and _norm(t.category.name) not in ("dizimo", "dízimo", "missoes", "missões"):
+                            combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
 
-                        # 2. Adiciona Dízimos Nominais (separadamente)
-                        for t in dados_completos.get("tithes", []):
-                            combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": "Dízimo Nominal", "Descricao": f"Dizimista: {t.tither_name}, Pgto: {t.payment_method}", "Valor": t.amount})
-
-                        # 3. Adiciona outras entradas (sem Dízimo e sem Missões)
-                        for t in dados_completos.get("tx_in", []):
-                            if t.category and _norm(t.category.name) not in ("dizimo", "dízimo", "missoes", "missões"):
-                                combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
-                        
-                        # 4. Adiciona entradas de Missões (separadamente)
-                        for t in dados_completos.get("tx_in", []):
-                            if t.category and _norm(t.category.name) in ("missoes", "missões"):
-                                combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": "Entrada de Missões", "Descricao": t.description, "Valor": t.amount})
-
-                        # 5. Adiciona saídas
-                        for t in dados_completos.get("tx_out", []):
+                    # Adiciona entradas e saídas de Missões
+                    for t in dados_completos.get("tx_in", []):
+                        if t.category and _norm(t.category.name) in ("missoes", "missões"):
+                            combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": "Entrada de Missões", "Descricao": t.description, "Valor": t.amount})
+                    for t in dados_completos.get("tx_out", []):
+                        if t.category and _norm(t.category.name) in ("missões (saída)", "missoes (saida)"):
+                             combined_rows.append({"Data": t.date, "Tipo": "Saída", "Categoria": "Saída de Missões", "Descricao": t.description, "Valor": t.amount})
+                    
+                    # Adiciona as outras saídas
+                    for t in dados_completos.get("tx_out", []):
+                        if t.category and _norm(t.category.name) not in ("missões (saída)", "missoes (saida)"):
                             combined_rows.append({"Data": t.date, "Tipo": "Saída", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
-                        
-                        dados_para_ia_df = pd.DataFrame(combined_rows)
-
-                    elif user.role == 'TESOUREIRO MISSIONÁRIO':
-                        dados_para_ia_df = get_missions_data_for_ia(cong_selecionada_obj.id, start, end)
-                        contexto_str = f"Dados de Missões de {cong_selecionada_obj.name} - {ref.strftime('%B de %Y')}"
+                    
+                    dados_para_ia_df = pd.DataFrame(combined_rows)
+                    # --- FIM DA NOVA LÓGICA ---
 
                 with st.spinner("O assistente está analisando os dados e elaborando uma resposta..."):
+                    contexto_str = f"{cong_selecionada_obj.name} - {ref.strftime('%B de %Y')}"
+                    
                     resposta = responder_pergunta_financeira(
                         pergunta_usuario=pergunta,
                         dados_df=dados_para_ia_df,
