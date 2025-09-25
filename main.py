@@ -3398,46 +3398,53 @@ def page_relatorio_missoes(user: "User"):
             
             # 1. Tabela Geral de Contribuições agora vem primeiro
             st.markdown("###### Tabela Geral de Contribuições")
-            if not df_search.empty:
-                st.dataframe(
-                    df_search.style.format({"Total no Período (R$)": format_currency, "Total no Ano (R$)": format_currency}),
-                    use_container_width=True, hide_index=True
-                )
-            else:
-                st.caption("Nenhuma contribuição de missões encontrada para os filtros selecionados.")
+if not df_search.empty:
+    st.dataframe(
+        df_search.style.format({"Total no Período (R$)": format_currency, "Total no Ano (R$)": format_currency}),
+        use_container_width=True, hide_index=True
+    )
+else:
+    st.caption("Nenhuma contribuição de missões encontrada para os filtros selecionados.")
 
-            # 2. Métricas vêm abaixo da tabela geral
-            st.markdown("##### Destaques do Período Selecionado")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Total de Entradas no Mês", format_currency(total_periodo))
-            c2.metric("Nº de Congregações Contribuintes (mês)", f"{num_congs}")
-            st.write("Colunas disponíveis no df_search:", df_search.columns)
-            c3.metric("Total de Entradas no Ano", format_currency(df_search["Total no Ano (R$)"].sum()))
-            
-            st.divider()
-            
-            # 3. Tabelas do Top 5 vêm por último
-            st.markdown("##### Maiores Contribuintes")
-            col_top1, col_top2 = st.columns(2)
-            with col_top1:
-                st.markdown(f"**Top 5 ({mes_sel if mes_sel != 'Todos' else 'Período'})**")
-                if not df_top_period.empty:
-                    st.dataframe(
-                        df_top_period[['Congregação', 'Total no Período (R$)']].style.format({"Total no Período (R$)": format_currency}),
-                        use_container_width=True, hide_index=True
-                    )
-                else:
-                    st.caption("Nenhum contribuinte no período.")
-            
-            with col_top2:
-                st.markdown(f"**Top 5 (Ano de {ano_pesq})**")
-                if not df_top_year.empty:
-                    st.dataframe(
-                        df_top_year[['Congregação', 'Total no Ano (R$)']].style.format({"Total no Ano (R$)": format_currency}),
-                        use_container_width=True, hide_index=True
-                    )
-                else:
-                    st.caption("Nenhum contribuinte no ano.")
+# 2. Métricas vêm abaixo da tabela geral
+st.markdown("##### Destaques do Período Selecionado")
+c1, c2, c3 = st.columns(3)
+
+# --- INÍCIO DA CORREÇÃO ---
+# Calcula o total do ano de forma segura, verificando se a tabela não está vazia
+total_ano = 0.0
+if not df_search.empty:
+    total_ano = df_search["Total no Ano (R$)"].sum()
+
+c1.metric("Total de Entradas no Mês", format_currency(total_periodo))
+c2.metric("Nº de Congregações Contribuintes (mês)", f"{num_congs}")
+c3.metric("Total de Entradas no Ano", format_currency(total_ano))
+# --- FIM DA CORREÇÃO ---
+        
+st.divider()
+        
+# 3. Tabelas do Top 5 vêm por último
+st.markdown("##### Maiores Contribuintes")
+col_top1, col_top2 = st.columns(2)
+with col_top1:
+    st.markdown(f"**Top 5 ({mes_sel if mes_sel != 'Todos' else 'Período'})**")
+    if not df_top_period.empty:
+        st.dataframe(
+            df_top_period[['Congregação', 'Total no Período (R$)']].style.format({"Total no Período (R$)": format_currency}),
+            use_container_width=True, hide_index=True
+        )
+    else:
+        st.caption("Nenhum contribuinte no período.")
+
+with col_top2:
+    st.markdown(f"**Top 5 (Ano de {ano_pesq})**")
+    if not df_top_year.empty:
+        st.dataframe(
+            df_top_year[['Congregação', 'Total no Ano (R$)']].style.format({"Total no Ano (R$)": format_currency}),
+            use_container_width=True, hide_index=True
+        )
+    else:
+        st.caption("Nenhum contribuinte no ano.")
 
 
 def page_relatorio_missoes_congregacao(user: "User"):
