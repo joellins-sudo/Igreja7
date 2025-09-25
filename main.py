@@ -2963,7 +2963,7 @@ def page_visao_geral(user: "User"):
             all_units = [(f"{cong.name} (Principal)", None)] + [(f"↳ {s.name}", s.id) for s in sub_congs]
 
             for unit_name, sub_id in all_units:
-                df_entradas = _load_service_logs(db, cong.id, start, end, sub_id)
+                df_entradas = _load_service_logs(cong.id, start, end, sub_id)
                 total_dizimos = df_entradas['Dízimo'].sum() if not df_entradas.empty else 0.0
                 total_ofertas = df_entradas['Oferta'].sum() if not df_entradas.empty else 0.0
                 total_geral_entradas = total_dizimos + total_ofertas
