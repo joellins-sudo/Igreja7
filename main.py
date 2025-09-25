@@ -1717,90 +1717,50 @@ def _editor_saidas_agg_all(congs_all: List[Congregation], start: date, end: date
 # ===================== FUNÇÃO _collect_month_data CORRIGIDA =====================
 # ===================== FUNÇÃO DE RESUMO GERAL PARA SEDE =====================
 # ===================== FUNÇÃO DE COLETA GERAL PARA IA DA SEDE =====================
-@st.cache_data
-def get_all_consolidated_data_for_ia():
+# ===================== FUNÇÃO DE COLETA DETALHADA PARA IA DA SEDE =====================
+@st.cache_data(ttl="1h") # Adicionamos um cache de 1 hora para os dados não ficarem obsoletos
+def get_all_detailed_data_for_ia():
     """
-    Busca um resumo de TODAS as transações e dízimos do banco de dados,
-    agregados por congregação, ano e mês, de forma otimizada para a IA.
+    Busca TODAS as transações e dízimos do banco de dados de forma detalhada.
+    ATENÇÃO: Pode consumir bastante memória e ser lento na primeira execução.
     """
     with SessionLocal() as db:
-        # Subquery para Entradas e Saídas (Transaction)
-        transactions_subq = select(
-            Transaction.congregation_id,
-            func.coalesce(func.sum(Transaction.amount).filter(Transaction.type == 'DOAÇÃO'), 0).label("total_entries"),
-            func.coalesce(func.sum(Transaction.amount).filter(Transaction.type == 'SAÍDA'), 0).label("total_exits")
-        ).group_by(Transaction.congregation_id).subquery()
-
-        # Subquery para Dízimos Nominais (Tithe)
-        tithes_subq = select(
-            Tithe.congregation_id,
-            func.coalesce(func.sum(Tithe.amount), 0).label("total_tithes")
-        ).group_by(Tithe.congregation_id).subquery()
-        
-        # Query principal que junta os totais gerais
-        query = select(
+        # Busca todas as transações (entradas e saídas)
+        q_transactions = select(
             Congregation.name.label("Congregacao"),
-            (func.coalesce(transactions_subq.c.total_entries, 0) + func.coalesce(tithes_subq.c.total_tithes, 0)).label("Entradas"),
-            func.coalesce(transactions_subq.c.total_exits, 0).label("Saidas")
-        ).select_from(Congregation).outerjoin(
-            transactions_subq, Congregation.id == transactions_subq.c.congregation_id
-        ).outerjoin(
-            tithes_subq, Congregation.id == tithes_subq.c.congregation_id
-        ).order_by(Congregation.name)
+            Transaction.date.label("Data"),
+            Transaction.type.label("Tipo"),
+            Category.name.label("Categoria"),
+            Transaction.description.label("Descricao"),
+            Transaction.amount.label("Valor")
+        ).join(Congregation).join(Category)
+        df_transactions = pd.read_sql(q_transactions, db.bind)
 
-        # Query para dados detalhados por mês para a IA
-        q_detailed = select(
+        # Busca todos os dízimos nominais
+        q_tithes = select(
             Congregation.name.label("Congregacao"),
-            func.extract('year', Transaction.date).label('Ano'),
-            func.extract('month', Transaction.date).label('Mes'),
-            func.sum(Transaction.amount).label('Valor'),
-            Transaction.type.label('Tipo')
-        ).join(Congregation).group_by(
-            Congregation.name,
-            func.extract('year', Transaction.date),
-            func.extract('month', Transaction.date),
-            Transaction.type
-        )
+            Tithe.date.label("Data"),
+            Tithe.tither_name.label("Dizimista"),
+            Tithe.payment_method.label("Forma_Pagamento"),
+            Tithe.amount.label("Valor")
+        ).join(Congregation)
+        df_tithes = pd.read_sql(q_tithes, db.bind)
+
+        # Prepara o DataFrame de dízimos para ser combinado
+        df_tithes_formatted = pd.DataFrame()
+        if not df_tithes.empty:
+            df_tithes_formatted["Data"] = df_tithes["Data"]
+            df_tithes_formatted["Tipo"] = "Entrada"
+            df_tithes_formatted["Categoria"] = "Dízimo Nominal"
+            df_tithes_formatted["Descricao"] = "Dizimista: " + df_tithes["Dizimista"].fillna('') + ", Pgto: " + df_tithes["Forma_Pagamento"].fillna('')
+            df_tithes_formatted["Valor"] = df_tithes["Valor"]
+            df_tithes_formatted["Congregacao"] = df_tithes["Congregacao"]
+
+        # Combina tudo em uma única tabela de dados para a IA
+        df_final = pd.concat([df_transactions, df_tithes_formatted], ignore_index=True)
+        df_final.sort_values(by="Data", inplace=True)
         
-        # Busca todos os dados de uma vez
-        all_transactions = pd.read_sql(q_detailed, db.bind)
-        all_tithes_q = select(
-            Congregation.name.label("Congregacao"),
-            func.extract('year', Tithe.date).label('Ano'),
-            func.extract('month', Tithe.date).label('Mes'),
-            func.sum(Tithe.amount).label('Valor')
-        ).join(Congregation).group_by(Congregation.name, func.extract('year', Tithe.date), func.extract('month', Tithe.date))
-        all_tithes = pd.read_sql(all_tithes_q, db.bind)
-
-        # Combina os dados para a IA
-        if not all_transactions.empty:
-            entradas_df = all_transactions[all_transactions['Tipo'] == 'DOAÇÃO'].copy()
-            saidas_df = all_transactions[all_transactions['Tipo'] == 'SAÍDA'].copy()
-            
-            # Renomeia colunas para o merge
-            entradas_df.rename(columns={'Valor': 'Entradas'}, inplace=True)
-            saidas_df.rename(columns={'Valor': 'Saidas'}, inplace=True)
-            all_tithes.rename(columns={'Valor': 'Dizimos_Nominais'}, inplace=True)
-
-            # Merge principal
-            df_final = pd.merge(entradas_df[['Congregacao', 'Ano', 'Mes', 'Entradas']], saidas_df[['Congregacao', 'Ano', 'Mes', 'Saidas']], on=['Congregacao', 'Ano', 'Mes'], how='outer')
-            df_final = pd.merge(df_final, all_tithes, on=['Congregacao', 'Ano', 'Mes'], how='outer')
-            df_final.fillna(0, inplace=True)
-            
-            # Lógica de equivalência de dízimos (simplificada para o resumo)
-            # Aqui, apenas somamos os dízimos nominais às entradas para um total geral
-            df_final['Entradas'] = df_final['Entradas'] + df_final['Dizimos_Nominais']
-            df_final['Saldo'] = df_final['Entradas'] - df_final['Saidas']
-            
-            return df_final[['Congregacao', 'Ano', 'Mes', 'Entradas', 'Saidas', 'Saldo']]
-        
-        elif not all_tithes.empty:
-            all_tithes.rename(columns={'Valor': 'Entradas'}, inplace=True)
-            all_tithes['Saidas'] = 0
-            all_tithes['Saldo'] = all_tithes['Entradas']
-            return all_tithes[['Congregacao', 'Ano', 'Mes', 'Entradas', 'Saidas', 'Saldo']]
-
-        return pd.DataFrame()
+        return df_final
 
 @st.cache_data
 # 1. O parâmetro 'db' foi REMOVIDO daqui
@@ -4248,6 +4208,7 @@ def main():
         # ===================== PAGE: ASSISTENTE IA =====================
 # ===================== PAGE: ASSISTENTE IA (LÓGICA DE PERMISSÃO CORRIGIDA) =====================
 # ===================== PAGE: ASSISTENTE IA (COM LÓGICA DE PERFIS) =====================
+# ===================== PAGE: ASSISTENTE IA (COM BUSCA DETALHADA) =====================
 def page_assistente_ia(user: "User"):
     # Verificação de permissão geral
     if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
@@ -4260,20 +4221,20 @@ def page_assistente_ia(user: "User"):
     if user.role == 'SEDE':
         st.info("Faça uma pergunta em linguagem natural sobre os dados financeiros de **todas as congregações e de todo o período**.")
         
-        pergunta = st.text_area("Sua pergunta:", key="ia_pergunta_sede", height=150, placeholder="Ex: Qual foi o total de saídas em 2024? Qual congregação teve o maior saldo em julho de 2025?")
+        pergunta = st.text_area("Sua pergunta:", key="ia_pergunta_sede", height=150, placeholder="Ex: Qual foi o total de saídas em 2024? Liste os dizimistas da Sede em setembro de 2025.")
 
         if st.button("Analisar Banco de Dados Completo", type="primary", use_container_width=True):
             if pergunta.strip():
-                with st.spinner("Buscando e consolidando todos os dados do banco... Isso pode levar um momento."):
-                    # 1. Busca o resumo de TODOS os dados
-                    dados_consolidados_df = get_all_consolidated_data_for_ia()
+                with st.spinner("Buscando todos os lançamentos do banco de dados... Isso pode levar um momento."):
+                    # --- MUDANÇA AQUI ---
+                    # Chamamos a nova função que busca os dados detalhados
+                    dados_detalhados_df = get_all_detailed_data_for_ia()
                 
                 with st.spinner("O assistente está analisando os dados e elaborando uma resposta..."):
-                    # 2. Envia a pergunta e os dados consolidados para a IA
                     resposta = responder_pergunta_financeira(
                         pergunta_usuario=pergunta,
-                        dados_df=dados_consolidados_df,
-                        contexto="Dados consolidados de todas as congregações e de todo o período."
+                        dados_df=dados_detalhados_df, # Usamos os dados detalhados
+                        contexto="Dados detalhados de todas as congregações e de todo o período."
                     )
                     st.markdown("---")
                     st.markdown(f"#### Resposta do Assistente")
@@ -4283,6 +4244,7 @@ def page_assistente_ia(user: "User"):
 
     # --- LÓGICA PARA O PERFIL TESOUREIRO MISSIONÁRIO (INTERFACE COM FILTROS) ---
     else:
+        # (O código para o Tesoureiro Missionário continua o mesmo)
         st.info("Selecione um contexto (congregação e período) e faça sua pergunta em linguagem natural sobre os dados financeiros.")
 
         with SessionLocal() as db:
