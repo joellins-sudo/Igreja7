@@ -1601,7 +1601,7 @@ def _editor_entradas_agg_all(congs_all: List[Congregation], start: date, end: da
             # Dados das sub-congregações
             sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == c.id)).all()
             for sub in sub_congs:
-                sub_totals = _collect_month_data(db, c.id, start, end, sub_cong_id=sub.id)["totals"]
+                sub_totals = _collect_month_data(c.id, start, end, sub_cong_id=sub.id)["totals"]
                 rows_data.append({
                     "unidade_display": f"↳ {sub.name}",
                     "valor": float(sub_totals["entradas_total_sem_missoes"]),
@@ -1633,7 +1633,7 @@ def _editor_saidas_agg_all(congs_all: List[Congregation], start: date, end: date
     with SessionLocal() as db:
         rows = []
         for c in congs_all:
-            totals = _collect_month_data(db, c.id, start, end)["totals"]
+            totals = _collect_month_data(c.id, start, end)["totals"]
             rows.append({"Congregação": c.name, "Total Saídas (R$)": float(totals["saidas_total"])})
         df_view = pd.DataFrame(rows).sort_values("Total Saídas (R$)", ascending=False).reset_index(drop=True)
 
@@ -2265,7 +2265,7 @@ def page_relatorio_saida(user: "User"):
             all_units = [(f"{parent_cong_obj.name} (Principal)", None)] + [(s.name, s.id) for s in sub_congs]
             rows = []
             for name, sub_id in all_units:
-                totals = _collect_month_data(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)["totals"]
+                totals = _collect_month_data(parent_cong_obj.id, start, end, sub_cong_id=sub_id)["totals"]
                 rows.append({"Unidade": name, "Total Saídas": totals["saidas_total"]})
             
             df_agg = pd.DataFrame(rows)
@@ -2390,7 +2390,7 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
     story.append(Spacer(1, 0.5*cm))
 
     # Coleta de dados gerais (para Saídas e Resumo Final)
-    data_geral = _collect_month_data(db, cong_id, start, end, sub_cong_id=sub_cong_id)
+    data_geral = _collect_month_data(cong_id, start, end, sub_cong_id=sub_cong_id)
     totals_gerais = data_geral["totals"]
     
     # ===== Tabela de Entradas (CORRIGIDA) =====
@@ -2691,7 +2691,7 @@ def build_full_statement_pdf(parent_cong_id: int, ref: date, db: Session) -> byt
         story.append(Spacer(1, 1*cm))
         story.append(Paragraph(f"Detalhes da Unidade: {name}", heading_style))
         
-        data = _collect_month_data(db, parent_cong_obj.id, start, end, sub_cong_id=sub_id)
+        data = _collect_month_data(parent_cong_obj.id, start, end, sub_cong_id=sub_id)
         totals = data["totals"]
         unit_total_entradas = totals["entradas_total_sem_missoes"]
         unit_total_saidas = totals["saidas_total"]
@@ -3309,7 +3309,7 @@ def page_relatorio_missoes(user: "User"):
 
             # --- CORREÇÃO DE ORDEM ---
             # PRIMEIRO, a linha que cria a variável df_search
-            df_search, total_periodo, num_congs, df_top_period, df_top_year = _build_missions_search_df(db, ano_pesq, mes_sel)
+            df_search, total_periodo, num_congs, df_top_period, df_top_year = _build_missions_search_df(ano_pesq, mes_sel)
 
             # SÓ DEPOIS, o bloco de código que USA a variável df_search
             st.divider()
@@ -3616,7 +3616,7 @@ def display_entry_hierarchy(user: User, congs_all: List[Congregation], start: da
         })
         
         for sub in sub_congs:
-            sub_totals = _collect_month_data(db, cong.id, start, end, sub_cong_id=sub.id)["totals"]
+            sub_totals = _collect_month_data(cong.id, start, end, sub_cong_id=sub.id)["totals"]
             sub_entradas = sub_totals["entradas_total_sem_missoes"]
             report_data.append({
                 "Unidade": f"↳ {sub.name}", "Entradas": sub_entradas,
@@ -3717,7 +3717,7 @@ def display_exit_hierarchy(user: User, congs_all: List[Congregation], start: dat
         })
         
         for sub in sub_congs:
-            sub_totals = _collect_month_data(db, cong.id, start, end, sub_cong_id=sub.id)["totals"]
+            sub_totals = _collect_month_data(cong.id, start, end, sub_cong_id=sub.id)["totals"]
             sub_saidas = sub_totals["saidas_total"]
             report_data.append({
                 "Unidade": f"↳ {sub.name}", "Saídas": sub_saidas,
