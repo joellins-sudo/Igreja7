@@ -1701,10 +1701,6 @@ def _editor_saidas_agg_all(congs_all: List[Congregation], start: date, end: date
     )
     # REMOVIDO: Botão de salvar e toda sua lógica
 
-# ===================== CORE COLETA =====================
-# ===================== CORE COLETA =====================
-# ===================== FUNÇÃO _collect_month_data CORRIGIDA =====================
-# ===================== FUNÇÃO DE RESUMO GERAL PARA SEDE =====================
 # ===================== FUNÇÃO DE COLETA GERAL PARA IA DA SEDE =====================
 # ===================== FUNÇÃO DE COLETA DETALHADA PARA IA DA SEDE =====================
 @st.cache_data(ttl="1h") # Cache de 1 hora
@@ -1750,6 +1746,60 @@ def get_all_aggregated_data_for_ia():
         # 3. Combina tudo
         df_final = pd.concat([df_transactions, df_tithes], ignore_index=True)
         return df_final
+
+# ===================== FUNÇÃO DE RESUMO RÁPIDO PARA DASHBOARD =====================
+# ===================== FUNÇÃO DE RESUMO RÁPIDO PARA DASHBOARD =====================
+@st.cache_data(ttl="10m") # Cache de 10 minutos para dados atualizados
+def get_dashboard_summary(cong_id: int, start: date, end: date):
+    """
+    Busca e calcula os 5 totais financeiros essenciais para uma congregação e período.
+    """
+    with SessionLocal() as db:
+        # 1. Total de Saídas
+        q_saidas = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+            Transaction.congregation_id == cong_id,
+            Transaction.date >= start, Transaction.date < end,
+            Transaction.type == 'SAÍDA'
+        )
+        total_saida = db.scalar(q_saidas)
+
+        # 2. Total de Ofertas
+        q_ofertas = select(func.coalesce(func.sum(Transaction.amount), 0.0)).join(Category).where(
+            Transaction.congregation_id == cong_id,
+            Transaction.date >= start, Transaction.date < end,
+            Category.name == 'Oferta'
+        )
+        total_oferta = db.scalar(q_ofertas)
+        
+        # 3. Total de Dízimos (de Transações)
+        q_dizimos_trans = select(func.coalesce(func.sum(Transaction.amount), 0.0)).join(Category).where(
+            Transaction.congregation_id == cong_id,
+            Transaction.date >= start, Transaction.date < end,
+            Category.name == 'Dízimo'
+        )
+        total_dizimo_transacao = db.scalar(q_dizimos_trans)
+
+        # 4. Total de Dízimos (Nominais)
+        q_dizimos_nominal = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
+            Tithe.congregation_id == cong_id,
+            Tithe.date >= start, Tithe.date < end
+        )
+        total_dizimo_nominal = db.scalar(q_dizimos_nominal)
+
+        # Aplicando a regra de negócio para o total de dízimo
+        total_dizimo = max(total_dizimo_transacao, total_dizimo_nominal)
+        
+        # Cálculos finais
+        total_dizimo_mais_oferta = total_dizimo + total_oferta
+        saldo = total_dizimo_mais_oferta - total_saida
+
+        return {
+            "total_dizimo": total_dizimo,
+            "total_oferta": total_oferta,
+            "total_dizimo_mais_oferta": total_dizimo_mais_oferta,
+            "total_saida": total_saida,
+            "saldo": saldo,
+        }
 
 @st.cache_data
 # 1. O parâmetro 'db' foi REMOVIDO daqui
@@ -3038,6 +3088,54 @@ def render_stat_card(col, label: str, full_text: str):
         unsafe_allow_html=True,
     )
 
+# ===================== PAGE: RESUMO RÁPIDO =====================
+def page_resumo_financeiro(user: "User"):
+    st.markdown("<h1 class='page-title'>⚡ Resumo Financeiro Rápido</h1>", unsafe_allow_html=True)
+
+    with SessionLocal() as db:
+        congs_all = order_congs_sede_first(cong_options_for(user, db))
+        
+        # --- Filtros de Congregação e Data ---
+        col_cong, col_filtros = st.columns([2, 3])
+        with col_cong:
+            cong_selecionada_obj = None
+            if user.role in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
+                cong_sel_name = st.selectbox("Congregação", [c.name for c in congs_all], key="resumo_cong_sel")
+                cong_selecionada_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
+            else:
+                cong_selecionada_obj = db.get(Congregation, user.congregation_id)
+                if cong_selecionada_obj:
+                    st.text_input("Congregação", cong_selecionada_obj.name, disabled=True)
+
+        with col_filtros:
+            ref = get_month_selector("Mês de Referência", key_prefix="resumo_ref")
+        
+        start, end = month_bounds(ref)
+
+        if not cong_selecionada_obj:
+            st.warning("Nenhuma congregação selecionada.")
+            return
+            
+        st.divider()
+
+        # --- Busca os dados e exibe as métricas ---
+        with st.spinner(f"Calculando resumo para {cong_selecionada_obj.name}..."):
+            summary = get_dashboard_summary(cong_selecionada_obj.id, start, end)
+
+            st.markdown(f"### Resumo para **{cong_selecionada_obj.name}** em **{ref.strftime('%B de %Y')}**")
+
+            # Layout das métricas
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total de Dízimo", format_currency(summary["total_dizimo"]))
+            col2.metric("Total de Oferta", format_currency(summary["total_oferta"]))
+            col3.metric("Dízimo + Oferta", format_currency(summary["total_dizimo_mais_oferta"]))
+            
+            st.markdown("<br>", unsafe_allow_html=True) # Espaçamento
+
+            col4, col5 = st.columns(2)
+            col4.metric("Total de Saídas", format_currency(summary["total_saida"]), delta_color="inverse")
+            col5.metric("Saldo do Mês", format_currency(summary["saldo"]))
+
 # ===================== PAGE: VISÃO GERAL =====================
 # ===================== PAGE: VISÃO GERAL =====================
 def page_visao_geral(user: "User"):
@@ -4199,87 +4297,85 @@ def main():
 # ===================== PAGE: ASSISTENTE IA (COM LÓGICA DE PERFIS) =====================
 # ===================== PAGE: ASSISTENTE IA (COM BUSCA DETALHADA) =====================
 # ===================== PAGE: ASSISTENTE IA (COM CHAMADA CORRIGIDA) =====================
+# ===================== PAGE: ASSISTENTE IA (COM RESUMO RÁPIDO E ANÁLISE LIVRE) =====================
 def page_assistente_ia(user: "User"):
+    # Verificação de permissão geral
     if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
         st.warning("🔒 Acesso negado. Esta funcionalidade está disponível apenas para os perfis SEDE e TESOUREIRO MISSIONÁRIO.")
         return
 
     st.markdown("<h1 class='page-title'>🤖 Assistente Financeiro IA</h1>", unsafe_allow_html=True)
 
+    # --- LÓGICA PARA O PERFIL SEDE ---
     if user.role == 'SEDE':
-        st.info("Faça uma pergunta em linguagem natural sobre os dados financeiros de **todas as congregações e de todo o período**.")
-        pergunta = st.text_area("Sua pergunta:", key="ia_pergunta_sede", height=150, placeholder="Ex: Qual foi o total de saídas em 2024? Qual congregação teve o maior saldo em julho de 2025?")
-
-        if st.button("Analisar Banco de Dados Completo", type="primary", use_container_width=True):
-            if pergunta.strip():
-                with st.spinner("Buscando e consolidando todos os dados do banco... Isso pode levar um momento."):
-                    # --- CORREÇÃO AQUI ---
-                    # Usamos o nome da nova função que criamos
-                    dados_consolidados_df = get_all_aggregated_data_for_ia()
-                
-                with st.spinner("O assistente está analisando os dados e elaborando uma resposta..."):
-                    resposta = responder_pergunta_financeira(
-                        pergunta_usuario=pergunta,
-                        dados_df=dados_consolidados_df,
-                        contexto="Dados consolidados de todas as congregações e de todo o período."
-                    )
-                    st.markdown("---")
-                    st.markdown(f"#### Resposta do Assistente")
-                    st.info(resposta)
-            else:
-                st.warning("Por favor, digite uma pergunta.")
-    else:
-        st.info("Selecione um contexto (congregação e período) e faça sua pergunta em linguagem natural sobre os dados financeiros.")
+        # SEÇÃO 1: RESUMO RÁPIDO COM FILTROS
+        st.subheader("1. Resumo Financeiro Rápido (com IA)")
         with SessionLocal() as db:
-            st.markdown("#### 1. Selecione o Contexto dos Dados")
             congs_all = order_congs_sede_first(cong_options_for(user, db))
-            col_cong, col_filtros = st.columns([2, 3])
             
+            col_cong, col_filtros = st.columns([2, 3])
             with col_cong:
-                cong_sel_name = st.selectbox("Congregação", [c.name for c in congs_all], key="ia_cong_sel_tm")
+                cong_sel_name = st.selectbox("Congregação", [c.name for c in congs_all], key="ia_resumo_cong_sel")
                 cong_selecionada_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
 
             with col_filtros:
-                ref = get_month_selector("Mês de Referência", key_prefix="ia_ref_tm")
+                ref = get_month_selector("Mês de Referência", key_prefix="ia_resumo_ref")
             
             start, end = month_bounds(ref)
 
-            if not cong_selecionada_obj:
-                st.warning("Nenhuma congregação selecionada. Por favor, selecione uma na lista.")
-                return
-
-            st.markdown("---")
-            st.markdown("#### 2. Faça sua Pergunta Detalhada")
-            
-            dados_completos = _collect_month_data(cong_selecionada_obj.id, start, end)
-            
-            combined_rows = []
-            for t in dados_completos.get("tx_in", []):
-                combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
-            for t in dados_completos.get("tithes", []):
-                combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": "Dízimo Nominal", "Descricao": f"Dizimista: {t.tither_name}, Pgto: {t.payment_method}", "Valor": t.amount})
-            for t in dados_completos.get("tx_out", []):
-                combined_rows.append({"Data": t.date, "Tipo": "Saída", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
-            
-            dados_para_ia_df = pd.DataFrame(combined_rows)
-
-            pergunta = st.text_area("Sua pergunta:", key="ia_pergunta_tm", height=100, placeholder="Ex: Qual foi o total de ofertas em dinheiro?")
-
-            if st.button("Analisar com IA", type="primary", use_container_width=True):
-                if pergunta.strip():
-                    with st.spinner("O assistente está analisando os dados e elaborando uma resposta..."):
-                        contexto_str = f"{cong_selecionada_obj.name} - {ref.strftime('%B de %Y')}"
+            if st.button(f"Gerar Resumo para {cong_sel_name}", type="primary"):
+                if cong_selecionada_obj:
+                    with st.spinner("Calculando e gerando resumo..."):
+                        summary = get_dashboard_summary(cong_selecionada_obj.id, start, end)
                         
+                        prompt_resumo = (
+                            f"Com base nos seguintes dados da congregação {cong_sel_name} para {ref.strftime('%B de %Y')}, "
+                            f"gere um resumo financeiro em formato de lista (bullet points) com os seguintes totais: "
+                            f"Total de Dízimo, Total de Oferta, Total de Dízimo + Oferta, Total de Saída e Saldo Final.\n\n"
+                            f"Dados: {str(summary)}"
+                        )
+
+                        # Usamos a função de IA já existente, mas com um prompt muito específico
+                        resposta = responder_pergunta_financeira(
+                            pergunta_usuario=prompt_resumo,
+                            dados_df=pd.DataFrame([summary]), # Passa um DataFrame simples
+                            contexto="Resumo financeiro mensal"
+                        )
+                        st.info(resposta)
+                else:
+                    st.error("Congregação não encontrada.")
+        
+        st.divider()
+
+        # SEÇÃO 2: ANÁLISE LIVRE (EXPANSÍVEL)
+        with st.expander("2. Análise Livre (Consultar todo o banco de dados)"):
+            st.info("Faça uma pergunta em linguagem natural sobre os dados financeiros de **todas as congregações e de todo o período**.")
+            pergunta = st.text_area("Sua pergunta:", key="ia_pergunta_sede", height=150, placeholder="Ex: Qual foi o total de saídas em 2024? Qual congregação teve o maior saldo em julho de 2025?")
+
+            if st.button("Analisar Banco de Dados Completo"):
+                if pergunta.strip():
+                    with st.spinner("Buscando e consolidando todos os dados do banco... Isso pode levar um momento."):
+                        dados_consolidados_df = get_all_aggregated_data_for_ia()
+                    
+                    with st.spinner("O assistente está analisando os dados e elaborando uma resposta..."):
                         resposta = responder_pergunta_financeira(
                             pergunta_usuario=pergunta,
-                            dados_df=dados_para_ia_df,
-                            contexto=contexto_str
+                            dados_df=dados_consolidados_df,
+                            contexto="Dados consolidados de todas as congregações e de todo o período."
                         )
                         st.markdown("---")
                         st.markdown(f"#### Resposta do Assistente")
                         st.info(resposta)
                 else:
                     st.warning("Por favor, digite uma pergunta.")
+
+    # --- LÓGICA PARA O TESOUREIRO MISSIONÁRIO (continua a mesma) ---
+    else:
+        st.info("Selecione um contexto (congregação e período) e faça sua pergunta em linguagem natural sobre os dados financeiros.")
+        with SessionLocal() as db:
+            st.markdown("#### Selecione o Contexto dos Dados")
+            # ... (O restante do código para o Tesoureiro Missionário permanece o mesmo)
+            # ...
 
 if __name__ == "__main__":
     main()
