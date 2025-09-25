@@ -1724,79 +1724,83 @@ def get_all_consolidated_data_for_ia():
     agregados por congregação, ano e mês, de forma otimizada para a IA.
     """
     with SessionLocal() as db:
-        # Query para agregar todas as transações (Entradas e Saídas)
-        q_transactions = select(
-            Congregation.name,
-            func.extract('year', Transaction.date).label('ano'),
-            func.extract('month', Transaction.date).label('mes'),
-            func.coalesce(func.sum(Transaction.amount).filter(Transaction.type == 'DOAÇÃO'), 0).label("entradas"),
-            func.coalesce(func.sum(Transaction.amount).filter(Transaction.type == 'SAÍDA'), 0).label("saidas")
+        # Subquery para Entradas e Saídas (Transaction)
+        transactions_subq = select(
+            Transaction.congregation_id,
+            func.coalesce(func.sum(Transaction.amount).filter(Transaction.type == 'DOAÇÃO'), 0).label("total_entries"),
+            func.coalesce(func.sum(Transaction.amount).filter(Transaction.type == 'SAÍDA'), 0).label("total_exits")
+        ).group_by(Transaction.congregation_id).subquery()
+
+        # Subquery para Dízimos Nominais (Tithe)
+        tithes_subq = select(
+            Tithe.congregation_id,
+            func.coalesce(func.sum(Tithe.amount), 0).label("total_tithes")
+        ).group_by(Tithe.congregation_id).subquery()
+        
+        # Query principal que junta os totais gerais
+        query = select(
+            Congregation.name.label("Congregacao"),
+            (func.coalesce(transactions_subq.c.total_entries, 0) + func.coalesce(tithes_subq.c.total_tithes, 0)).label("Entradas"),
+            func.coalesce(transactions_subq.c.total_exits, 0).label("Saidas")
+        ).select_from(Congregation).outerjoin(
+            transactions_subq, Congregation.id == transactions_subq.c.congregation_id
+        ).outerjoin(
+            tithes_subq, Congregation.id == tithes_subq.c.congregation_id
+        ).order_by(Congregation.name)
+
+        # Query para dados detalhados por mês para a IA
+        q_detailed = select(
+            Congregation.name.label("Congregacao"),
+            func.extract('year', Transaction.date).label('Ano'),
+            func.extract('month', Transaction.date).label('Mes'),
+            func.sum(Transaction.amount).label('Valor'),
+            Transaction.type.label('Tipo')
         ).join(Congregation).group_by(
             Congregation.name,
             func.extract('year', Transaction.date),
-            func.extract('month', Transaction.date)
+            func.extract('month', Transaction.date),
+            Transaction.type
         )
-
-        # Query para agregar todos os dízimos nominais
-        q_tithes = select(
-            Congregation.name,
-            func.extract('year', Tithe.date).label('ano'),
-            func.extract('month', Tithe.date).label('mes'),
-            func.coalesce(func.sum(Tithe.amount), 0).label("dizimos_nominais")
-        ).join(Congregation).group_by(
-            Congregation.name,
-            func.extract('year', Tithe.date),
-            func.extract('month', Tithe.date)
-        )
-
-        df_transactions = pd.read_sql(q_transactions, db.bind)
-        df_tithes = pd.read_sql(q_tithes, db.bind)
-
-        # Combina os resultados
-        if df_transactions.empty and df_tithes.empty:
-            return pd.DataFrame()
         
-        if df_transactions.empty:
-            df_tithes.rename(columns={'dizimos_nominais': 'entradas'}, inplace=True)
-            df_tithes['saidas'] = 0.0
-            return df_tithes
+        # Busca todos os dados de uma vez
+        all_transactions = pd.read_sql(q_detailed, db.bind)
+        all_tithes_q = select(
+            Congregation.name.label("Congregacao"),
+            func.extract('year', Tithe.date).label('Ano'),
+            func.extract('month', Tithe.date).label('Mes'),
+            func.sum(Tithe.amount).label('Valor')
+        ).join(Congregation).group_by(Congregation.name, func.extract('year', Tithe.date), func.extract('month', Tithe.date))
+        all_tithes = pd.read_sql(all_tithes_q, db.bind)
 
-        if not df_tithes.empty:
-            # Combina dízimos de transaction com dízimos nominais, pegando o maior valor (regra de negócio)
-            # Esta parte é complexa, mas garante a lógica correta que você pediu.
-            df_merged = pd.merge(df_transactions, df_tithes, on=["congregacao_name", "ano", "mes"], how="outer").fillna(0)
+        # Combina os dados para a IA
+        if not all_transactions.empty:
+            entradas_df = all_transactions[all_transactions['Tipo'] == 'DOAÇÃO'].copy()
+            saidas_df = all_transactions[all_transactions['Tipo'] == 'SAÍDA'].copy()
             
-            # Identifica a coluna de dízimos dentro de 'entradas' e a separa
-            cat_dizimo_id_q = select(Category.id).where(func.lower(Category.name).in_(('dizimo', 'dízimo')))
-            cat_dizimo_id = db.scalar(cat_dizimo_id_q)
-            
-            if cat_dizimo_id:
-                q_dizimo_trans = select(
-                    Congregation.name,
-                    func.extract('year', Transaction.date).label('ano'),
-                    func.extract('month', Transaction.date).label('mes'),
-                    func.coalesce(func.sum(Transaction.amount), 0).label("dizimos_transacao")
-                ).join(Congregation).where(Transaction.category_id == cat_dizimo_id).group_by(
-                    Congregation.name, func.extract('year', Transaction.date), func.extract('month', Transaction.date)
-                )
-                df_dizimo_trans = pd.read_sql(q_dizimo_trans, db.bind)
-                if not df_dizimo_trans.empty:
-                    df_merged = pd.merge(df_merged, df_dizimo_trans, on=["congregacao_name", "ano", "mes"], how="outer").fillna(0)
-                    df_merged['entradas_sem_dizimo'] = df_merged['entradas'] - df_merged['dizimos_transacao']
-                    df_merged['entradas_dizimo_final'] = df_merged[['dizimos_transacao', 'dizimos_nominais']].max(axis=1)
-                    df_merged['Entradas Finais'] = df_merged['entradas_sem_dizimo'] + df_merged['entradas_dizimo_final']
-                else:
-                    df_merged['Entradas Finais'] = df_merged['entradas'] + df_merged['dizimos_nominais']
-            else:
-                 df_merged['Entradas Finais'] = df_merged['entradas'] + df_merged['dizimos_nominais']
-            
-            df_final = df_merged.rename(columns={'congregacao_name': 'Congregacao', 'ano': 'Ano', 'mes': 'Mes', 'saidas': 'Saidas'})
-            df_final['Saldo'] = df_final['Entradas Finais'] - df_final['Saidas']
-            return df_final[['Congregacao', 'Ano', 'Mes', 'Entradas Finais', 'Saidas', 'Saldo']]
+            # Renomeia colunas para o merge
+            entradas_df.rename(columns={'Valor': 'Entradas'}, inplace=True)
+            saidas_df.rename(columns={'Valor': 'Saidas'}, inplace=True)
+            all_tithes.rename(columns={'Valor': 'Dizimos_Nominais'}, inplace=True)
 
-        # Fallback se não houver dízimos nominais
-        df_transactions['Saldo'] = df_transactions['entradas'] - df_transactions['saidas']
-        return df_transactions.rename(columns={'congregacao_name': 'Congregacao', 'ano': 'Ano', 'mes': 'Mes', 'entradas': 'Entradas Finais', 'saidas': 'Saidas'})
+            # Merge principal
+            df_final = pd.merge(entradas_df[['Congregacao', 'Ano', 'Mes', 'Entradas']], saidas_df[['Congregacao', 'Ano', 'Mes', 'Saidas']], on=['Congregacao', 'Ano', 'Mes'], how='outer')
+            df_final = pd.merge(df_final, all_tithes, on=['Congregacao', 'Ano', 'Mes'], how='outer')
+            df_final.fillna(0, inplace=True)
+            
+            # Lógica de equivalência de dízimos (simplificada para o resumo)
+            # Aqui, apenas somamos os dízimos nominais às entradas para um total geral
+            df_final['Entradas'] = df_final['Entradas'] + df_final['Dizimos_Nominais']
+            df_final['Saldo'] = df_final['Entradas'] - df_final['Saidas']
+            
+            return df_final[['Congregacao', 'Ano', 'Mes', 'Entradas', 'Saidas', 'Saldo']]
+        
+        elif not all_tithes.empty:
+            all_tithes.rename(columns={'Valor': 'Entradas'}, inplace=True)
+            all_tithes['Saidas'] = 0
+            all_tithes['Saldo'] = all_tithes['Entradas']
+            return all_tithes[['Congregacao', 'Ano', 'Mes', 'Entradas', 'Saidas', 'Saldo']]
+
+        return pd.DataFrame()
 
 @st.cache_data
 # 1. O parâmetro 'db' foi REMOVIDO daqui
