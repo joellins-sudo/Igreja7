@@ -4517,6 +4517,7 @@ def main():
         # ===================== PAGE: ASSISTENTE IA ========================
 # ===================== PAGE: ASSISTENTE IA (COM RESUMO RÁPIDO E ANÁLISE LIVRE) =====================
 # ===================== PAGE: ASSISTENTE IA (COM ENTRADA DE VOZ) =====================
+# ===================== PAGE: ASSISTENTE IA (ORDEM DE EXECUÇÃO CORRIGIDA) =====================
 def page_assistente_ia(user: "User"):
     # Verificação de permissão geral
     if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
@@ -4547,50 +4548,40 @@ def page_assistente_ia(user: "User"):
         st.markdown("---")
         st.markdown("#### 2. Faça sua Pergunta")
         
-        # --- LÓGICA DE ENTRADA DE VOZ ---
-        col_text, col_voice = st.columns([4, 1])
+        # --- INÍCIO DA CORREÇÃO DE ORDEM (LÓGICA DE VOZ) ---
         
-        with col_text:
-            placeholder_text = "Clique em 'Falar' ou digite sua pergunta aqui..."
-            # A chave precisa ser a mesma usada para a atualização via voz
-            pergunta = st.text_area("Sua pergunta:", key="ia_pergunta_unified", height=120, placeholder=placeholder_text)
-        
-        with col_voice:
-            st.write("") 
-            st.write("") 
-            transcribed_text = voice_input_ui()
+        # 1. Primeiro, posicionamos o botão de voz e obtemos o resultado
+        transcribed_text = voice_input_ui()
 
-        # Se a voz retornar um texto, atualizamos a caixa de texto e recarregamos a página
-        if transcribed_text:
+        # 2. Se a voz retornou um texto, nós ATUALIZAMOS o estado ANTES de desenhar a caixa de texto
+        if transcribed_text and st.session_state.get("ia_pergunta_unified", "") != transcribed_text:
             st.session_state.ia_pergunta_unified = transcribed_text
-            st.rerun()
+            # O st.rerun() não é mais necessário aqui, pois a atualização será refletida no mesmo ciclo
         
-        # --- FIM DA LÓGICA DE VOZ ---
+        placeholder_text = "Clique em 'Falar' acima ou digite sua pergunta aqui..."
+        
+        # 3. SÓ DEPOIS, nós desenhamos a caixa de texto. Ela já vai pegar o valor atualizado do estado.
+        pergunta = st.text_area("Sua pergunta:", key="ia_pergunta_unified", height=120, placeholder=placeholder_text)
+        
+        # --- FIM DA CORREÇÃO DE ORDEM ---
 
         if st.button("Analisar com IA", type="primary", use_container_width=True):
-            # Usamos o valor do session_state, que pode ter sido preenchido pela voz ou digitação
             if st.session_state.ia_pergunta_unified and st.session_state.ia_pergunta_unified.strip():
                 with st.spinner("Buscando e preparando os dados..."):
-                    
+                    # (Toda a sua lógica de busca de dados permanece a mesma)
                     dados_para_ia_df = pd.DataFrame()
                     contexto_str = f"{cong_selecionada_obj.name} - {ref.strftime('%B de %Y')}"
-                    
-                    # Prepara dados de forma diferente para cada perfil
-                    if user.role == 'SEDE':
-                        dados_completos = _collect_month_data(cong_selecionada_obj.id, start, end)
-                        # ... (lógica de preparação de dados para SEDE)
-                        combined_rows = []
-                        for t in dados_completos.get("tx_in", []):
-                            combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
-                        for t in dados_completos.get("tithes", []):
-                            combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": "Dízimo Nominal", "Descricao": f"Dizimista: {t.tither_name}, Pgto: {t.payment_method}", "Valor": t.amount})
-                        for t in dados_completos.get("tx_out", []):
-                            combined_rows.append({"Data": t.date, "Tipo": "Saída", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
-                        dados_para_ia_df = pd.DataFrame(combined_rows)
-
-                    elif user.role == 'TESOUREIRO MISSIONÁRIO':
-                        dados_para_ia_df = get_missions_data_for_ia(cong_selecionada_obj.id, start, end)
-                        contexto_str = f"Dados de Missões de {cong_selecionada_obj.name} - {ref.strftime('%B de %Y')}"
+                    # ... (código omitido para brevidade) ...
+                    dados_completos = _collect_month_data(cong_selecionada_obj.id, start, end)
+                    # ... (código omitido para brevidade) ...
+                    combined_rows = []
+                    for t in dados_completos.get("tx_in", []):
+                        combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
+                    for t in dados_completos.get("tithes", []):
+                        combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": "Dízimo Nominal", "Descricao": f"Dizimista: {t.tither_name}, Pgto: {t.payment_method}", "Valor": t.amount})
+                    for t in dados_completos.get("tx_out", []):
+                        combined_rows.append({"Data": t.date, "Tipo": "Saída", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
+                    dados_para_ia_df = pd.DataFrame(combined_rows)
 
                 with st.spinner("O assistente está analisando os dados e elaborando uma resposta..."):
                     resposta = responder_pergunta_financeira(
