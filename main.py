@@ -1901,17 +1901,18 @@ def _collect_month_data(cong_id: int, start: date, end: date, sub_cong_id: Optio
         }
     
     @st.cache_data(ttl="10m")
+@st.cache_data(ttl="10m")
 def build_ai_month_df(cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
     """
-    Gera uma tabela diária do mês para a IA com as colunas:
+    Monta a tabela diária do mês para a IA com:
       - Data do Culto
-      - Dízimo  (regra: MAIOR entre 'dízimo nominal' e 'dízimo em transações')
-      - Oferta  (equivalência: MAIOR entre 'Oferta do Resumo do Culto' e 'Oferta em transações')
+      - Dízimo  (MAIOR entre dízimo nominal e dízimo em transações)
+      - Oferta  (MAIOR entre Oferta do Resumo do Culto e Oferta em transações)
       - Total   (Dízimo + Oferta)
-    OBS: Missões ficam de fora — seguem como categoria separada no seu sistema.
+    Observação: Missões ficam de fora (sua categoria separada).
     """
     with SessionLocal() as db:
-        # --- Filtros de sub/unidade ---
+        # Filtros de sub/ principal
         if sub_cong_id is None:
             sl_sub = ServiceLog.sub_congregation_id.is_(None)
             tx_sub = Transaction.sub_congregation_id.is_(None)
@@ -1921,8 +1922,8 @@ def build_ai_month_df(cong_id: int, start: date, end: date, sub_cong_id: Optiona
             tx_sub = (Transaction.sub_congregation_id == sub_cong_id)
             tt_sub = (Tithe.sub_congregation_id == sub_cong_id)
 
-        # ===== 1) OFERTA =====
-        # 1a) Oferta do Resumo do Culto (ServiceLog.oferta)
+        # ---- OFERTA (duas fontes equivalentes) ----
+        # 1) Ofertas lançadas no Resumo do Culto (ServiceLog.oferta)
         sl_oferta_q = (
             select(ServiceLog.date, func.coalesce(func.sum(ServiceLog.oferta), 0.0))
             .where(
@@ -1934,7 +1935,7 @@ def build_ai_month_df(cong_id: int, start: date, end: date, sub_cong_id: Optiona
         )
         sl_oferta = {d: float(v or 0.0) for d, v in db.execute(sl_oferta_q).all()}
 
-        # 1b) Oferta em lançamentos (Transaction com categoria 'Oferta')
+        # 2) Ofertas lançadas como Transação (Categoria = "Oferta")
         tx_oferta_q = (
             select(Transaction.date, func.coalesce(func.sum(Transaction.amount), 0.0))
             .join(Category)
@@ -1949,8 +1950,8 @@ def build_ai_month_df(cong_id: int, start: date, end: date, sub_cong_id: Optiona
         )
         tx_oferta = {d: float(v or 0.0) for d, v in db.execute(tx_oferta_q).all()}
 
-        # ===== 2) DÍZIMO =====
-        # 2a) Dízimo nominal (Tithe)
+        # ---- DÍZIMO (sua regra de equivalência) ----
+        # 1) Dízimo nominal (Tithe)
         tt_diz_q = (
             select(Tithe.date, func.coalesce(func.sum(Tithe.amount), 0.0))
             .where(
@@ -1962,7 +1963,7 @@ def build_ai_month_df(cong_id: int, start: date, end: date, sub_cong_id: Optiona
         )
         tt_diz = {d: float(v or 0.0) for d, v in db.execute(tt_diz_q).all()}
 
-        # 2b) Dízimo em lançamentos (Transaction com categoria 'Dízimo')
+        # 2) Dízimo em Transações (Categoria = "Dízimo")
         tx_diz_q = (
             select(Transaction.date, func.coalesce(func.sum(Transaction.amount), 0.0))
             .join(Category)
@@ -1977,11 +1978,9 @@ def build_ai_month_df(cong_id: int, start: date, end: date, sub_cong_id: Optiona
         )
         tx_diz = {d: float(v or 0.0) for d, v in db.execute(tx_diz_q).all()}
 
-        # ===== 3) Montagem por dia =====
-        # Observação importante (evita duplicidade):
-        # - Oferta: usamos o MAIOR entre (ServiceLog.oferta) e (Transaction 'Oferta')
-        #   porque são jeitos equivalentes de lançar a MESMA coisa.
-        # - Dízimo: mantemos a sua regra atual (MAIOR entre nominal e transação).
+        # ---- Montagem por dia (evita duplicidade) ----
+        # Oferta: MAIOR entre (ServiceLog) x (Transação) — são o MESMO conceito por caminhos diferentes
+        # Dízimo: MAIOR entre nominal x transação (sua regra original)
         all_dates = sorted(set(sl_oferta) | set(tx_oferta) | set(tt_diz) | set(tx_diz))
 
         rows = []
@@ -1996,6 +1995,7 @@ def build_ai_month_df(cong_id: int, start: date, end: date, sub_cong_id: Optiona
             })
 
         return pd.DataFrame(rows, columns=["Data do Culto", "Dízimo", "Oferta", "Total"])
+
 
 
 # COLE ESTAS DUAS FUNÇÕES NO SEU CÓDIGO, ANTES DA "page_lancamentos"
