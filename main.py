@@ -4160,6 +4160,7 @@ def main():
         st.exception(e)
 
         # ===================== PAGE: ASSISTENTE IA =====================
+# ===================== PAGE: ASSISTENTE IA (LÓGICA DE PERMISSÃO CORRIGIDA) =====================
 def page_assistente_ia(user: "User"):
     if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
         st.warning("🔒 Acesso negado. Esta funcionalidade está disponível apenas para os perfis SEDE e TESOUREIRO MISSIONÁRIO.")
@@ -4176,19 +4177,19 @@ def page_assistente_ia(user: "User"):
         
         with col_cong:
             cong_selecionada_obj = None
-            if user.role == "SEDE":
+            
+            # --- INÍCIO DA CORREÇÃO DE LÓGICA ---
+            # Agora, tanto SEDE quanto TESOUREIRO MISSIONÁRIO podem ver a lista de todas as congregações.
+            if user.role in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
                 cong_sel_name = st.selectbox(
                     "Congregação", [c.name for c in congs_all], key="ia_cong_sel"
                 )
                 cong_selecionada_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
-            else:
+            else: # Para outros perfis (se houver no futuro)
                 cong_selecionada_obj = db.get(Congregation, user.congregation_id)
-                
-                # --- INÍCIO DA CORREÇÃO ---
-                # Adicionamos esta verificação para garantir que o objeto não é nulo
                 if cong_selecionada_obj:
                     st.text_input("Congregação", cong_selecionada_obj.name, disabled=True)
-                # --- FIM DA CORREÇÃO ---
+            # --- FIM DA CORREÇÃO DE LÓGICA ---
 
         with col_filtros:
             ref = get_month_selector("Mês de Referência", key_prefix="ia_ref")
@@ -4196,13 +4197,12 @@ def page_assistente_ia(user: "User"):
         start, end = month_bounds(ref)
 
         if not cong_selecionada_obj:
-            st.warning("Nenhuma congregação encontrada ou selecionada. Verifique o cadastro do usuário.")
+            st.warning("Nenhuma congregação selecionada. Por favor, selecione uma na lista.")
             return
 
         st.markdown("---")
         st.markdown("#### 2. Faça sua Pergunta")
         
-        # O resto da função continua exatamente igual...
         dados_completos = _collect_month_data(cong_selecionada_obj.id, start, end)
         
         combined_rows = []
