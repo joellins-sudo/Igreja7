@@ -1588,7 +1588,7 @@ def _editor_entradas_agg_all(congs_all: List[Congregation], start: date, end: da
         # Primeiro, colete os dados de todas as unidades (principais e subs)
         for c in congs_all:
             # Dados da congregação principal
-            principal_totals = _collect_month_data(c.id, start, end, sub_cong_id=None)["totals"]
+            principal_totals = _collect_month_data(cong.id, start, end, sub_cong_id=None)["totals"]
             rows_data.append({
                 "unidade_display": f"{c.name} (Principal)",
                 "valor": float(principal_totals["entradas_total_sem_missoes"]),
@@ -3204,61 +3204,66 @@ def _build_missions_analytics(db: Session, year: int, month_name: str):
     df_sorted = df.sort_values("Total no Período (R$)", ascending=False).reset_index(drop=True)
     return df_sorted, total_periodo, num_congs_periodo, top_period_contributor, top_year_contributor
 @st.cache_data
-def _build_missions_search_df(_db: Session, year: int, month_name: str):
+# ===================== FUNÇÃO _build_missions_search_df CORRIGIDA =====================
+@st.cache_data
+# 1. O parâmetro 'db' foi REMOVIDO daqui
+def _build_missions_search_df(year: int, month_name: str):
     """
     Busca e agrega as contribuições de missões, identificando o Top 5 de contribuintes.
     """
-    month_num = None
-    if month_name != "Todos":
-        try:
-            month_num = MONTHS.index(month_name) + 1
-        except ValueError:
-            month_name = "Todos"
-    
-    start_date = date(year, month_num, 1) if month_num else date(year, 1, 1)
-    end_date = date(year + (1 if month_num == 12 else 0), (month_num % 12) + 1, 1) if month_num else date(year + 1, 1, 1)
-    
-    q_period = select(
-        Congregation.name, func.sum(Transaction.amount)
-    ).join(Transaction).join(Category).where(
-        Transaction.date >= start_date, Transaction.date < end_date,
-        Transaction.type == "DOAÇÃO", func.lower(Category.name) == 'missões'
-    ).group_by(Congregation.name)
+    # 2. Adicionamos esta linha para criar a conexão DENTRO da função
+    with SessionLocal() as db:
+        # 3. Todo o código original foi recuado para ficar dentro do 'with'
+        month_num = None
+        if month_name != "Todos":
+            try:
+                month_num = MONTHS.index(month_name) + 1
+            except ValueError:
+                month_name = "Todos"
+        
+        start_date = date(year, month_num, 1) if month_num else date(year, 1, 1)
+        end_date = date(year + (1 if month_num == 12 else 0), (month_num % 12) + 1, 1) if month_num else date(year + 1, 1, 1)
+        
+        q_period = select(
+            Congregation.name, func.sum(Transaction.amount)
+        ).join(Transaction).join(Category).where(
+            Transaction.date >= start_date, Transaction.date < end_date,
+            Transaction.type == "DOAÇÃO", func.lower(Category.name) == 'missões'
+        ).group_by(Congregation.name)
 
-    q_year = select(
-        Congregation.name, func.sum(Transaction.amount)
-    ).join(Transaction).join(Category).where(
-        Transaction.date >= date(year, 1, 1), Transaction.date < date(year + 1, 1, 1),
-        Transaction.type == "DOAÇÃO", func.lower(Category.name) == 'missões'
-    ).group_by(Congregation.name)
+        q_year = select(
+            Congregation.name, func.sum(Transaction.amount)
+        ).join(Transaction).join(Category).where(
+            Transaction.date >= date(year, 1, 1), Transaction.date < date(year + 1, 1, 1),
+            Transaction.type == "DOAÇÃO", func.lower(Category.name) == 'missões'
+        ).group_by(Congregation.name)
 
-    period_data = {name: val for name, val in db.execute(q_period).all()}
-    year_data = {name: val for name, val in db.execute(q_year).all()}
-    
-    all_congs = set(list(period_data.keys()) + list(year_data.keys()))
-    
-    report_rows = []
-    for cong_name in sorted(list(all_congs)):
-        report_rows.append({
-            "Congregação": cong_name,
-            "Total no Período (R$)": period_data.get(cong_name, 0.0),
-            "Total no Ano (R$)": year_data.get(cong_name, 0.0)
-        })
+        period_data = {name: val for name, val in db.execute(q_period).all()}
+        year_data = {name: val for name, val in db.execute(q_year).all()}
+        
+        all_congs = set(list(period_data.keys()) + list(year_data.keys()))
+        
+        report_rows = []
+        for cong_name in sorted(list(all_congs)):
+            report_rows.append({
+                "Congregação": cong_name,
+                "Total no Período (R$)": float(period_data.get(cong_name, 0.0) or 0.0),
+                "Total no Ano (R$)": float(year_data.get(cong_name, 0.0) or 0.0)
+            })
 
-    if not report_rows:
-        return pd.DataFrame(), 0.0, 0, pd.DataFrame(), pd.DataFrame()
+        if not report_rows:
+            return pd.DataFrame(), 0.0, 0, pd.DataFrame(), pd.DataFrame()
 
-    df = pd.DataFrame(report_rows)
-    total_periodo = df["Total no Período (R$)"].sum()
-    num_congs_periodo = len(df[df["Total no Período (R$)"] > 0])
+        df = pd.DataFrame(report_rows)
+        total_periodo = df["Total no Período (R$)"].sum()
+        num_congs_periodo = len(df[df["Total no Período (R$)"] > 0])
 
-    # ===== NOVO: Calcula o Top 5 =====
-    df_top_period = df[df["Total no Período (R$)"] > 0].sort_values("Total no Período (R$)", ascending=False).head(5)
-    df_top_year = df[df["Total no Ano (R$)"] > 0].sort_values("Total no Ano (R$)", ascending=False).head(5)
-    
-    df_sorted = df.sort_values("Total no Período (R$)", ascending=False).reset_index(drop=True)
-    
-    return df_sorted, total_periodo, num_congs_periodo, df_top_period, df_top_year
+        df_top_period = df[df["Total no Período (R$)"] > 0].sort_values("Total no Período (R$)", ascending=False).head(5)
+        df_top_year = df[df["Total no Ano (R$)"] > 0].sort_values("Total no Ano (R$)", ascending=False).head(5)
+        
+        df_sorted = df.sort_values("Total no Período (R$)", ascending=False).reset_index(drop=True)
+        
+        return df_sorted, total_periodo, num_congs_periodo, df_top_period, df_top_year
 
 # ======== Páginas de Missões ========
 def page_relatorio_missoes(user: "User"):
