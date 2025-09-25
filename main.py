@@ -1067,7 +1067,7 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
 # ===================== RELATÓRIO DE ENTRADA — TABELA ÚNICA (EDIT SUMÁRIO) =====================
 # ===================== RELATÓRIO DE ENTRADA — TABELA ÚNICA (EDIT SUMÁRIO) =====================
 @st.cache_data
-def _entrada_summary_df(db: Session, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
+def _entrada_summary_df(_db: Session, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
     # Base queries
     tithes_q = select(Tithe.date, func.sum(Tithe.amount)).where(
         Tithe.congregation_id == cong_id, Tithe.date >= start, Tithe.date < end
@@ -1648,7 +1648,7 @@ def _editor_saidas_agg_all(congs_all: List[Congregation], start: date, end: date
 # ===================== CORE COLETA =====================
 # ===================== CORE COLETA =====================
 @st.cache_data
-def _collect_month_data(db, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None):
+def _collect_month_data(_db, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None):
     # Base queries
     tx_in_query = select(Transaction).options(joinedload(Transaction.category)).where(
         Transaction.date >= start, Transaction.date < end,
@@ -1716,7 +1716,7 @@ def _collect_month_data(db, cong_id: int, start: date, end: date, sub_cong_id: O
 
 # SUBSTITUA SUA FUNÇÃO _load_service_logs INTEIRA POR ESTA VERSÃO CORRIGIDA
 @st.cache_data
-def _load_service_logs(db: Session, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
+def _load_service_logs(_db: Session, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
     """Carrega os resumos de culto para a tabela de edição, com ordenação customizada."""
     
     log_filter = and_(
@@ -3200,7 +3200,7 @@ def _build_missions_analytics(db: Session, year: int, month_name: str):
     df_sorted = df.sort_values("Total no Período (R$)", ascending=False).reset_index(drop=True)
     return df_sorted, total_periodo, num_congs_periodo, top_period_contributor, top_year_contributor
 @st.cache_data
-def _build_missions_search_df(db: Session, year: int, month_name: str):
+def _build_missions_search_df(_db: Session, year: int, month_name: str):
     """
     Busca e agrega as contribuições de missões, identificando o Top 5 de contribuintes.
     """
