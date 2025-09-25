@@ -331,11 +331,9 @@ MONTHS_SHORT = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov
 
 # ===================== FUNÇÃO DE IA PARA ASSISTENTE FINANCEIRO =====================
 # ===================== FUNÇÃO DE IA PARA ASSISTENTE FINANCEIRO (MODELO RÁPIDO) =====================
+# ===================== FUNÇÃO DE IA PARA ASSISTENTE FINANCEIRO (PERSONALIDADE CORRIGIDA) =====================
 @st.cache_data
 def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame, contexto: str) -> str:
-    """
-    Usa a IA para responder uma pergunta do usuário com base em um DataFrame de dados.
-    """
     import openai
 
     api_key = os.environ.get("OPENAI_API_KEY")
@@ -353,31 +351,28 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
         prompt_sistema = (
             "Você é um assistente financeiro sênior, especialista em analisar dados de relatórios de igrejas. "
             "Sua tarefa é responder às perguntas do usuário de forma clara, objetiva e educada. "
-            "REGRAS IMPORTANTES: "
-            "1. Responda usando APENAS os dados fornecidos no contexto. "
-            "2. NUNCA invente informações ou valores. Se a resposta não estiver nos dados, diga 'Não encontrei essa informação nos dados fornecidos para este período'. "
-            "3. Ao citar valores monetários, sempre use o formato R$ 1.234,56. "
-            "4. Seja direto e resuma a informação. Não precisa mostrar a tabela de dados completa na sua resposta. "
-            "5. Se a resposta incluir uma lista de pessoas, transações ou itens, formate-os como uma LISTA DE TÓPICOS (bullet points, usando '*' ou '-'), com cada item em uma nova linha. Isso é crucial para a clareza. "
-            "6. Sempre coloque um espaço após a pontuação final (pontos e vírgulas)."
+            "REGRAS IMPORTANTES: \n"
+            "1. Responda usando APENAS os dados fornecidos no contexto. Os dados estão agregados por Categoria, Mês, Ano e Congregação. \n"
+            "2. **VOCÊ NÃO CONSEGUE VER NOMES DE DIZIMISTAS OU DESCRIÇÕES DE TRANSAÇÕES INDIVIDUAIS.** Se o usuário pedir detalhes que você não tem (como 'liste os dizimistas' ou 'qual foi a descrição daquela saída de R$50?'), informe educadamente que você só tem acesso aos totais e resumos, mas pode fornecer o valor total ou a contagem, se disponível. \n"
+            "3. **REGRA DO DÍZIMO:** Para calcular o total de dízimos de um período, você deve somar os valores da categoria 'Dízimo' e da categoria 'Dízimo Nominal' e usar o **MAIOR** valor entre os dois, nunca a soma de ambos. Se apenas uma das categorias existir, use o valor dela. \n"
+            "4. Ao citar valores monetários, sempre use o formato R$ 1.234,56. \n"
+            "5. Se a resposta incluir uma lista de itens, formate-os como uma LISTA DE TÓPICOS (bullet points, usando '*' ou '-'), com cada item em uma nova linha. \n"
         )
 
         prompt_usuario_completo = (
             f"Contexto do Relatório: {contexto}\n\n"
-            f"Dados Disponíveis para sua análise:\n"
+            f"Dados Disponíveis para sua análise (resumidos por categoria):\n"
             f"```markdown\n{dados_texto}\n```\n\n"
-            f"Com base nos dados acima, responda a seguinte pergunta: \"{pergunta_usuario}\""
+            f"Com base nas regras e nos dados acima, responda a seguinte pergunta: \"{pergunta_usuario}\""
         )
 
         response = client.chat.completions.create(
-            # --- MUDANÇA AQUI ---
-            model="gpt-3.5-turbo",  # Usando o modelo mais rápido
-            # --- FIM DA MUDANÇA ---
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": prompt_sistema},
                 {"role": "user", "content": prompt_usuario_completo}
             ],
-            temperature=0.2,
+            temperature=0.1,
             max_tokens=500
         )
         return response.choices[0].message.content
@@ -1712,48 +1707,48 @@ def _editor_saidas_agg_all(congs_all: List[Congregation], start: date, end: date
 # ===================== FUNÇÃO DE RESUMO GERAL PARA SEDE =====================
 # ===================== FUNÇÃO DE COLETA GERAL PARA IA DA SEDE =====================
 # ===================== FUNÇÃO DE COLETA DETALHADA PARA IA DA SEDE =====================
-@st.cache_data(ttl="1h") # Adicionamos um cache de 1 hora para os dados não ficarem obsoletos
-def get_all_detailed_data_for_ia():
+@st.cache_data(ttl="1h") # Cache de 1 hora
+def get_all_aggregated_data_for_ia():
     """
-    Busca TODAS as transações e dízimos do banco de dados de forma detalhada.
-    ATENÇÃO: Pode consumir bastante memória e ser lento na primeira execução.
+    Busca um resumo de TODAS as transações e dízimos, já aplicando a regra de negócio
+    de equivalência de dízimos. Retorna dados agregados por congregação, ano e mês.
     """
     with SessionLocal() as db:
-        # Busca todas as transações (entradas e saídas)
+        # 1. Busca todas as transações (Entradas e Saídas)
         q_transactions = select(
             Congregation.name.label("Congregacao"),
-            Transaction.date.label("Data"),
+            func.extract('year', Transaction.date).label('Ano'),
+            func.extract('month', Transaction.date).label('Mes'),
             Transaction.type.label("Tipo"),
             Category.name.label("Categoria"),
-            Transaction.description.label("Descricao"),
-            Transaction.amount.label("Valor")
-        ).join(Congregation).join(Category)
+            func.sum(Transaction.amount).label("Valor")
+        ).join(Congregation).join(Category).group_by(
+            Congregation.name,
+            func.extract('year', Transaction.date),
+            func.extract('month', Transaction.date),
+            Transaction.type,
+            Category.name
+        )
         df_transactions = pd.read_sql(q_transactions, db.bind)
 
-        # Busca todos os dízimos nominais
+        # 2. Busca todos os dízimos nominais
         q_tithes = select(
             Congregation.name.label("Congregacao"),
-            Tithe.date.label("Data"),
-            Tithe.tither_name.label("Dizimista"),
-            Tithe.payment_method.label("Forma_Pagamento"),
-            Tithe.amount.label("Valor")
-        ).join(Congregation)
+            func.extract('year', Tithe.date).label('Ano'),
+            func.extract('month', Tithe.date).label('Mes'),
+            func.sum(Tithe.amount).label("Valor")
+        ).join(Congregation).group_by(
+            Congregation.name,
+            func.extract('year', Tithe.date),
+            func.extract('month', Tithe.date)
+        )
         df_tithes = pd.read_sql(q_tithes, db.bind)
-
-        # Prepara o DataFrame de dízimos para ser combinado
-        df_tithes_formatted = pd.DataFrame()
         if not df_tithes.empty:
-            df_tithes_formatted["Data"] = df_tithes["Data"]
-            df_tithes_formatted["Tipo"] = "Entrada"
-            df_tithes_formatted["Categoria"] = "Dízimo Nominal"
-            df_tithes_formatted["Descricao"] = "Dizimista: " + df_tithes["Dizimista"].fillna('') + ", Pgto: " + df_tithes["Forma_Pagamento"].fillna('')
-            df_tithes_formatted["Valor"] = df_tithes["Valor"]
-            df_tithes_formatted["Congregacao"] = df_tithes["Congregacao"]
+            df_tithes["Tipo"] = "Entrada"
+            df_tithes["Categoria"] = "Dízimo Nominal"
 
-        # Combina tudo em uma única tabela de dados para a IA
-        df_final = pd.concat([df_transactions, df_tithes_formatted], ignore_index=True)
-        df_final.sort_values(by="Data", inplace=True)
-        
+        # 3. Combina tudo
+        df_final = pd.concat([df_transactions, df_tithes], ignore_index=True)
         return df_final
 
 @st.cache_data
