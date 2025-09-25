@@ -2065,7 +2065,7 @@ def page_lancamentos(user: "User"):
             st.markdown("##### Resumo de Entradas por Culto")
 
             df_logs = _load_service_logs(
-                db, parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id
+                parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id
             )
 
             # Divergência Dízimos (resumo x nominal)
