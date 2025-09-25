@@ -331,28 +331,26 @@ MONTHS_SHORT = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov
 
 # ===================== FUNÇÃO DE IA PARA ASSISTENTE FINANCEIRO =====================
 @st.cache_data
+@st.cache_data
 def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame, contexto: str) -> str:
     """
     Usa a IA para responder uma pergunta do usuário com base em um DataFrame de dados.
     """
     import openai
 
-    # Pega a chave de API das variáveis de ambiente do Render
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         return "Aviso: A chave de API da OpenAI não foi configurada no ambiente."
 
-    # Se não houver dados no DataFrame, não há o que analisar.
     if dados_df.empty:
         return "Não encontrei dados para o período e congregação selecionados para responder a esta pergunta."
 
-    # Converte a tabela de dados (DataFrame) para um formato de texto que a IA entende bem
     dados_texto = dados_df.to_markdown(index=False)
 
     try:
         client = openai.OpenAI(api_key=api_key)
 
-        # O prompt do sistema é a instrução mais importante: define a personalidade e as regras da IA
+        # O prompt do sistema com as novas regras de formatação
         prompt_sistema = (
             "Você é um assistente financeiro sênior, especialista em analisar dados de relatórios de igrejas. "
             "Sua tarefa é responder às perguntas do usuário de forma clara, objetiva e educada. "
@@ -360,10 +358,11 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
             "1. Responda usando APENAS os dados fornecidos no contexto. "
             "2. NUNCA invente informações ou valores. Se a resposta não estiver nos dados, diga 'Não encontrei essa informação nos dados fornecidos para este período'. "
             "3. Ao citar valores monetários, sempre use o formato R$ 1.234,56. "
-            "4. Seja direto e resuma a informação. Não precisa mostrar a tabela de dados completa na sua resposta."
+            "4. Seja direto e resuma a informação. Não precisa mostrar a tabela de dados completa na sua resposta. "
+            "5. Se a resposta incluir uma lista de pessoas, transações ou itens, formate-os como uma LISTA DE TÓPICOS (bullet points, usando '*' ou '-'), com cada item em uma nova linha. Isso é crucial para a clareza. " # <--- NOVA REGRA
+            "6. Sempre coloque um espaço após a pontuação final (pontos e vírgulas)." # <--- NOVA REGRA
         )
 
-        # O prompt do usuário combina a pergunta dele com os dados que buscamos
         prompt_usuario_completo = (
             f"Contexto do Relatório: {contexto}\n\n"
             f"Dados Disponíveis para sua análise:\n"
@@ -372,13 +371,13 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
         )
 
         response = client.chat.completions.create(
-            model="gpt-4o",  # Modelo mais avançado, ideal para análise de dados
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": prompt_sistema},
                 {"role": "user", "content": prompt_usuario_completo}
             ],
-            temperature=0.2, # Deixa a resposta bem objetiva e menos "criativa"
-            max_tokens=500   # Limita o tamanho da resposta para economizar
+            temperature=0.2,
+            max_tokens=500
         )
         return response.choices[0].message.content
 
