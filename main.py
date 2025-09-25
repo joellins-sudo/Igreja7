@@ -3993,7 +3993,7 @@ def page_relatorio_entrada(user: "User"):
             total_geral = df_agg["Total Entradas"].sum()
             st.metric("Total Geral da Congregação", format_currency(total_geral))
         else:
-            report_df = _load_service_logs(parent_cong_obj.id, start, end, start, end, sub_cong_id=target_sub_cong_id_or_all)
+            report_df = _load_service_logs(parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id_or_all)
             
             st.dataframe(
                 report_df.style.format({
