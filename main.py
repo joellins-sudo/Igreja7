@@ -1588,7 +1588,7 @@ def _editor_entradas_agg_all(congs_all: List[Congregation], start: date, end: da
         # Primeiro, colete os dados de todas as unidades (principais e subs)
         for c in congs_all:
             # Dados da congregação principal
-            principal_totals = _collect_month_data(db, c.id, start, end, sub_cong_id=None)["totals"]
+            principal_totals = _collect_month_data(c.id, start, end, sub_cong_id=None)["totals"]
             rows_data.append({
                 "unidade_display": f"{c.name} (Principal)",
                 "valor": float(principal_totals["entradas_total_sem_missoes"]),
@@ -1648,67 +1648,67 @@ def _editor_saidas_agg_all(congs_all: List[Congregation], start: date, end: date
 # ===================== CORE COLETA =====================
 # ===================== CORE COLETA =====================
 @st.cache_data
-def _collect_month_data(_db, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None):
-    # Base queries
-    tx_in_query = select(Transaction).options(joinedload(Transaction.category)).where(
-        Transaction.date >= start, Transaction.date < end,
-        Transaction.type.in_(("DOAÇÃO", "RECEITA")),
-        Transaction.congregation_id == cong_id
-    )
-    tithes_query = select(Tithe).where(
-        Tithe.date >= start, Tithe.date < end,
-        Tithe.congregation_id == cong_id
-    )
-    tx_out_query = select(Transaction).options(joinedload(Transaction.category)).where(
-        Transaction.date >= start, Transaction.date < end,
-        Transaction.type.in_(("SAÍDA", "DESPESA")),
-        Transaction.congregation_id == cong_id
-    )
+# ===================== FUNÇÃO _collect_month_data CORRIGIDA =====================
+@st.cache_data
+# 1. O parâmetro 'db' foi REMOVIDO daqui
+def _collect_month_data(cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None):
+    # 2. Adicionamos esta linha para criar a conexão DENTRO da função
+    with SessionLocal() as db:
+        # 3. Todo o código original foi recuado para ficar dentro do 'with'
+        # Base queries
+        tx_in_query = select(Transaction).options(joinedload(Transaction.category)).where(
+            Transaction.date >= start, Transaction.date < end,
+            Transaction.type.in_(("DOAÇÃO", "RECEITA")),
+            Transaction.congregation_id == cong_id
+        )
+        tithes_query = select(Tithe).where(
+            Tithe.date >= start, Tithe.date < end,
+            Tithe.congregation_id == cong_id
+        )
+        tx_out_query = select(Transaction).options(joinedload(Transaction.category)).where(
+            Transaction.date >= start, Transaction.date < end,
+            Transaction.type.in_(("SAÍDA", "DESPESA")),
+            Transaction.congregation_id == cong_id
+        )
 
-    # --- LÓGICA DE FILTRO CORRIGIDA ---
-    # Aplica o filtro da sub-congregação, tratando o caso "Principal" (None) explicitamente
-    if sub_cong_id is not None:
-        # Filtra por uma sub-congregação específica
-        tx_in_query = tx_in_query.where(Transaction.sub_congregation_id == sub_cong_id)
-        tithes_query = tithes_query.where(Tithe.sub_congregation_id == sub_cong_id)
-        tx_out_query = tx_out_query.where(Transaction.sub_congregation_id == sub_cong_id)
-    else:
-        # Filtra APENAS para a congregação principal (onde não há sub_congregation_id)
-        tx_in_query = tx_in_query.where(Transaction.sub_congregation_id.is_(None))
-        tithes_query = tithes_query.where(Tithe.sub_congregation_id.is_(None))
-        tx_out_query = tx_out_query.where(Transaction.sub_congregation_id.is_(None))
-    
-    # Executa as queries
-    tx_in = db.scalars(tx_in_query.order_by(Transaction.date)).all()
-    tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
-    tx_out = db.scalars(tx_out_query.order_by(Transaction.date)).all()
+        if sub_cong_id is not None:
+            tx_in_query = tx_in_query.where(Transaction.sub_congregation_id == sub_cong_id)
+            tithes_query = tithes_query.where(Tithe.sub_congregation_id == sub_cong_id)
+            tx_out_query = tx_out_query.where(Transaction.sub_congregation_id == sub_cong_id)
+        else:
+            tx_in_query = tx_in_query.where(Transaction.sub_congregation_id.is_(None))
+            tithes_query = tithes_query.where(Tithe.sub_congregation_id.is_(None))
+            tx_out_query = tx_out_query.where(Transaction.sub_congregation_id.is_(None))
+        
+        tx_in = db.scalars(tx_in_query.order_by(Transaction.date)).all()
+        tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
+        tx_out = db.scalars(tx_out_query.order_by(Transaction.date)).all()
 
-    # O resto da lógica de cálculo de totais permanece a mesma
-    def _is_dizimo_tx(t: Transaction) -> bool:
-        return t.category and _norm(t.category.name) in ("dizimo", "dízimo")
-    def _is_oferta_tx(t: Transaction) -> bool:
-        return t.category and _norm(t.category.name) == "oferta"
-    def _is_mission_entry(t: Transaction) -> bool:
-        return t.category and _norm(t.category.name) in ("missoes","missões")
+        def _is_dizimo_tx(t: Transaction) -> bool:
+            return t.category and _norm(t.category.name) in ("dizimo", "dízimo")
+        def _is_oferta_tx(t: Transaction) -> bool:
+            return t.category and _norm(t.category.name) == "oferta"
+        def _is_mission_entry(t: Transaction) -> bool:
+            return t.category and _norm(t.category.name) in ("missoes","missões")
 
-    total_dizimos_tithe = sum(float(t.amount) for t in tithes)
-    total_dizimos_trans = sum(float(t.amount) for t in tx_in if _is_dizimo_tx(t))
-    total_dizimos_final = max(total_dizimos_tithe, total_dizimos_trans)
-    total_ofertas = sum(float(t.amount) for t in tx_in if _is_oferta_tx(t))
-    total_missoes = sum(float(t.amount) for t in tx_in if _is_mission_entry(t))
-    total_entradas_outros = sum(float(t.amount) for t in tx_in if not (_is_dizimo_tx(t) or _is_oferta_tx(t) or _is_mission_entry(t)))
-    total_geral_entradas_sem_missoes = total_dizimos_final + total_ofertas + total_entradas_outros
-    total_saidas = sum(float(t.amount) for t in tx_out)
-    saldo = total_geral_entradas_sem_missoes + total_missoes - total_saidas
+        total_dizimos_tithe = sum(float(t.amount) for t in tithes)
+        total_dizimos_trans = sum(float(t.amount) for t in tx_in if _is_dizimo_tx(t))
+        total_dizimos_final = max(total_dizimos_tithe, total_dizimos_trans)
+        total_ofertas = sum(float(t.amount) for t in tx_in if _is_oferta_tx(t))
+        total_missoes = sum(float(t.amount) for t in tx_in if _is_mission_entry(t))
+        total_entradas_outros = sum(float(t.amount) for t in tx_in if not (_is_dizimo_tx(t) or _is_oferta_tx(t) or _is_mission_entry(t)))
+        total_geral_entradas_sem_missoes = total_dizimos_final + total_ofertas + total_entradas_outros
+        total_saidas = sum(float(t.amount) for t in tx_out)
+        saldo = total_geral_entradas_sem_missoes + total_missoes - total_saidas
 
-    return {
-        "tx_in": tx_in, "tithes": tithes, "tx_out": tx_out,
-        "totals": {
-            "dizimos": total_dizimos_final, "ofertas": total_ofertas, "missoes": total_missoes,
-            "entradas_outros": total_entradas_outros, "entradas_total_sem_missoes": total_geral_entradas_sem_missoes,
-            "saidas_total": total_saidas, "saldo": saldo
+        return {
+            "tx_in": tx_in, "tithes": tithes, "tx_out": tx_out,
+            "totals": {
+                "dizimos": total_dizimos_final, "ofertas": total_ofertas, "missoes": total_missoes,
+                "entradas_outros": total_entradas_outros, "entradas_total_sem_missoes": total_geral_entradas_sem_missoes,
+                "saidas_total": total_saidas, "saldo": saldo
+            }
         }
-    }
 
 # COLE ESTAS DUAS FUNÇÕES NO SEU CÓDIGO, ANTES DA "page_lancamentos"
 
@@ -1716,48 +1716,52 @@ def _collect_month_data(_db, cong_id: int, start: date, end: date, sub_cong_id: 
 
 # SUBSTITUA SUA FUNÇÃO _load_service_logs INTEIRA POR ESTA VERSÃO CORRIGIDA
 @st.cache_data
-def _load_service_logs(_db: Session, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
+# 1. O parâmetro '_db: Session' foi REMOVIDO daqui
+def _load_service_logs(cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
     """Carrega os resumos de culto para a tabela de edição, com ordenação customizada."""
     
-    log_filter = and_(
-        ServiceLog.congregation_id == cong_id,
-        ServiceLog.date >= start,
-        ServiceLog.date < end,
-        ServiceLog.sub_congregation_id == sub_cong_id
-    )
-    
-    # ===== NOVA LÓGICA DE ORDENAÇÃO =====
-    # Cria uma regra de "ranking" para o tipo de culto
-    from sqlalchemy import case
-    custom_sort_order = case(
-        (ServiceLog.service_type == "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)", 1),
-        (ServiceLog.service_type == "Culto da Noite (Padrão)", 2),
-        (ServiceLog.service_type == "Evento Especial", 3),
-        else_=4  # Garante que "Outro" e tipos futuros fiquem por último
-    )
+    # 2. Adicionamos esta linha para criar a conexão DENTRO da função
+    with SessionLocal() as db:
+        # 3. Todo o código original foi recuado (indentado) para ficar dentro do 'with'
+        log_filter = and_(
+            ServiceLog.congregation_id == cong_id,
+            ServiceLog.date >= start,
+            ServiceLog.date < end,
+            ServiceLog.sub_congregation_id == sub_cong_id
+        )
+        
+        # ===== NOVA LÓGICA DE ORDENAÇÃO =====
+        # Cria uma regra de "ranking" para o tipo de culto
+        from sqlalchemy import case
+        custom_sort_order = case(
+            (ServiceLog.service_type == "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)", 1),
+            (ServiceLog.service_type == "Culto da Noite (Padrão)", 2),
+            (ServiceLog.service_type == "Evento Especial", 3),
+            else_=4  # Garante que "Outro" e tipos futuros fiquem por último
+        )
 
-    # Aplica a ordenação primária por data e a secundária pela regra customizada
-    query = select(ServiceLog).where(log_filter).order_by(ServiceLog.date, custom_sort_order)
-    # ===== FIM DA NOVA LÓGICA =====
-    
-    logs = db.scalars(query).all()
+        # Aplica a ordenação primária por data e a secundária pela regra customizada
+        query = select(ServiceLog).where(log_filter).order_by(ServiceLog.date, custom_sort_order)
+        # ===== FIM DA NOVA LÓGICA =====
+        
+        logs = db.scalars(query).all()
 
-    if not logs:
-        return pd.DataFrame()
+        if not logs:
+            return pd.DataFrame()
 
-    data = []
-    for log in logs:
-        total = log.dizimo + log.oferta
-        data.append({
-            "ID": log.id,
-            "Data do Culto": log.date,
-            "Tipo de Culto": log.service_type,
-            "Dízimo": log.dizimo,
-            "Oferta": log.oferta,
-            "Total": total
-        })
-    
-    return pd.DataFrame(data)
+        data = []
+        for log in logs:
+            total = log.dizimo + log.oferta
+            data.append({
+                "ID": log.id,
+                "Data do Culto": log.date,
+                "Tipo de Culto": log.service_type,
+                "Dízimo": log.dizimo,
+                "Oferta": log.oferta,
+                "Total": total
+            })
+        
+        return pd.DataFrame(data)
 
 # Substitua esta função inteira
 # Substitua sua função _apply_service_log_changes inteira por esta
@@ -3602,7 +3606,7 @@ def display_entry_hierarchy(user: User, congs_all: List[Congregation], start: da
     for cong in congs_all:
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id).order_by(SubCongregation.name)).all()
         
-        principal_totals = _collect_month_data(db, cong.id, start, end, sub_cong_id=None)["totals"]
+        principal_totals = _collect_month_data(c.id, start, end, sub_cong_id=None)["totals"]
         principal_entradas = principal_totals["entradas_total_sem_missoes"]
         
         # Adiciona a linha da congregação principal
@@ -3704,7 +3708,7 @@ def display_exit_hierarchy(user: User, congs_all: List[Congregation], start: dat
     for cong in congs_all:
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id).order_by(SubCongregation.name)).all()
         
-        principal_totals = _collect_month_data(db, cong.id, start, end, sub_cong_id=None)["totals"]
+        principal_totals = _collect_month_data(c.id, start, end, sub_cong_id=None)["totals"]
         principal_saidas = principal_totals["saidas_total"]
         
         report_data.append({
@@ -3989,7 +3993,7 @@ def page_relatorio_entrada(user: "User"):
             total_geral = df_agg["Total Entradas"].sum()
             st.metric("Total Geral da Congregação", format_currency(total_geral))
         else:
-            report_df = _load_service_logs(db, parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id_or_all)
+            report_df = _load_service_logs(parent_cong_obj.id, start, end, start, end, sub_cong_id=target_sub_cong_id_or_all)
             
             st.dataframe(
                 report_df.style.format({
