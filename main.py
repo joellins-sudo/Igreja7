@@ -4198,54 +4198,45 @@ def main():
 # ===================== PAGE: ASSISTENTE IA (LÓGICA DE PERMISSÃO CORRIGIDA) =====================
 # ===================== PAGE: ASSISTENTE IA (COM LÓGICA DE PERFIS) =====================
 # ===================== PAGE: ASSISTENTE IA (COM BUSCA DETALHADA) =====================
+# ===================== PAGE: ASSISTENTE IA (COM CHAMADA CORRIGIDA) =====================
 def page_assistente_ia(user: "User"):
-    # Verificação de permissão geral
     if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
         st.warning("🔒 Acesso negado. Esta funcionalidade está disponível apenas para os perfis SEDE e TESOUREIRO MISSIONÁRIO.")
         return
 
     st.markdown("<h1 class='page-title'>🤖 Assistente Financeiro IA</h1>", unsafe_allow_html=True)
 
-    # --- LÓGICA PARA O PERFIL SEDE (INTERFACE DE CHAT ABERTA) ---
     if user.role == 'SEDE':
         st.info("Faça uma pergunta em linguagem natural sobre os dados financeiros de **todas as congregações e de todo o período**.")
-        
-        pergunta = st.text_area("Sua pergunta:", key="ia_pergunta_sede", height=150, placeholder="Ex: Qual foi o total de saídas em 2024? Liste os dizimistas da Sede em setembro de 2025.")
+        pergunta = st.text_area("Sua pergunta:", key="ia_pergunta_sede", height=150, placeholder="Ex: Qual foi o total de saídas em 2024? Qual congregação teve o maior saldo em julho de 2025?")
 
         if st.button("Analisar Banco de Dados Completo", type="primary", use_container_width=True):
             if pergunta.strip():
-                with st.spinner("Buscando todos os lançamentos do banco de dados... Isso pode levar um momento."):
-                    # --- MUDANÇA AQUI ---
-                    # Chamamos a nova função que busca os dados detalhados
-                    dados_detalhados_df = get_all_detailed_data_for_ia()
+                with st.spinner("Buscando e consolidando todos os dados do banco... Isso pode levar um momento."):
+                    # --- CORREÇÃO AQUI ---
+                    # Usamos o nome da nova função que criamos
+                    dados_consolidados_df = get_all_aggregated_data_for_ia()
                 
                 with st.spinner("O assistente está analisando os dados e elaborando uma resposta..."):
                     resposta = responder_pergunta_financeira(
                         pergunta_usuario=pergunta,
-                        dados_df=dados_detalhados_df, # Usamos os dados detalhados
-                        contexto="Dados detalhados de todas as congregações e de todo o período."
+                        dados_df=dados_consolidados_df,
+                        contexto="Dados consolidados de todas as congregações e de todo o período."
                     )
                     st.markdown("---")
                     st.markdown(f"#### Resposta do Assistente")
                     st.info(resposta)
             else:
                 st.warning("Por favor, digite uma pergunta.")
-
-    # --- LÓGICA PARA O PERFIL TESOUREIRO MISSIONÁRIO (INTERFACE COM FILTROS) ---
     else:
-        # (O código para o Tesoureiro Missionário continua o mesmo)
         st.info("Selecione um contexto (congregação e período) e faça sua pergunta em linguagem natural sobre os dados financeiros.")
-
         with SessionLocal() as db:
             st.markdown("#### 1. Selecione o Contexto dos Dados")
             congs_all = order_congs_sede_first(cong_options_for(user, db))
-            
             col_cong, col_filtros = st.columns([2, 3])
             
             with col_cong:
-                cong_sel_name = st.selectbox(
-                    "Congregação", [c.name for c in congs_all], key="ia_cong_sel_tm"
-                )
+                cong_sel_name = st.selectbox("Congregação", [c.name for c in congs_all], key="ia_cong_sel_tm")
                 cong_selecionada_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
 
             with col_filtros:
