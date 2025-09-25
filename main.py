@@ -3411,6 +3411,7 @@ def page_relatorio_missoes(user: "User"):
             c1, c2, c3 = st.columns(3)
             c1.metric("Total de Entradas no Mês", format_currency(total_periodo))
             c2.metric("Nº de Congregações Contribuintes (mês)", f"{num_congs}")
+            st.write("Colunas disponíveis no df_search:", df_search.columns)
             c3.metric("Total de Entradas no Ano", format_currency(df_search["Total no Ano (R$)"].sum()))
             
             st.divider()
