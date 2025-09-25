@@ -1899,6 +1899,104 @@ def _collect_month_data(cong_id: int, start: date, end: date, sub_cong_id: Optio
                 "saidas_total": total_saidas, "saldo": saldo
             }
         }
+    
+    @st.cache_data(ttl="10m")
+def build_ai_month_df(cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
+    """
+    Gera uma tabela diária do mês para a IA com as colunas:
+      - Data do Culto
+      - Dízimo  (regra: MAIOR entre 'dízimo nominal' e 'dízimo em transações')
+      - Oferta  (equivalência: MAIOR entre 'Oferta do Resumo do Culto' e 'Oferta em transações')
+      - Total   (Dízimo + Oferta)
+    OBS: Missões ficam de fora — seguem como categoria separada no seu sistema.
+    """
+    with SessionLocal() as db:
+        # --- Filtros de sub/unidade ---
+        if sub_cong_id is None:
+            sl_sub = ServiceLog.sub_congregation_id.is_(None)
+            tx_sub = Transaction.sub_congregation_id.is_(None)
+            tt_sub = Tithe.sub_congregation_id.is_(None)
+        else:
+            sl_sub = (ServiceLog.sub_congregation_id == sub_cong_id)
+            tx_sub = (Transaction.sub_congregation_id == sub_cong_id)
+            tt_sub = (Tithe.sub_congregation_id == sub_cong_id)
+
+        # ===== 1) OFERTA =====
+        # 1a) Oferta do Resumo do Culto (ServiceLog.oferta)
+        sl_oferta_q = (
+            select(ServiceLog.date, func.coalesce(func.sum(ServiceLog.oferta), 0.0))
+            .where(
+                ServiceLog.congregation_id == cong_id,
+                ServiceLog.date >= start, ServiceLog.date < end,
+                sl_sub
+            )
+            .group_by(ServiceLog.date)
+        )
+        sl_oferta = {d: float(v or 0.0) for d, v in db.execute(sl_oferta_q).all()}
+
+        # 1b) Oferta em lançamentos (Transaction com categoria 'Oferta')
+        tx_oferta_q = (
+            select(Transaction.date, func.coalesce(func.sum(Transaction.amount), 0.0))
+            .join(Category)
+            .where(
+                Transaction.congregation_id == cong_id,
+                Transaction.date >= start, Transaction.date < end,
+                Transaction.type.in_((TYPE_IN, "RECEITA")),
+                func.lower(Category.name) == "oferta",
+                tx_sub
+            )
+            .group_by(Transaction.date)
+        )
+        tx_oferta = {d: float(v or 0.0) for d, v in db.execute(tx_oferta_q).all()}
+
+        # ===== 2) DÍZIMO =====
+        # 2a) Dízimo nominal (Tithe)
+        tt_diz_q = (
+            select(Tithe.date, func.coalesce(func.sum(Tithe.amount), 0.0))
+            .where(
+                Tithe.congregation_id == cong_id,
+                Tithe.date >= start, Tithe.date < end,
+                tt_sub
+            )
+            .group_by(Tithe.date)
+        )
+        tt_diz = {d: float(v or 0.0) for d, v in db.execute(tt_diz_q).all()}
+
+        # 2b) Dízimo em lançamentos (Transaction com categoria 'Dízimo')
+        tx_diz_q = (
+            select(Transaction.date, func.coalesce(func.sum(Transaction.amount), 0.0))
+            .join(Category)
+            .where(
+                Transaction.congregation_id == cong_id,
+                Transaction.date >= start, Transaction.date < end,
+                Transaction.type.in_((TYPE_IN, "RECEITA")),
+                func.lower(Category.name).in_(("dízimo", "dizimo")),
+                tx_sub
+            )
+            .group_by(Transaction.date)
+        )
+        tx_diz = {d: float(v or 0.0) for d, v in db.execute(tx_diz_q).all()}
+
+        # ===== 3) Montagem por dia =====
+        # Observação importante (evita duplicidade):
+        # - Oferta: usamos o MAIOR entre (ServiceLog.oferta) e (Transaction 'Oferta')
+        #   porque são jeitos equivalentes de lançar a MESMA coisa.
+        # - Dízimo: mantemos a sua regra atual (MAIOR entre nominal e transação).
+        all_dates = sorted(set(sl_oferta) | set(tx_oferta) | set(tt_diz) | set(tx_diz))
+
+        rows = []
+        for d in all_dates:
+            diz = max(float(tt_diz.get(d, 0.0)), float(tx_diz.get(d, 0.0)))
+            ofe = max(float(sl_oferta.get(d, 0.0)), float(tx_oferta.get(d, 0.0)))
+            rows.append({
+                "Data do Culto": d,
+                "Dízimo": diz,
+                "Oferta": ofe,
+                "Total": diz + ofe
+            })
+
+        return pd.DataFrame(rows, columns=["Data do Culto", "Dízimo", "Oferta", "Total"])
+
 
 # COLE ESTAS DUAS FUNÇÕES NO SEU CÓDIGO, ANTES DA "page_lancamentos"
 
@@ -4353,108 +4451,44 @@ def main():
 # ===================== PAGE: ASSISTENTE IA (LÓGICA DE DADOS FINAL) =====================
 # ===================== PAGE: ASSISTENTE IA (LÓGICA DE DADOS FINAL E PRECISA) =====================
 def page_assistente_ia(user: "User"):
-    # Verificação de permissão geral
-    if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
-        st.warning("🔒 Acesso negado. Esta funcionalidade está disponível apenas para os perfis SEDE e TESOUREIRO MISSIONÁRIO.")
-        return
-
-    st.markdown("<h1 class='page-title'>🤖 Assistente Financeiro IA</h1>", unsafe_allow_html=True)
-    st.info("Selecione um contexto (congregação e período) e faça sua pergunta em linguagem natural sobre os dados financeiros.")
+    ensure_seed()
+    st.markdown("<h1 class='page-title'>Assistente IA</h1>", unsafe_allow_html=True)
 
     with SessionLocal() as db:
-        st.markdown("#### 1. Selecione o Contexto da Análise")
-        congs_all = order_congs_sede_first(cong_options_for(user, db))
-        col_cong, col_filtros = st.columns([2, 3])
-        
-        with col_cong:
-            cong_sel_name = st.selectbox("Congregação", [c.name for c in congs_all], key="ia_cong_sel_unified")
-            cong_selecionada_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
+        # Congregação (igual aos outros menus)
+        congs = order_congs_sede_first(cong_options_for(user, db))
+        if not congs:
+            st.info("Nenhuma congregação disponível."); return
 
-        with col_filtros:
-            ref = get_month_selector("Mês de Referência", key_prefix="ia_ref_unified")
-        
+        cong_sel_name = st.selectbox("Congregação", [c.name for c in congs], key="ai_cong_sel")
+        cong_obj = next((c for c in congs if c.name == cong_sel_name), None)
+        if not cong_obj:
+            st.warning("Selecione uma congregação."); return
+
+        # Mês/Ano de referência (usa seu helper)
+        ref = get_month_selector("Mês de referência", key_prefix="ai_ref")
         start, end = month_bounds(ref)
 
-        if not cong_selecionada_obj:
-            st.warning("Nenhuma congregação selecionada. Por favor, selecione uma na lista.")
-            return
+        # Dados para a IA (novo: soma equivalências sem duplicar)
+        dados_df = build_ai_month_df(
+            cong_id=cong_obj.id,
+            start=start,
+            end=end,
+            sub_cong_id=None  # se quiser permitir sub-congregação, troque aqui
+        )
 
-        st.markdown("---")
-        st.markdown("#### 2. Faça sua Pergunta")
-        
-        placeholder_text = "Ex: Qual o total de dízimos? Liste as 3 maiores saídas. Quem foi o dizimista com maior valor?"
-        pergunta = st.text_area("Sua pergunta:", key="ia_pergunta_final", height=100, placeholder=placeholder_text)
-        
+        st.markdown("### 2. Faça sua Pergunta")
+        pergunta = st.text_area("Sua pergunta:", key="ai_question", placeholder="Ex.: total de ofertas")
         if st.button("Analisar com IA", type="primary", use_container_width=True):
-            if pergunta.strip():
-                with st.spinner("Buscando e preparando os dados..."):
-                    
-                    dados_completos = _collect_month_data(cong_selecionada_obj.id, start, end)
-                    
-                    # --- INÍCIO DA NOVA LÓGICA DE PREPARAÇÃO DE DADOS ---
-                    
-                    # 1. Calcula os totais de dízimo das duas fontes
-                    total_dizimo_transacao = sum(float(t.amount) for t in dados_completos.get("tx_in", []) if t.category and _norm(t.category.name) in ("dizimo", "dízimo"))
-                    total_dizimo_nominal = sum(float(t.amount) for t in dados_completos.get("tithes", []))
-                    
-                    # 2. Aplica a REGRA DE NEGÓCIO: pega o maior valor
-                    total_dizimo_correto = max(total_dizimo_transacao, total_dizimo_nominal)
-                    
-                    # 3. Monta a lista de dados para a IA, agora com dados limpos e precisos
-                    combined_rows = []
+            contexto = f"Congregação: {cong_obj.name} • Período: {MONTHS[ref.month-1]}/{ref.year}"
+            resposta = responder_pergunta_financeira(pergunta, dados_df, contexto)
 
-                    # Adiciona uma única linha consolidada para o Dízimo, com o valor já correto
-                    if total_dizimo_correto > 0:
-                        combined_rows.append({
-                            "Data": start, 
-                            "Tipo": "Entrada", 
-                            "Categoria": "Dízimo (Total Consolidado)", 
-                            "Descricao": "Valor total de dízimos do período, aplicando a regra de equivalência.", 
-                            "Valor": total_dizimo_correto
-                        })
-                    
-                    # Adiciona detalhes do dízimo nominal para que a IA possa responder sobre nomes
-                    for t in dados_completos.get("tithes", []):
-                        combined_rows.append({
-                            "Data": t.date, "Tipo": "Entrada", "Categoria": "Detalhe Dízimo Nominal", 
-                            "Descricao": f"Dizimista: {t.tither_name}, Pgto: {t.payment_method}", 
-                            "Valor": t.amount
-                        })
-
-                    # Adiciona outras entradas (sem Dízimo e sem Missões)
-                    for t in dados_completos.get("tx_in", []):
-                        if t.category and _norm(t.category.name) not in ("dizimo", "dízimo", "missoes", "missões"):
-                            combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
-
-                    # Adiciona entradas e saídas de Missões
-                    for t in dados_completos.get("tx_in", []):
-                        if t.category and _norm(t.category.name) in ("missoes", "missões"):
-                            combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": "Entrada de Missões", "Descricao": t.description, "Valor": t.amount})
-                    for t in dados_completos.get("tx_out", []):
-                        if t.category and _norm(t.category.name) in ("missões (saída)", "missoes (saida)"):
-                             combined_rows.append({"Data": t.date, "Tipo": "Saída", "Categoria": "Saída de Missões", "Descricao": t.description, "Valor": t.amount})
-                    
-                    # Adiciona as outras saídas
-                    for t in dados_completos.get("tx_out", []):
-                        if t.category and _norm(t.category.name) not in ("missões (saída)", "missoes (saida)"):
-                            combined_rows.append({"Data": t.date, "Tipo": "Saída", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
-                    
-                    dados_para_ia_df = pd.DataFrame(combined_rows)
-                    # --- FIM DA NOVA LÓGICA ---
-
-                with st.spinner("O assistente está analisando os dados e elaborando uma resposta..."):
-                    contexto_str = f"{cong_selecionada_obj.name} - {ref.strftime('%B de %Y')}"
-                    
-                    resposta = responder_pergunta_financeira(
-                        pergunta_usuario=pergunta,
-                        dados_df=dados_para_ia_df,
-                        contexto=contexto_str
-                    )
-                    st.markdown("---")
-                    st.markdown(f"#### Resposta do Assistente")
-                    st.info(resposta)
+            st.markdown("### Resposta do Assistente")
+            if (resposta or "").strip():
+                st.info(resposta)
             else:
-                st.warning("Por favor, digite uma pergunta.")
+                st.info("Não encontrei dados para responder.")
+
             # ... (O restante do código para o Tesoureiro Missionário permanece o mesmo)
             # ...
 
