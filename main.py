@@ -326,6 +326,76 @@ def _set_locale_ptbr():
 _set_locale_ptbr()
 
 # ===================== UTILS =====================
+# ===================== COMPONENTE DE ENTRADA DE VOZ =====================
+def voice_input_ui():
+    """
+    Cria um componente HTML/JS para capturar a fala do usuário e retornar o texto.
+    """
+    import streamlit.components.v1 as components
+
+    html_code = """
+    <style>
+        #talk-btn {
+            padding: 10px 15px;
+            border-radius: 8px;
+            background-color: #28a745; /* Verde */
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+            height: 48px;
+            transition: background-color 0.2s;
+        }
+        #talk-btn:hover { background-color: #218838; }
+        #talk-btn.listening { background-color: #dc3545; } /* Vermelho */
+    </style>
+
+    <button id="talk-btn">🎤 Falar</button>
+
+    <script>
+        const btn = document.getElementById('talk-btn');
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        
+        if (!SpeechRecognition) {
+            btn.innerHTML = "Voz não suportada";
+            btn.disabled = true;
+        } else {
+            const recognition = new SpeechRecognition();
+            recognition.lang = 'pt-BR';
+            recognition.continuous = false;
+            recognition.interimResults = false;
+
+            recognition.onstart = function() {
+                btn.innerHTML = "Ouvindo...";
+                btn.classList.add("listening");
+            };
+
+            recognition.onresult = function(event) {
+                const transcript = event.results[0][0].transcript;
+                // Envia o texto transcrito de volta para o Python/Streamlit
+                window.parent.Streamlit.setComponentValue(transcript);
+            };
+
+            recognition.onerror = function(event) {
+                console.error("Erro no reconhecimento de voz:", event.error);
+                btn.innerHTML = "Erro";
+            };
+
+            recognition.onend = function() {
+                btn.innerHTML = "🎤 Falar";
+                btn.classList.remove("listening");
+            };
+
+            btn.addEventListener('click', () => {
+                recognition.start();
+            });
+        }
+    </script>
+    """
+    transcribed_text = components.html(html_code, height=60)
+    return transcribed_text
+
 MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
 MONTHS_SHORT = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"]
 
@@ -4446,48 +4516,93 @@ def main():
 
         # ===================== PAGE: ASSISTENTE IA ========================
 # ===================== PAGE: ASSISTENTE IA (COM RESUMO RÁPIDO E ANÁLISE LIVRE) =====================
-# ===================== PAGE: ASSISTENTE IA (COM REGRAS DE NEGÓCIO CORRIGIDAS) =====================
-# ===================== PAGE: ASSISTENTE IA (VERSÃO FINAL COM PERFIS) =====================
-# ===================== PAGE: ASSISTENTE IA (LÓGICA DE DADOS FINAL) =====================
-# ===================== PAGE: ASSISTENTE IA (LÓGICA DE DADOS FINAL E PRECISA) =====================
+# ===================== PAGE: ASSISTENTE IA (COM ENTRADA DE VOZ) =====================
 def page_assistente_ia(user: "User"):
-    ensure_seed()
-    st.markdown("<h1 class='page-title'>Assistente IA</h1>", unsafe_allow_html=True)
+    # Verificação de permissão geral
+    if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
+        st.warning("🔒 Acesso negado. Esta funcionalidade está disponível apenas para os perfis SEDE e TESOUREIRO MISSIONÁRIO.")
+        return
+
+    st.markdown("<h1 class='page-title'>🤖 Assistente Financeiro IA</h1>", unsafe_allow_html=True)
+    st.info("Selecione um contexto, clique no botão 'Falar' para fazer sua pergunta por voz ou simplesmente digite no campo abaixo.")
 
     with SessionLocal() as db:
-        # Congregação (igual aos outros menus)
-        congs = order_congs_sede_first(cong_options_for(user, db))
-        if not congs:
-            st.info("Nenhuma congregação disponível."); return
+        st.markdown("#### 1. Selecione o Contexto da Análise")
+        congs_all = order_congs_sede_first(cong_options_for(user, db))
+        col_cong, col_filtros = st.columns([2, 3])
+        
+        with col_cong:
+            cong_sel_name = st.selectbox("Congregação", [c.name for c in congs_all], key="ia_cong_sel_unified")
+            cong_selecionada_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
 
-        cong_sel_name = st.selectbox("Congregação", [c.name for c in congs], key="ai_cong_sel")
-        cong_obj = next((c for c in congs if c.name == cong_sel_name), None)
-        if not cong_obj:
-            st.warning("Selecione uma congregação."); return
-
-        # Mês/Ano de referência (usa seu helper)
-        ref = get_month_selector("Mês de referência", key_prefix="ai_ref")
+        with col_filtros:
+            ref = get_month_selector("Mês de Referência", key_prefix="ia_ref_unified")
+        
         start, end = month_bounds(ref)
 
-        # Dados para a IA (novo: soma equivalências sem duplicar)
-        dados_df = build_ai_month_df(
-            cong_id=cong_obj.id,
-            start=start,
-            end=end,
-            sub_cong_id=None  # se quiser permitir sub-congregação, troque aqui
-        )
+        if not cong_selecionada_obj:
+            st.warning("Nenhuma congregação selecionada. Por favor, selecione uma na lista.")
+            return
 
-        st.markdown("### 2. Faça sua Pergunta")
-        pergunta = st.text_area("Sua pergunta:", key="ai_question", placeholder="Ex.: total de ofertas")
+        st.markdown("---")
+        st.markdown("#### 2. Faça sua Pergunta")
+        
+        # --- LÓGICA DE ENTRADA DE VOZ ---
+        col_text, col_voice = st.columns([4, 1])
+        
+        with col_text:
+            placeholder_text = "Clique em 'Falar' ou digite sua pergunta aqui..."
+            # A chave precisa ser a mesma usada para a atualização via voz
+            pergunta = st.text_area("Sua pergunta:", key="ia_pergunta_unified", height=120, placeholder=placeholder_text)
+        
+        with col_voice:
+            st.write("") 
+            st.write("") 
+            transcribed_text = voice_input_ui()
+
+        # Se a voz retornar um texto, atualizamos a caixa de texto e recarregamos a página
+        if transcribed_text:
+            st.session_state.ia_pergunta_unified = transcribed_text
+            st.rerun()
+        
+        # --- FIM DA LÓGICA DE VOZ ---
+
         if st.button("Analisar com IA", type="primary", use_container_width=True):
-            contexto = f"Congregação: {cong_obj.name} • Período: {MONTHS[ref.month-1]}/{ref.year}"
-            resposta = responder_pergunta_financeira(pergunta, dados_df, contexto)
+            # Usamos o valor do session_state, que pode ter sido preenchido pela voz ou digitação
+            if st.session_state.ia_pergunta_unified and st.session_state.ia_pergunta_unified.strip():
+                with st.spinner("Buscando e preparando os dados..."):
+                    
+                    dados_para_ia_df = pd.DataFrame()
+                    contexto_str = f"{cong_selecionada_obj.name} - {ref.strftime('%B de %Y')}"
+                    
+                    # Prepara dados de forma diferente para cada perfil
+                    if user.role == 'SEDE':
+                        dados_completos = _collect_month_data(cong_selecionada_obj.id, start, end)
+                        # ... (lógica de preparação de dados para SEDE)
+                        combined_rows = []
+                        for t in dados_completos.get("tx_in", []):
+                            combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
+                        for t in dados_completos.get("tithes", []):
+                            combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": "Dízimo Nominal", "Descricao": f"Dizimista: {t.tither_name}, Pgto: {t.payment_method}", "Valor": t.amount})
+                        for t in dados_completos.get("tx_out", []):
+                            combined_rows.append({"Data": t.date, "Tipo": "Saída", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
+                        dados_para_ia_df = pd.DataFrame(combined_rows)
 
-            st.markdown("### Resposta do Assistente")
-            if (resposta or "").strip():
-                st.info(resposta)
+                    elif user.role == 'TESOUREIRO MISSIONÁRIO':
+                        dados_para_ia_df = get_missions_data_for_ia(cong_selecionada_obj.id, start, end)
+                        contexto_str = f"Dados de Missões de {cong_selecionada_obj.name} - {ref.strftime('%B de %Y')}"
+
+                with st.spinner("O assistente está analisando os dados e elaborando uma resposta..."):
+                    resposta = responder_pergunta_financeira(
+                        pergunta_usuario=st.session_state.ia_pergunta_unified,
+                        dados_df=dados_para_ia_df,
+                        contexto=contexto_str
+                    )
+                    st.markdown("---")
+                    st.markdown(f"#### Resposta do Assistente")
+                    st.info(resposta)
             else:
-                st.info("Não encontrei dados para responder.")
+                st.warning("Por favor, digite ou fale uma pergunta.")
 
             # ... (O restante do código para o Tesoureiro Missionário permanece o mesmo)
             # ...
