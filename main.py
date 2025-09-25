@@ -1175,6 +1175,7 @@ def _entrada_summary_df(_db: Session, cong_id: int, start: date, end: date, sub_
     
     return pd.DataFrame(rows)
 
+
 def _apply_entrada_summary_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None):
     with SessionLocal() as db:
         cats_in = categories_for_type(db, TYPE_IN)
