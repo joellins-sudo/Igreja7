@@ -335,7 +335,10 @@ MONTHS_SHORT = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov
 # ===================== FUNÇÃO DE IA PARA ASSISTENTE (PROMPT FINAL) =====================
 @st.cache_data
 def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame, contexto: str) -> str:
-    import openai
+    try:
+        from openai import OpenAI  # <-- usar import recomendado
+    except Exception:
+        return "Aviso: A biblioteca 'openai' não está instalada. Instale com: pip install openai"
 
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
@@ -344,30 +347,31 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
     if dados_df.empty:
         return "Não encontrei dados para o período e congregação selecionados para responder a esta pergunta."
 
-    dados_texto = dados_df.to_markdown(index=False)
+    # (opcional) reduzir tamanho do markdown pra evitar prompts gigantes
+    dados_texto = dados_df.head(400).to_markdown(index=False)
 
     try:
-        client = openai.OpenAI(api_key=api_key)
+        client = OpenAI(api_key=api_key)
 
         prompt_sistema = (
-            "Você é um assistente financeiro sênior, especialista em analisar dados de relatórios de igrejas. "
-            "Sua tarefa é responder às perguntas do usuário de forma clara e objetiva. "
-            "REGRAS IMPORTANTES: \n"
-            "1. Responda usando APENAS os dados fornecidos no contexto. \n"
-            "2. **REGRAS DE DADOS:** A categoria 'Dízimo (Culto)' é o dízimo principal. A categoria 'Dízimo Nominal' contém detalhes por pessoa. A categoria 'Oferta' NÃO inclui 'Entrada de Missões'. Se o usuário perguntar pelo 'total de dízimo', use a soma de 'Dízimo (Culto)'. Use 'Dízimo Nominal' apenas se o usuário perguntar especificamente por 'nominal' ou por nomes de dizimistas. \n"
-            "3. NUNCA invente informações. Se a resposta não estiver nos dados, diga 'Não encontrei essa informação nos dados fornecidos para este período'. \n"
-            "4. Ao citar valores monetários, sempre use o formato R$ 1.234,56. \n"
-            "5. Se a resposta incluir uma lista de itens, formate-os como uma LISTA DE TÓPICOS (bullet points, usando '*' ou '-'), com cada item em uma nova linha. \n"
+            "Você é um assistente financeiro sênior, especialista em analisar dados de relatórios de igrejas.\n"
+            "REGRAS:\n"
+            "1) Responda APENAS com base nos dados fornecidos.\n"
+            "2) REGRA DE DÍZIMO (EQUIVALÊNCIA): sempre trate o total de dízimo do DIA/MÊS como o MAIOR entre: "
+            "   (a) soma de Dízimos Nominais (tabela 'Tithe') e (b) soma de Transações com categoria 'Dízimo'. "
+            "3) 'Oferta' não inclui Missões. 'Missões' é categoria separada.\n"
+            "4) Se faltar dado, diga que não consta no período informado.\n"
+            "5) Formate valores como R$ 1.234,56. Use lista com bullets quando for elencar itens.\n"
         )
 
         prompt_usuario_completo = (
-            f"Contexto do Relatório: {contexto}\n\n"
-            f"Dados Disponíveis para sua análise:\n"
+            f"Contexto: {contexto}\n\n"
+            f"Dados para análise (máx. 400 linhas):\n"
             f"```markdown\n{dados_texto}\n```\n\n"
-            f"Com base nas regras e nos dados acima, responda a seguinte pergunta: \"{pergunta_usuario}\""
+            f"Pergunta: \"{pergunta_usuario}\""
         )
 
-        response = client.chat.completions.create(
+        resp = client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": prompt_sistema},
@@ -376,7 +380,7 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
             temperature=0.1,
             max_tokens=500
         )
-        return response.choices[0].message.content
+        return resp.choices[0].message.content
 
     except Exception as e:
         return f"Ocorreu um erro ao processar a solicitação com a IA: {e}"
