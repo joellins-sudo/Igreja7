@@ -1970,7 +1970,7 @@ def _collect_month_data(cong_id: int, start: date, end: date, sub_cong_id: Optio
             }
         }
     
-    @st.cache_data(ttl="10m")
+ 
 @st.cache_data(ttl="10m")
 def build_ai_month_df(cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
     """
