@@ -329,11 +329,68 @@ _set_locale_ptbr()
 MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
 MONTHS_SHORT = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"]
 
+# ===================== FUNÇÃO DE IA PARA ASSISTENTE FINANCEIRO =====================
+@st.cache_data
+def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame, contexto: str) -> str:
+    """
+    Usa a IA para responder uma pergunta do usuário com base em um DataFrame de dados.
+    """
+    import openai
+
+    # Pega a chave de API das variáveis de ambiente do Render
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return "Aviso: A chave de API da OpenAI não foi configurada no ambiente."
+
+    # Se não houver dados no DataFrame, não há o que analisar.
+    if dados_df.empty:
+        return "Não encontrei dados para o período e congregação selecionados para responder a esta pergunta."
+
+    # Converte a tabela de dados (DataFrame) para um formato de texto que a IA entende bem
+    dados_texto = dados_df.to_markdown(index=False)
+
+    try:
+        client = openai.OpenAI(api_key=api_key)
+
+        # O prompt do sistema é a instrução mais importante: define a personalidade e as regras da IA
+        prompt_sistema = (
+            "Você é um assistente financeiro sênior, especialista em analisar dados de relatórios de igrejas. "
+            "Sua tarefa é responder às perguntas do usuário de forma clara, objetiva e educada. "
+            "REGRAS IMPORTANTES: "
+            "1. Responda usando APENAS os dados fornecidos no contexto. "
+            "2. NUNCA invente informações ou valores. Se a resposta não estiver nos dados, diga 'Não encontrei essa informação nos dados fornecidos para este período'. "
+            "3. Ao citar valores monetários, sempre use o formato R$ 1.234,56. "
+            "4. Seja direto e resuma a informação. Não precisa mostrar a tabela de dados completa na sua resposta."
+        )
+
+        # O prompt do usuário combina a pergunta dele com os dados que buscamos
+        prompt_usuario_completo = (
+            f"Contexto do Relatório: {contexto}\n\n"
+            f"Dados Disponíveis para sua análise:\n"
+            f"```markdown\n{dados_texto}\n```\n\n"
+            f"Com base nos dados acima, responda a seguinte pergunta: \"{pergunta_usuario}\""
+        )
+
+        response = client.chat.completions.create(
+            model="gpt-4o",  # Modelo mais avançado, ideal para análise de dados
+            messages=[
+                {"role": "system", "content": prompt_sistema},
+                {"role": "user", "content": prompt_usuario_completo}
+            ],
+            temperature=0.2, # Deixa a resposta bem objetiva e menos "criativa"
+            max_tokens=500   # Limita o tamanho da resposta para economizar
+        )
+        return response.choices[0].message.content
+
+    except Exception as e:
+        return f"Ocorreu um erro ao processar a solicitação com a IA: {e}"
+
 def now_bahia() -> datetime:
     try:
         return datetime.now(TZ_BA) if TZ_BA else datetime.now()
     except Exception:
         return datetime.now()
+
 
 def today_bahia() -> date:
     return now_bahia().date()
@@ -832,18 +889,19 @@ def order_congs_sede_first(congs: List[Congregation]) -> List[Congregation]:
 def sidebar_common(user: "User") -> str:
     """Desenha o menu lateral e retorna a página selecionada."""
     MENU_PAGES = {
-        "Lançamentos": "📥", "Relatório de Entrada": "📊", "Relatório de Saída": "📉",
-        "Relatório de Missões": "🌍", "Relatório de Dizimistas": "🧾", "Visão Geral": "🏁",
-        "Cadastro": "🛠️",
-    }
+    "Lançamentos": "📥", "Relatório de Entrada": "📊", "Relatório de Saída": "📉",
+    "Relatório de Missões": "🌍", "Relatório de Dizimistas": "🧾", "Visão Geral": "🏁",
+    "Assistente IA": "🤖",  # <-- ADICIONE ESTA LINHA
+    "Cadastro": "🛠️",
+}
     
     role = getattr(user, "role", "")
     if role == "SEDE":
-        menu_options_plain = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Cadastro"]
+        menu_options_plain = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Assistente IA", "Cadastro"]
     elif role == "TESOUREIRO":
-        menu_options_plain = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"]
+        menu_options_plain = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Assistente IA"]
     elif role == "TESOUREIRO MISSIONÁRIO":
-        menu_options_plain = ["Relatório de Missões"]
+        menu_options_plain = ["Relatório de Missões", "Assistente IA"]
     else:
         menu_options_plain = ["Visão Geral"]
 
@@ -4076,6 +4134,12 @@ def main():
                     page_visao_geral(user)
                 elif page == "Cadastro":
                     page_cadastro(user)
+                
+                # --- INÍCIO DA ALTERAÇÃO ---
+                elif page == "Assistente IA":
+                    page_assistente_ia(user)
+                # --- FIM DA ALTERAÇÃO ---
+
                 else:
                     page_visao_geral(user)
             else:
@@ -4085,6 +4149,82 @@ def main():
     except Exception as e:
         st.error("Ocorreu um erro crítico na aplicação.")
         st.exception(e)
+
+        # ===================== PAGE: ASSISTENTE IA =====================
+def page_assistente_ia(user: "User"):
+    st.markdown("<h1 class='page-title'>🤖 Assistente Financeiro IA</h1>", unsafe_allow_html=True)
+    st.info("Selecione um contexto (congregação e período) e faça sua pergunta em linguagem natural sobre os dados financeiros.")
+
+    with SessionLocal() as db:
+        # --- PASSO 1: SELEÇÃO DE CONTEXTO ---
+        st.markdown("#### 1. Selecione o Contexto dos Dados")
+        congs_all = order_congs_sede_first(cong_options_for(user, db))
+        
+        col_cong, col_filtros = st.columns([2, 3])
+        
+        with col_cong:
+            cong_selecionada_obj = None
+            if user.role == "SEDE":
+                cong_sel_name = st.selectbox(
+                    "Congregação", [c.name for c in congs_all], key="ia_cong_sel"
+                )
+                cong_selecionada_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
+            else:
+                cong_selecionada_obj = db.get(Congregation, user.congregation_id)
+                st.text_input("Congregação", cong_selecionada_obj.name, disabled=True)
+
+        with col_filtros:
+            ref = get_month_selector("Mês de Referência", key_prefix="ia_ref")
+        
+        start, end = month_bounds(ref)
+
+        if not cong_selecionada_obj:
+            st.warning("Nenhuma congregação encontrada ou selecionada.")
+            return
+
+        # --- PASSO 2: BUSCA DE DADOS ---
+        # Buscamos todos os dados do contexto para que a IA possa analisar
+        dados_completos = _collect_month_data(cong_selecionada_obj.id, start, end)
+        
+        # Preparamos um DataFrame consolidado e amigável para a IA
+        combined_rows = []
+        for t in dados_completos.get("tx_in", []):
+            combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
+        for t in dados_completos.get("tithes", []):
+            combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": "Dízimo Nominal", "Descricao": f"Dizimista: {t.tither_name}, Pgto: {t.payment_method}", "Valor": t.amount})
+        for t in dados_completos.get("tx_out", []):
+            combined_rows.append({"Data": t.date, "Tipo": "Saída", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
+        
+        dados_para_ia_df = pd.DataFrame(combined_rows)
+
+        # --- PASSO 3: PERGUNTA DO USUÁRIO ---
+        st.markdown("---")
+        st.markdown("#### 2. Faça sua Pergunta")
+        
+        exemplos = [
+            "Faça um resumo geral do mês.",
+            "Qual foi o total de dízimos?",
+            "Liste todas as saídas com energia elétrica.",
+        ]
+        st.caption(f"Exemplos: '{exemplos[0]}', '{exemplos[1]}', '{exemplos[2]}'")
+
+        pergunta = st.text_area("Sua pergunta:", key="ia_pergunta", height=100, placeholder="Ex: Qual foi o total de ofertas em dinheiro?")
+
+        if st.button("Analisar com IA", type="primary", use_container_width=True):
+            if pergunta.strip():
+                with st.spinner("O assistente está analisando os dados e elaborando uma resposta..."):
+                    contexto_str = f"{cong_selecionada_obj.name} - {ref.strftime('%B de %Y')}"
+                    
+                    resposta = responder_pergunta_financeira(
+                        pergunta_usuario=pergunta,
+                        dados_df=dados_para_ia_df,
+                        contexto=contexto_str
+                    )
+                    st.markdown("---")
+                    st.markdown(f"#### Resposta do Assistente")
+                    st.info(resposta)
+            else:
+                st.warning("Por favor, digite uma pergunta.")
 
 if __name__ == "__main__":
     main()
