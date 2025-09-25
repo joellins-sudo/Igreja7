@@ -4161,10 +4161,13 @@ def main():
 
         # ===================== PAGE: ASSISTENTE IA =====================
 def page_assistente_ia(user: "User"):
-
+    # --- INÍCIO DA CORREÇÃO DE INDENTAÇÃO ---
+    # Bloco de verificação de permissão com o recuo (indentação) correto
     if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
-    st.warning("🔒 Acesso negado. Esta funcionalidade está disponível apenas para os perfis SEDE e TESOUREIRO MISSIONÁRIO.")
-    return  # Para a execução da página aqui
+        st.warning("🔒 Acesso negado. Esta funcionalidade está disponível apenas para os perfis SEDE e TESOUREIRO MISSIONÁRIO.")
+        return  # Para a execução da página aqui
+    # --- FIM DA CORREÇÃO ---
+
     st.markdown("<h1 class='page-title'>🤖 Assistente Financeiro IA</h1>", unsafe_allow_html=True)
     st.info("Selecione um contexto (congregação e período) e faça sua pergunta em linguagem natural sobre os dados financeiros.")
 
@@ -4196,10 +4199,8 @@ def page_assistente_ia(user: "User"):
             return
 
         # --- PASSO 2: BUSCA DE DADOS ---
-        # Buscamos todos os dados do contexto para que a IA possa analisar
         dados_completos = _collect_month_data(cong_selecionada_obj.id, start, end)
         
-        # Preparamos um DataFrame consolidado e amigável para a IA
         combined_rows = []
         for t in dados_completos.get("tx_in", []):
             combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
