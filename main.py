@@ -332,6 +332,7 @@ MONTHS_SHORT = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov
 # ===================== FUNÇÃO DE IA PARA ASSISTENTE FINANCEIRO =====================
 # ===================== FUNÇÃO DE IA PARA ASSISTENTE FINANCEIRO (MODELO RÁPIDO) =====================
 # ===================== FUNÇÃO DE IA PARA ASSISTENTE FINANCEIRO (PERSONALIDADE CORRIGIDA) =====================
+# ===================== FUNÇÃO DE IA PARA ASSISTENTE (PROMPT FINAL) =====================
 @st.cache_data
 def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame, contexto: str) -> str:
     import openai
@@ -350,18 +351,18 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
 
         prompt_sistema = (
             "Você é um assistente financeiro sênior, especialista em analisar dados de relatórios de igrejas. "
-            "Sua tarefa é responder às perguntas do usuário de forma clara, objetiva e educada. "
+            "Sua tarefa é responder às perguntas do usuário de forma clara e objetiva. "
             "REGRAS IMPORTANTES: \n"
-            "1. Responda usando APENAS os dados fornecidos no contexto. Os dados estão agregados por Categoria, Mês, Ano e Congregação. \n"
-            "2. **VOCÊ NÃO CONSEGUE VER NOMES DE DIZIMISTAS OU DESCRIÇÕES DE TRANSAÇÕES INDIVIDUAIS.** Se o usuário pedir detalhes que você não tem (como 'liste os dizimistas' ou 'qual foi a descrição daquela saída de R$50?'), informe educadamente que você só tem acesso aos totais e resumos, mas pode fornecer o valor total ou a contagem, se disponível. \n"
-            "3. **REGRA DO DÍZIMO:** Para calcular o total de dízimos de um período, você deve somar os valores da categoria 'Dízimo' e da categoria 'Dízimo Nominal' e usar o **MAIOR** valor entre os dois, nunca a soma de ambos. Se apenas uma das categorias existir, use o valor dela. \n"
+            "1. Responda usando APENAS os dados fornecidos no contexto. \n"
+            "2. **REGRAS DE DADOS:** A categoria 'Dízimo (Culto)' é o dízimo principal. A categoria 'Dízimo Nominal' contém detalhes por pessoa. A categoria 'Oferta' NÃO inclui 'Entrada de Missões'. Se o usuário perguntar pelo 'total de dízimo', use a soma de 'Dízimo (Culto)'. Use 'Dízimo Nominal' apenas se o usuário perguntar especificamente por 'nominal' ou por nomes de dizimistas. \n"
+            "3. NUNCA invente informações. Se a resposta não estiver nos dados, diga 'Não encontrei essa informação nos dados fornecidos para este período'. \n"
             "4. Ao citar valores monetários, sempre use o formato R$ 1.234,56. \n"
             "5. Se a resposta incluir uma lista de itens, formate-os como uma LISTA DE TÓPICOS (bullet points, usando '*' ou '-'), com cada item em uma nova linha. \n"
         )
 
         prompt_usuario_completo = (
             f"Contexto do Relatório: {contexto}\n\n"
-            f"Dados Disponíveis para sua análise (resumidos por categoria):\n"
+            f"Dados Disponíveis para sua análise:\n"
             f"```markdown\n{dados_texto}\n```\n\n"
             f"Com base nas regras e nos dados acima, responda a seguinte pergunta: \"{pergunta_usuario}\""
         )
@@ -4312,6 +4313,7 @@ def main():
 # ===================== PAGE: ASSISTENTE IA (COM RESUMO RÁPIDO E ANÁLISE LIVRE) =====================
 # ===================== PAGE: ASSISTENTE IA (COM REGRAS DE NEGÓCIO CORRIGIDAS) =====================
 # ===================== PAGE: ASSISTENTE IA (VERSÃO FINAL COM PERFIS) =====================
+# ===================== PAGE: ASSISTENTE IA (LÓGICA DE DADOS FINAL) =====================
 def page_assistente_ia(user: "User"):
     # Verificação de permissão geral
     if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
@@ -4319,21 +4321,19 @@ def page_assistente_ia(user: "User"):
         return
 
     st.markdown("<h1 class='page-title'>🤖 Assistente Financeiro IA</h1>", unsafe_allow_html=True)
-    
+    st.info("Selecione um contexto (congregação e período) e faça sua pergunta em linguagem natural sobre os dados financeiros.")
+
     with SessionLocal() as db:
-        # --- Interface de Filtros (comum para ambos os perfis) ---
         st.markdown("#### 1. Selecione o Contexto da Análise")
         congs_all = order_congs_sede_first(cong_options_for(user, db))
-        
         col_cong, col_filtros = st.columns([2, 3])
         
         with col_cong:
-            # SEDE e Tesoureiro Missionário podem selecionar qualquer congregação
-            cong_sel_name = st.selectbox("Congregação", [c.name for c in congs_all], key="ia_cong_sel_final")
+            cong_sel_name = st.selectbox("Congregação", [c.name for c in congs_all], key="ia_cong_sel_unified")
             cong_selecionada_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
 
         with col_filtros:
-            ref = get_month_selector("Mês de Referência", key_prefix="ia_ref_final")
+            ref = get_month_selector("Mês de Referência", key_prefix="ia_ref_unified")
         
         start, end = month_bounds(ref)
 
@@ -4344,36 +4344,58 @@ def page_assistente_ia(user: "User"):
         st.markdown("---")
         st.markdown("#### 2. Faça sua Pergunta")
         
-        # --- Lógica de busca de dados e pergunta (separada por perfil) ---
-        dados_para_ia_df = pd.DataFrame()
-        contexto_str = f"{cong_selecionada_obj.name} - {ref.strftime('%B de %Y')}"
-        placeholder_text = ""
-
-        # Prepara os dados de acordo com o perfil do usuário
-        if user.role == 'SEDE':
-            placeholder_text = "Ex: Qual foi o total de dízimos? Liste as 3 maiores saídas. Quem foi o dizimista com maior valor?"
-            dados_completos = _collect_month_data(cong_selecionada_obj.id, start, end)
-            
-            combined_rows = []
-            for t in dados_completos.get("tx_in", []):
-                combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
-            for t in dados_completos.get("tithes", []):
-                combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": "Dízimo Nominal", "Descricao": f"Dizimista: {t.tither_name}, Pgto: {t.payment_method}", "Valor": t.amount})
-            for t in dados_completos.get("tx_out", []):
-                combined_rows.append({"Data": t.date, "Tipo": "Saída", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
-            
-            dados_para_ia_df = pd.DataFrame(combined_rows)
+        # --- INÍCIO DA NOVA LÓGICA DE PREPARAÇÃO DE DADOS ---
         
+        # Define o placeholder da pergunta baseado no perfil
+        placeholder_text = ""
+        if user.role == 'SEDE':
+            placeholder_text = "Ex: Qual foi o total de dízimos (culto)? Liste os dízimos nominais. Qual o total de saídas com transporte?"
         elif user.role == 'TESOUREIRO MISSIONÁRIO':
-            placeholder_text = "Ex: Qual o total de entradas de missões? E o de saídas? Houve alguma saída acima de R$ 500?"
-            dados_para_ia_df = get_missions_data_for_ia(cong_selecionada_obj.id, start, end)
-            contexto_str = f"Dados de Missões de {cong_selecionada_obj.name} - {ref.strftime('%B de %Y')}"
+            placeholder_text = "Ex: Qual o total de entradas de missões? E o de saídas?"
 
         # Interface de pergunta
         pergunta = st.text_area("Sua pergunta:", key="ia_pergunta_final", height=100, placeholder=placeholder_text)
-
+        
         if st.button("Analisar com IA", type="primary", use_container_width=True):
             if pergunta.strip():
+                with st.spinner("Buscando e preparando os dados..."):
+                    
+                    dados_para_ia_df = pd.DataFrame()
+                    contexto_str = f"{cong_selecionada_obj.name} - {ref.strftime('%B de %Y')}"
+
+                    if user.role == 'SEDE':
+                        dados_completos = _collect_month_data(cong_selecionada_obj.id, start, end)
+                        combined_rows = []
+
+                        # 1. Adiciona Dízimos de Transação (o padrão)
+                        for t in dados_completos.get("tx_in", []):
+                            if t.category and _norm(t.category.name) in ("dizimo", "dízimo"):
+                                combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": "Dízimo (Culto)", "Descricao": t.description, "Valor": t.amount})
+
+                        # 2. Adiciona Dízimos Nominais (separadamente)
+                        for t in dados_completos.get("tithes", []):
+                            combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": "Dízimo Nominal", "Descricao": f"Dizimista: {t.tither_name}, Pgto: {t.payment_method}", "Valor": t.amount})
+
+                        # 3. Adiciona outras entradas (sem Dízimo e sem Missões)
+                        for t in dados_completos.get("tx_in", []):
+                            if t.category and _norm(t.category.name) not in ("dizimo", "dízimo", "missoes", "missões"):
+                                combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
+                        
+                        # 4. Adiciona entradas de Missões (separadamente)
+                        for t in dados_completos.get("tx_in", []):
+                            if t.category and _norm(t.category.name) in ("missoes", "missões"):
+                                combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": "Entrada de Missões", "Descricao": t.description, "Valor": t.amount})
+
+                        # 5. Adiciona saídas
+                        for t in dados_completos.get("tx_out", []):
+                            combined_rows.append({"Data": t.date, "Tipo": "Saída", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
+                        
+                        dados_para_ia_df = pd.DataFrame(combined_rows)
+
+                    elif user.role == 'TESOUREIRO MISSIONÁRIO':
+                        dados_para_ia_df = get_missions_data_for_ia(cong_selecionada_obj.id, start, end)
+                        contexto_str = f"Dados de Missões de {cong_selecionada_obj.name} - {ref.strftime('%B de %Y')}"
+
                 with st.spinner("O assistente está analisando os dados e elaborando uma resposta..."):
                     resposta = responder_pergunta_financeira(
                         pergunta_usuario=pergunta,
