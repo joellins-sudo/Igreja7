@@ -898,7 +898,7 @@ def sidebar_common(user: "User") -> str:
     if role == "SEDE":
         menu_options_plain = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Assistente IA", "Cadastro"]
     elif role == "TESOUREIRO":
-        menu_options_plain = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Assistente IA"]
+        menu_options_plain = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"]
     elif role == "TESOUREIRO MISSIONÁRIO":
         menu_options_plain = ["Relatório de Missões", "Assistente IA"]
     else:
@@ -1079,8 +1079,6 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
     o = norm_df(orig_df)
     n_bruto = norm_df(edited_df)
 
-    # --- LÓGICA DE EXCLUSÃO CORRIGIDA ---
-    # Considera válidas apenas as linhas com valor e nome de dizimista preenchidos
     n = n_bruto[
         (n_bruto["Valor"].abs() > 0.01) & 
         (n_bruto["Dizimista"] != "")
@@ -1104,7 +1102,13 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
             changed = False
             if t.date != new["Data"]: t.date = new["Data"]; changed = True
             if t.tither_name != new["Dizimista"]: t.tither_name = new["Dizimista"]; changed = True
-            if t.amount != new["Valor"]: t.amount = new["Valor"]; changed = True
+            
+            # --- INÍCIO DA CORREÇÃO ---
+            # Convertemos o valor para float normal antes de comparar e salvar
+            new_valor_float = float(new["Valor"])
+            if t.amount != new_valor_float: t.amount = new_valor_float; changed = True
+            # --- FIM DA CORREÇÃO ---
+            
             if (t.payment_method or "") != (new["Forma de Pagamento"] or ""): t.payment_method = new["Forma de Pagamento"] or None; changed = True
             if changed: db.add(t)
 
@@ -1114,8 +1118,14 @@ def _apply_tithe_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, default
 
             if default_cong_id is None: continue
             db.add(Tithe(
-                date=row["Data"], tither_name=row["Dizimista"], amount=row["Valor"],
-                congregation_id=int(default_cong_id), sub_congregation_id=default_sub_cong_id,
+                date=row["Data"], 
+                tither_name=row["Dizimista"], 
+                # --- INÍCIO DA CORREÇÃO ---
+                # Convertemos o valor para float aqui também
+                amount=float(row["Valor"]),
+                # --- FIM DA CORREÇÃO ---
+                congregation_id=int(default_cong_id), 
+                sub_cong_regation_id=default_sub_cong_id,
                 payment_method=(row.get("Forma de Pagamento") or None)
             ))
         db.commit()
@@ -4151,6 +4161,10 @@ def main():
 
         # ===================== PAGE: ASSISTENTE IA =====================
 def page_assistente_ia(user: "User"):
+
+    if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
+    st.warning("🔒 Acesso negado. Esta funcionalidade está disponível apenas para os perfis SEDE e TESOUREIRO MISSIONÁRIO.")
+    return  # Para a execução da página aqui
     st.markdown("<h1 class='page-title'>🤖 Assistente Financeiro IA</h1>", unsafe_allow_html=True)
     st.info("Selecione um contexto (congregação e período) e faça sua pergunta em linguagem natural sobre os dados financeiros.")
 
