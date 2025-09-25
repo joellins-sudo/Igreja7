@@ -2397,7 +2397,7 @@ def build_single_unit_report_pdf(cong_id: int, sub_cong_id: Optional[int], unit_
     story.append(Paragraph("1. Entradas (Resumo por Culto)", heading_style))
     
     # Usa a função correta para buscar os logs de serviço
-    df_entradas = _load_service_logs(db, cong_id, start, end, sub_cong_id=sub_cong_id)
+    df_entradas = _load_service_logs(cong_id, start, end, sub_cong_id=sub_cong_id)
     
     if not df_entradas.empty:
         data_in = [["Data", "Tipo de Culto", "Dízimo", "Oferta", "Total"]]
@@ -2811,13 +2811,13 @@ def build_consolidated_pdf(congs_all: List[Congregation], ref: date, db: Session
     for cong in congs_all:
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id)).all()
         
-        df_principal = _load_service_logs(db, cong.id, start, end, None)
+        df_principal = _load_service_logs(cong.id, start, end, None)
         principal_entradas = df_principal['Total'].sum() if not df_principal.empty else 0.0
         
         total_subs = 0.0
         subs_data = []
         for sub in sub_congs:
-            df_sub = _load_service_logs(db, cong.id, start, end, sub.id)
+            df_sub = _load_service_logs(cong.id, start, end, sub.id)
             sub_entradas = df_sub['Total'].sum() if not df_sub.empty else 0.0
             subs_data.append({"name": sub.name, "total": sub_entradas})
             total_subs += sub_entradas
@@ -3842,7 +3842,7 @@ def display_entry_hierarchy(user: "User", congs_all: List[Congregation], start: 
     # Itera sobre todas as congregações para construir a estrutura de dados
     for cong in congs_all:
         # Busca dados da congregação principal
-        principal_df = _load_service_logs(db, cong.id, start, end, sub_cong_id=None)
+        principal_df = _load_service_logs(cong.id, start, end, sub_cong_id=None)
         principal_entradas = principal_df['Total'].sum() if not principal_df.empty else 0.0
         report_data.append({
             "Unidade": f"{cong.name} (Principal)", "Entradas": principal_entradas,
@@ -3852,7 +3852,7 @@ def display_entry_hierarchy(user: "User", congs_all: List[Congregation], start: 
         # Busca dados das sub-congregações
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == cong.id).order_by(SubCongregation.name)).all()
         for sub in sub_congs:
-            sub_df = _load_service_logs(db, cong.id, start, end, sub_cong_id=sub.id)
+            sub_df = _load_service_logs(cong.id, start, end, sub_cong_id=sub.id)
             sub_entradas = sub_df['Total'].sum() if not sub_df.empty else 0.0
             report_data.append({
                 "Unidade": f"↳ {sub.name}", "Entradas": sub_entradas,
@@ -3982,10 +3982,10 @@ def page_relatorio_entrada(user: "User"):
 
         if target_sub_cong_id_or_all == "ALL":
             all_units_data = []
-            df_principal = _load_service_logs(db, parent_cong_obj.id, start, end, sub_cong_id=None)
+            df_principal = _load_service_logs(parent_cong_obj.id, start, end, sub_cong_id=None)
             all_units_data.append({"Unidade": f"{parent_cong_obj.name} (Principal)", "Total Entradas": df_principal['Total'].sum()})
             for sub in sub_congs:
-                df_sub = _load_service_logs(db, parent_cong_obj.id, start, end, sub_cong_id=sub.id)
+                df_sub = _load_service_logs(parent_cong_obj.id, start, end, sub_cong_id=sub.id)
                 all_units_data.append({"Unidade": f"↳ {sub.name}", "Total Entradas": df_sub['Total'].sum()})
             
             df_agg = pd.DataFrame(all_units_data)
