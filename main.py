@@ -330,7 +330,7 @@ MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto"
 MONTHS_SHORT = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"]
 
 # ===================== FUNÇÃO DE IA PARA ASSISTENTE FINANCEIRO =====================
-@st.cache_data
+# ===================== FUNÇÃO DE IA PARA ASSISTENTE FINANCEIRO (MODELO RÁPIDO) =====================
 @st.cache_data
 def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame, contexto: str) -> str:
     """
@@ -350,7 +350,6 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
     try:
         client = openai.OpenAI(api_key=api_key)
 
-        # O prompt do sistema com as novas regras de formatação
         prompt_sistema = (
             "Você é um assistente financeiro sênior, especialista em analisar dados de relatórios de igrejas. "
             "Sua tarefa é responder às perguntas do usuário de forma clara, objetiva e educada. "
@@ -359,8 +358,8 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
             "2. NUNCA invente informações ou valores. Se a resposta não estiver nos dados, diga 'Não encontrei essa informação nos dados fornecidos para este período'. "
             "3. Ao citar valores monetários, sempre use o formato R$ 1.234,56. "
             "4. Seja direto e resuma a informação. Não precisa mostrar a tabela de dados completa na sua resposta. "
-            "5. Se a resposta incluir uma lista de pessoas, transações ou itens, formate-os como uma LISTA DE TÓPICOS (bullet points, usando '*' ou '-'), com cada item em uma nova linha. Isso é crucial para a clareza. " # <--- NOVA REGRA
-            "6. Sempre coloque um espaço após a pontuação final (pontos e vírgulas)." # <--- NOVA REGRA
+            "5. Se a resposta incluir uma lista de pessoas, transações ou itens, formate-os como uma LISTA DE TÓPICOS (bullet points, usando '*' ou '-'), com cada item em uma nova linha. Isso é crucial para a clareza. "
+            "6. Sempre coloque um espaço após a pontuação final (pontos e vírgulas)."
         )
 
         prompt_usuario_completo = (
@@ -371,7 +370,9 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
         )
 
         response = client.chat.completions.create(
-            model="gpt-4o",
+            # --- MUDANÇA AQUI ---
+            model="gpt-3.5-turbo",  # Usando o modelo mais rápido
+            # --- FIM DA MUDANÇA ---
             messages=[
                 {"role": "system", "content": prompt_sistema},
                 {"role": "user", "content": prompt_usuario_completo}
