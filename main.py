@@ -4161,18 +4161,14 @@ def main():
 
         # ===================== PAGE: ASSISTENTE IA =====================
 def page_assistente_ia(user: "User"):
-    # --- INÍCIO DA CORREÇÃO DE INDENTAÇÃO ---
-    # Bloco de verificação de permissão com o recuo (indentação) correto
     if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
         st.warning("🔒 Acesso negado. Esta funcionalidade está disponível apenas para os perfis SEDE e TESOUREIRO MISSIONÁRIO.")
-        return  # Para a execução da página aqui
-    # --- FIM DA CORREÇÃO ---
+        return
 
     st.markdown("<h1 class='page-title'>🤖 Assistente Financeiro IA</h1>", unsafe_allow_html=True)
     st.info("Selecione um contexto (congregação e período) e faça sua pergunta em linguagem natural sobre os dados financeiros.")
 
     with SessionLocal() as db:
-        # --- PASSO 1: SELEÇÃO DE CONTEXTO ---
         st.markdown("#### 1. Selecione o Contexto dos Dados")
         congs_all = order_congs_sede_first(cong_options_for(user, db))
         
@@ -4187,7 +4183,12 @@ def page_assistente_ia(user: "User"):
                 cong_selecionada_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
             else:
                 cong_selecionada_obj = db.get(Congregation, user.congregation_id)
-                st.text_input("Congregação", cong_selecionada_obj.name, disabled=True)
+                
+                # --- INÍCIO DA CORREÇÃO ---
+                # Adicionamos esta verificação para garantir que o objeto não é nulo
+                if cong_selecionada_obj:
+                    st.text_input("Congregação", cong_selecionada_obj.name, disabled=True)
+                # --- FIM DA CORREÇÃO ---
 
         with col_filtros:
             ref = get_month_selector("Mês de Referência", key_prefix="ia_ref")
@@ -4195,10 +4196,13 @@ def page_assistente_ia(user: "User"):
         start, end = month_bounds(ref)
 
         if not cong_selecionada_obj:
-            st.warning("Nenhuma congregação encontrada ou selecionada.")
+            st.warning("Nenhuma congregação encontrada ou selecionada. Verifique o cadastro do usuário.")
             return
 
-        # --- PASSO 2: BUSCA DE DADOS ---
+        st.markdown("---")
+        st.markdown("#### 2. Faça sua Pergunta")
+        
+        # O resto da função continua exatamente igual...
         dados_completos = _collect_month_data(cong_selecionada_obj.id, start, end)
         
         combined_rows = []
@@ -4211,10 +4215,6 @@ def page_assistente_ia(user: "User"):
         
         dados_para_ia_df = pd.DataFrame(combined_rows)
 
-        # --- PASSO 3: PERGUNTA DO USUÁRIO ---
-        st.markdown("---")
-        st.markdown("#### 2. Faça sua Pergunta")
-        
         exemplos = [
             "Faça um resumo geral do mês.",
             "Qual foi o total de dízimos?",
