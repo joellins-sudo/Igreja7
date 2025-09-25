@@ -2968,7 +2968,7 @@ def page_visao_geral(user: "User"):
                 total_ofertas = df_entradas['Oferta'].sum() if not df_entradas.empty else 0.0
                 total_geral_entradas = total_dizimos + total_ofertas
 
-                dados_saidas = _collect_month_data(db, cong.id, start, end, sub_id)
+                dados_saidas = _collect_month_data(cong.id, start, end, sub_id)
                 total_saidas = dados_saidas["totals"]["saidas_total"]
                 saldo_total = total_geral_entradas - total_saidas
 
