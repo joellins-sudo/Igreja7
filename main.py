@@ -3611,15 +3611,31 @@ def page_relatorio_missoes_congregacao(user: "User"):
         # (Se você tinha outras seções específicas aqui, mantenha abaixo sem alterações.)
         # Ex.: visualizações, exportações, etc.
 
+@st.cache_data(ttl="10m")
+def get_missions_data_for_ia(cong_id: int, start: date, end: date):
+    """
+    Busca todas as transações de ENTRADA (Missões) e SAÍDA (Missões)
+    de uma congregação e período específicos para análise da IA.
+    """
+    with SessionLocal() as db:
+        q_missions = select(
+            Transaction.date.label("Data"),
+            Transaction.type.label("Tipo"),
+            Category.name.label("Categoria"),
+            Transaction.description.label("Descricao"),
+            Transaction.amount.label("Valor")
+        ).join(Category).where(
+            Transaction.congregation_id == cong_id,
+            Transaction.date >= start,
+            Transaction.date < end,
+            func.lower(Category.name).like('%missões%') # Pega 'Missões' e 'Missões (Saída)'
+        ).order_by(Transaction.date)
 
+        df_missions = pd.read_sql(q_missions, db.bind)
+        return df_missions
 # ===================== PAGE: CADASTRO =====================
 # ===================== PAGE: CADASTRO =====================
-# ===================== PAGE: CADASTRO =====================
-# ===================== PAGE: CADASTRO =====================
-# ===================== PAGE: CADASTRO =====================
-# ===================== PAGE: CADASTRO =====================
-# ===================== PAGE: CADASTRO =====================
-# ===================== PAGE: CADASTRO =====================
+
 def page_cadastro(user: "User"):
     if not is_admin_general(user):
         st.warning("🔒 Apenas o **administrador geral** (admin) pode acessar o Cadastro.")
@@ -4292,13 +4308,10 @@ def main():
         st.error("Ocorreu um erro crítico na aplicação.")
         st.exception(e)
 
-        # ===================== PAGE: ASSISTENTE IA =====================
-# ===================== PAGE: ASSISTENTE IA (LÓGICA DE PERMISSÃO CORRIGIDA) =====================
-# ===================== PAGE: ASSISTENTE IA (COM LÓGICA DE PERFIS) =====================
-# ===================== PAGE: ASSISTENTE IA (COM BUSCA DETALHADA) =====================
-# ===================== PAGE: ASSISTENTE IA (COM CHAMADA CORRIGIDA) =====================
+        # ===================== PAGE: ASSISTENTE IA ========================
 # ===================== PAGE: ASSISTENTE IA (COM RESUMO RÁPIDO E ANÁLISE LIVRE) =====================
 # ===================== PAGE: ASSISTENTE IA (COM REGRAS DE NEGÓCIO CORRIGIDAS) =====================
+# ===================== PAGE: ASSISTENTE IA (VERSÃO FINAL COM PERFIS) =====================
 def page_assistente_ia(user: "User"):
     # Verificação de permissão geral
     if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
@@ -4306,110 +4319,72 @@ def page_assistente_ia(user: "User"):
         return
 
     st.markdown("<h1 class='page-title'>🤖 Assistente Financeiro IA</h1>", unsafe_allow_html=True)
+    
+    with SessionLocal() as db:
+        # --- Interface de Filtros (comum para ambos os perfis) ---
+        st.markdown("#### 1. Selecione o Contexto da Análise")
+        congs_all = order_congs_sede_first(cong_options_for(user, db))
+        
+        col_cong, col_filtros = st.columns([2, 3])
+        
+        with col_cong:
+            # SEDE e Tesoureiro Missionário podem selecionar qualquer congregação
+            cong_sel_name = st.selectbox("Congregação", [c.name for c in congs_all], key="ia_cong_sel_final")
+            cong_selecionada_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
 
-    # --- LÓGICA PARA O PERFIL SEDE (INTERFACE DE CHAT ABERTA E DIRETA) ---
-    if user.role == 'SEDE':
-        st.info("Faça uma pergunta em linguagem natural sobre os dados financeiros de **todas as congregações e de todo o período**.")
-        pergunta = st.text_area(
-            "Sua pergunta:", 
-            key="ia_pergunta_sede", 
-            height=150, 
-            placeholder="Ex: Qual foi o total de saídas em 2024? Qual congregação teve o maior saldo em julho de 2025?"
-        )
+        with col_filtros:
+            ref = get_month_selector("Mês de Referência", key_prefix="ia_ref_final")
+        
+        start, end = month_bounds(ref)
 
-        if st.button("Analisar Banco de Dados Completo", type="primary", use_container_width=True):
+        if not cong_selecionada_obj:
+            st.warning("Nenhuma congregação selecionada. Por favor, selecione uma na lista.")
+            return
+
+        st.markdown("---")
+        st.markdown("#### 2. Faça sua Pergunta")
+        
+        # --- Lógica de busca de dados e pergunta (separada por perfil) ---
+        dados_para_ia_df = pd.DataFrame()
+        contexto_str = f"{cong_selecionada_obj.name} - {ref.strftime('%B de %Y')}"
+        placeholder_text = ""
+
+        # Prepara os dados de acordo com o perfil do usuário
+        if user.role == 'SEDE':
+            placeholder_text = "Ex: Qual foi o total de dízimos? Liste as 3 maiores saídas. Quem foi o dizimista com maior valor?"
+            dados_completos = _collect_month_data(cong_selecionada_obj.id, start, end)
+            
+            combined_rows = []
+            for t in dados_completos.get("tx_in", []):
+                combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
+            for t in dados_completos.get("tithes", []):
+                combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": "Dízimo Nominal", "Descricao": f"Dizimista: {t.tither_name}, Pgto: {t.payment_method}", "Valor": t.amount})
+            for t in dados_completos.get("tx_out", []):
+                combined_rows.append({"Data": t.date, "Tipo": "Saída", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
+            
+            dados_para_ia_df = pd.DataFrame(combined_rows)
+        
+        elif user.role == 'TESOUREIRO MISSIONÁRIO':
+            placeholder_text = "Ex: Qual o total de entradas de missões? E o de saídas? Houve alguma saída acima de R$ 500?"
+            dados_para_ia_df = get_missions_data_for_ia(cong_selecionada_obj.id, start, end)
+            contexto_str = f"Dados de Missões de {cong_selecionada_obj.name} - {ref.strftime('%B de %Y')}"
+
+        # Interface de pergunta
+        pergunta = st.text_area("Sua pergunta:", key="ia_pergunta_final", height=100, placeholder=placeholder_text)
+
+        if st.button("Analisar com IA", type="primary", use_container_width=True):
             if pergunta.strip():
-                with st.spinner("Buscando e consolidando todos os dados do banco... Isso pode levar um momento."):
-                    dados_consolidados_df = get_all_aggregated_data_for_ia()
-                
                 with st.spinner("O assistente está analisando os dados e elaborando uma resposta..."):
                     resposta = responder_pergunta_financeira(
                         pergunta_usuario=pergunta,
-                        dados_df=dados_consolidados_df,
-                        contexto="Dados consolidados de todas as congregações e de todo o período."
+                        dados_df=dados_para_ia_df,
+                        contexto=contexto_str
                     )
                     st.markdown("---")
                     st.markdown(f"#### Resposta do Assistente")
                     st.info(resposta)
             else:
                 st.warning("Por favor, digite uma pergunta.")
-
-    # --- LÓGICA PARA O TESOUREIRO MISSIONÁRIO E OUTROS (INTERFACE COM FILTROS) ---
-    else:
-        st.info("Selecione um contexto (congregação e período) e faça sua pergunta em linguagem natural sobre os dados financeiros.")
-        with SessionLocal() as db:
-            st.markdown("#### 1. Selecione o Contexto da Análise")
-            congs_all = order_congs_sede_first(cong_options_for(user, db))
-            
-            col_cong, col_filtros = st.columns([2, 3])
-            
-            with col_cong:
-                cong_sel_name = st.selectbox("Congregação", [c.name for c in congs_all], key="ia_cong_sel_unified")
-                cong_selecionada_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
-
-            with col_filtros:
-                ref = get_month_selector("Mês de Referência", key_prefix="ia_ref_unified")
-            
-            start, end = month_bounds(ref)
-
-            if not cong_selecionada_obj:
-                st.warning("Nenhuma congregação selecionada. Por favor, selecione uma na lista.")
-                return
-
-            st.markdown("---")
-            st.markdown("#### 2. Faça sua Pergunta")
-            
-            # --- INÍCIO DA NOVA LÓGICA DE PREPARAÇÃO DE DADOS ---
-            dados_completos = _collect_month_data(cong_selecionada_obj.id, start, end)
-            
-            combined_rows = []
-            
-            # Pega os totais já calculados corretamente pela função _collect_month_data
-            totals = dados_completos.get("totals", {})
-            total_dizimo_transacao = sum(float(t.amount) for t in dados_completos.get("tx_in", []) if t.category and _norm(t.category.name) in ("dizimo", "dízimo"))
-            total_dizimo_nominal = totals.get("dizimos", 0) - total_dizimo_transacao if "dizimos" in totals else sum(float(t.amount) for t in dados_completos.get("tithes", []))
-
-
-            # Regra de Equivalência de Dízimos: decide qual fonte de dízimo usar
-            if total_dizimo_nominal >= total_dizimo_transacao:
-                # Se o nominal for maior ou igual, usamos os detalhes dos dízimos nominais
-                for t in dados_completos.get("tithes", []):
-                    combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": "Dízimo Nominal", "Descricao": f"Dizimista: {t.tither_name}, Pgto: {t.payment_method}", "Valor": t.amount})
-            else:
-                # Se o de transação for maior, usamos os detalhes das transações de dízimo
-                for t in dados_completos.get("tx_in", []):
-                    if t.category and _norm(t.category.name) in ("dizimo", "dízimo"):
-                        combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": "Dízimo (Culto)", "Descricao": t.description, "Valor": t.amount})
-
-            # Adiciona as outras entradas, EXCLUINDO Dízimo e Missões
-            for t in dados_completos.get("tx_in", []):
-                if t.category and _norm(t.category.name) not in ("dizimo", "dízimo", "missoes", "missões"):
-                    combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
-
-            # Adiciona as saídas
-            for t in dados_completos.get("tx_out", []):
-                combined_rows.append({"Data": t.date, "Tipo": "Saída", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
-
-            dados_para_ia_df = pd.DataFrame(combined_rows)
-            # --- FIM DA NOVA LÓGICA ---
-
-            pergunta = st.text_area("Sua pergunta:", key="ia_pergunta_unified", height=100, placeholder="Ex: Qual foi o total de ofertas?")
-
-            if st.button("Analisar com IA", type="primary", use_container_width=True):
-                if pergunta.strip():
-                    with st.spinner("O assistente está analisando os dados e elaborando uma resposta..."):
-                        contexto_str = f"{cong_selecionada_obj.name} - {ref.strftime('%B de %Y')}"
-                        
-                        resposta = responder_pergunta_financeira(
-                            pergunta_usuario=pergunta,
-                            dados_df=dados_para_ia_df,
-                            contexto=contexto_str
-                        )
-                        st.markdown("---")
-                        st.markdown(f"#### Resposta do Assistente")
-                        st.info(resposta)
-                else:
-                    st.warning("Por favor, digite uma pergunta.")
             # ... (O restante do código para o Tesoureiro Missionário permanece o mesmo)
             # ...
 
