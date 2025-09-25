@@ -4592,6 +4592,6 @@ def page_assistente_ia(user: "User"):
 
             # ... (O restante do código para o Tesoureiro Missionário permanece o mesmo)
             # ...
-
+            
 if __name__ == "__main__":
     main()
