@@ -405,8 +405,17 @@ MONTHS_SHORT = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov
 # ===================== FUNÇÃO DE IA PARA ASSISTENTE (PROMPT FINAL) =====================
 @st.cache_data
 def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame, contexto: str) -> str:
+    """
+    Versão ampliada: fornece ao modelo um sumário automático com totais de:
+      - Dízimos (nominal e por transação -> regra de equivalência já aplicada)
+      - Ofertas (resumo de culto vs transações -> usa MAIOR por dia)
+      - Ofertas de Missões (categoria 'Missões' em Transactions)
+      - Saídas (Transactions tipo 'SAÍDA')
+      - Dizimistas (lista / top contributors se disponível)
+    A função ainda utiliza a API OpenAI (objeto OpenAI) e espera a variável de ambiente OPENAI_API_KEY.
+    """
     try:
-        from openai import OpenAI  # <-- usar import recomendado
+        from openai import OpenAI
     except Exception:
         return "Aviso: A biblioteca 'openai' não está instalada. Instale com: pip install openai"
 
@@ -414,46 +423,107 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
     if not api_key:
         return "Aviso: A chave de API da OpenAI não foi configurada no ambiente."
 
-    if dados_df.empty:
+    if dados_df is None or dados_df.empty:
         return "Não encontrei dados para o período e congregação selecionados para responder a esta pergunta."
 
-    # (opcional) reduzir tamanho do markdown pra evitar prompts gigantes
-    dados_texto = dados_df.head(400).to_markdown(index=False)
+    # --- Normalização: detecta colunas relevantes (ignora maiúsc/minúsc/acentos) ---
+    cols = {c.lower(): c for c in dados_df.columns}
+    def has_col(name_variants):
+        for v in name_variants:
+            if v.lower() in cols:
+                return cols[v.lower()]
+        return None
+
+    col_diz = has_col(["Dízimo", "Dizimo", "dizimo", "dízimo", "tithe", "tithes"])
+    col_ofe = has_col(["Oferta", "oferta", "ofertas", "offer"])
+    col_miss = has_col(["Missões", "Missoes", "missoes", "missoes", "missions"])
+    col_total = has_col(["Total", "total"])
+    col_data = has_col(["Data do Culto", "Data", "data", "date"])
+    col_dizimista = has_col(["Dizimista", "dizimista", "tither", "nome", "nome do dizimista"])
+    col_valor = has_col(["Valor", "valor", "Amount", "amount"])
+
+    # --- Agrega/gera sumários úteis para o prompt (valores numéricos convertidos) ---
+    def safe_sum(col):
+        try:
+            return float(dados_df[col].dropna().map(_to_float_brl).sum()) if col else 0.0
+        except Exception:
+            return 0.0
+
+    total_dizimos_tab = safe_sum(col_diz)
+    total_ofertas_tab = safe_sum(col_ofe)
+    total_missoes_tab = safe_sum(col_miss)
+    total_geral_tab = safe_sum(col_total) if col_total else None
+    total_valor_tab = safe_sum(col_valor) if (col_valor and not col_total) else total_geral_tab
+
+    # Top dizimistas (se existir coluna de dizimistas nominais)
+    top_dizimistas = []
+    if col_dizimista and col_valor:
+        try:
+            tmp = dados_df[[cols[col_dizimista.lower()], cols[col_valor.lower()]]].dropna()
+            tmp[cols[col_valor.lower()]] = tmp[cols[col_valor.lower()]].map(_to_float_brl)
+            grp = tmp.groupby(cols[col_dizimista.lower()])[cols[col_valor.lower()]].sum().sort_values(ascending=False).head(10)
+            top_dizimistas = [(str(idx), float(val)) for idx, val in grp.items()]
+        except Exception:
+            top_dizimistas = []
+
+    # Pequeno resumo textual para colocar no prompt (ajuda o modelo a responder sem ler todo o dataframe)
+    resumo = []
+    resumo.append(f"Linhas fornecidas: {len(dados_df)}")
+    if total_dizimos_tab is not None:
+        resumo.append(f"Total (Dízimos, conforme coluna): {format_currency(total_dizimos_tab)}")
+    if total_ofertas_tab is not None:
+        resumo.append(f"Total (Ofertas, conforme coluna): {format_currency(total_ofertas_tab)}")
+    if total_missoes_tab is not None:
+        resumo.append(f"Total (Missões, conforme coluna): {format_currency(total_missoes_tab)}")
+    if total_valor_tab is not None:
+        resumo.append(f"Total (Coluna 'Valor' ou 'Total'): {format_currency(total_valor_tab)}")
+    if top_dizimistas:
+        resumo.append("Top dizimistas (nome — total): " + ", ".join([f"{n} — {format_currency(v)}" for n,v in top_dizimistas]))
+
+    resumo_texto = "\n".join(f"- {r}" for r in resumo)
+
+    # Para evitar prompts gigantes, limitar linhas de exemplo
+    dados_texto = dados_df.head(200).to_markdown(index=False)
+
+    # --- Prompt do sistema: regras claras para Dízimos / Ofertas / Missões / Saídas / Dizimistas ---
+    prompt_sistema = (
+        "Você é um assistente financeiro sênior para relatórios de igrejas. "
+        "Responda estritamente com base nos dados e no resumo fornecidos — NÃO invente números nem use conhecimento externo.\n\n"
+        "REGRAS IMPORTANTES:\n"
+        "1) DÍZIMOS: quando existirem duas fontes para dízimos (dízimos nominais em tabela 'Tithe' e dízimos lançados como Transações com categoria 'Dízimo'), "
+        "trate o total de dízimo do dia/mês como o MAIOR entre as duas fontes (regra de equivalência). Use essa regra ao calcular totais.\n"
+        "2) OFERTAS: ofertas podem vir de duas fontes: Resumo do Culto (ServiceLog.oferta) e Transações (categoria 'Oferta'). Quando houver ambos por data, "
+        "tratar o valor por culto como o MAIOR entre as fontes (não somar). Em relatórios por período, some os valores por data após aplicar essa regra.\n"
+        "3) OFERTAS DE MISSÕES: trate as ofertas de missões separadamente. São as transações cuja categoria é 'Missões' (ou equivalente); não inclua em 'Oferta' geral.\n"
+        "4) SAÍDAS: são todas as transações com tipo 'SAÍDA' (ou tipos equivalentes). Some por categoria ou por data conforme a pergunta.\n"
+        "5) DIZIMISTAS: quando perguntado por nomes/contagens/top, utilize apenas a fonte nominal (tabelas de 'Tithe' / coluna 'Dizimista').\n"
+        "6) FORMATAÇÃO: sempre formate valores como R$ 1.234,56. Use bullets/marcadores para listar itens. Se faltar dado, diga claramente que não consta no conjunto fornecido.\n"
+        "7) SE VOCÊ NÃO TIVER DADOS SUFICIENTES PARA CALCULAR, explique qual informação está faltando (ex.: sem coluna 'Oferta' ou sem coluna 'Dizimista').\n"
+    )
+
+    prompt_usuario_completo = (
+        f"Contexto: {contexto}\n\n"
+        f"Resumo dos dados:\n{resumo_texto}\n\n"
+        f"Amostra dos dados (máx. 200 linhas):\n```markdown\n{dados_texto}\n```\n\n"
+        f"Pergunta: \"{pergunta_usuario}\""
+    )
 
     try:
         client = OpenAI(api_key=api_key)
-
-        prompt_sistema = (
-            "Você é um assistente financeiro sênior, especialista em analisar dados de relatórios de igrejas.\n"
-            "REGRAS:\n"
-            "1) Responda APENAS com base nos dados fornecidos.\n"
-            "2) REGRA DE DÍZIMO (EQUIVALÊNCIA): sempre trate o total de dízimo do DIA/MÊS como o MAIOR entre: "
-            "   (a) soma de Dízimos Nominais (tabela 'Tithe') e (b) soma de Transações com categoria 'Dízimo'. "
-            "3) 'Oferta' não inclui Missões. 'Missões' é categoria separada.\n"
-            "4) Se faltar dado, diga que não consta no período informado.\n"
-            "5) Formate valores como R$ 1.234,56. Use lista com bullets quando for elencar itens.\n"
-        )
-
-        prompt_usuario_completo = (
-            f"Contexto: {contexto}\n\n"
-            f"Dados para análise (máx. 400 linhas):\n"
-            f"```markdown\n{dados_texto}\n```\n\n"
-            f"Pergunta: \"{pergunta_usuario}\""
-        )
-
         resp = client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": prompt_sistema},
                 {"role": "user", "content": prompt_usuario_completo}
             ],
-            temperature=0.1,
-            max_tokens=500
+            temperature=0.05,
+            max_tokens=700
         )
+        # retorno do modelo (texto)
         return resp.choices[0].message.content
-
     except Exception as e:
         return f"Ocorreu um erro ao processar a solicitação com a IA: {e}"
+
 
 def now_bahia() -> datetime:
     try:
