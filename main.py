@@ -1285,29 +1285,41 @@ def _entrada_summary_df(
     Retorna um DataFrame com colunas:
       - Data do Culto
       - Dízimo   (aplica a equivalência: maior entre Tithe e Transaction 'Dízimo')
-      - Oferta   (apenas categoria 'Oferta'; NÃO inclui Missões)
+      - Oferta   (MAIOR entre ServiceLog.oferta e Transações categoria 'Oferta')
       - Total    (= Dízimo + Oferta)
     Filtro por congregação principal ou por sub_congregação (se informada).
     """
     # Base queries
-    tithes_q = select(Tithe.date, func.sum(Tithe.amount)).where(
+    # Dízimos (nominal)
+    tithes_q = select(Tithe.date, func.coalesce(func.sum(Tithe.amount), 0.0)).where(
         Tithe.congregation_id == cong_id,
         Tithe.date >= start,
         Tithe.date < end,
     )
-    diz_trans_q = select(Transaction.date, func.sum(Transaction.amount)).join(Category).where(
+
+    # Dízimos (transações)
+    diz_trans_q = select(Transaction.date, func.coalesce(func.sum(Transaction.amount), 0.0)).join(Category).where(
         Transaction.congregation_id == cong_id,
         Transaction.date >= start,
         Transaction.date < end,
         Transaction.type.in_((TYPE_IN, "RECEITA")),
-        func.lower(Category.name).in_(("dízimo", "dizimo")),
+        func.lower(func.replace(Category.name, " ", "" )).in_(("dizimo","dízimo")),
     )
-    oferta_trans_q = select(Transaction.date, func.sum(Transaction.amount)).join(Category).where(
+
+    # Ofertas (transações)
+    oferta_trans_q = select(Transaction.date, func.coalesce(func.sum(Transaction.amount), 0.0)).join(Category).where(
         Transaction.congregation_id == cong_id,
         Transaction.date >= start,
         Transaction.date < end,
         Transaction.type.in_((TYPE_IN, "RECEITA")),
-        func.lower(Category.name) == "oferta",
+        func.lower(func.replace(Category.name, " ", "" )) == "oferta",
+    )
+
+    # Ofertas (ServiceLog) — Resumo do Culto por data
+    sl_oferta_q = select(ServiceLog.date, func.coalesce(func.sum(ServiceLog.oferta), 0.0)).where(
+        ServiceLog.congregation_id == cong_id,
+        ServiceLog.date >= start,
+        ServiceLog.date < end
     )
 
     # Filtro de sub-congregação
@@ -1315,15 +1327,18 @@ def _entrada_summary_df(
         tithes_q      = tithes_q.where(Tithe.sub_congregation_id == sub_cong_id)
         diz_trans_q   = diz_trans_q.where(Transaction.sub_congregation_id == sub_cong_id)
         oferta_trans_q= oferta_trans_q.where(Transaction.sub_congregation_id == sub_cong_id)
+        sl_oferta_q   = sl_oferta_q.where(ServiceLog.sub_congregation_id == sub_cong_id)
     else:
         tithes_q      = tithes_q.where(Tithe.sub_congregation_id.is_(None))
         diz_trans_q   = diz_trans_q.where(Transaction.sub_congregation_id.is_(None))
         oferta_trans_q= oferta_trans_q.where(Transaction.sub_congregation_id.is_(None))
+        sl_oferta_q   = sl_oferta_q.where(ServiceLog.sub_congregation_id.is_(None))
 
-    # Executa queries (AQUI é a correção: usar _db)
+    # Executa queries (usa _db recebido)
     tithes      = _db.execute(tithes_q.group_by(Tithe.date)).all()
     diz_trans   = _db.execute(diz_trans_q.group_by(Transaction.date)).all()
     oferta_trans= _db.execute(oferta_trans_q.group_by(Transaction.date)).all()
+    sl_ofertas  = _db.execute(sl_oferta_q.group_by(ServiceLog.date)).all()
 
     # Agrega por data
     by_date_diz_tit = defaultdict(float)
@@ -1334,16 +1349,21 @@ def _entrada_summary_df(
     for d, s in diz_trans:
         by_date_diz_tx[d] += float(s or 0.0)
 
-    by_date_ofe = defaultdict(float)
+    by_date_ofe_tx = defaultdict(float)
     for d, s in oferta_trans:
-        by_date_ofe[d] += float(s or 0.0)
+        by_date_ofe_tx[d] += float(s or 0.0)
 
-    all_dates = sorted(set(list(by_date_diz_tit.keys()) + list(by_date_diz_tx.keys()) + list(by_date_ofe.keys())))
+    by_date_ofe_sl = defaultdict(float)
+    for d, s in sl_ofertas:
+        by_date_ofe_sl[d] += float(s or 0.0)
+
+    all_dates = sorted(set(list(by_date_diz_tit.keys()) + list(by_date_diz_tx.keys()) + list(by_date_ofe_tx.keys()) + list(by_date_ofe_sl.keys())))
 
     rows = []
     for d in all_dates:
         dz  = max(float(by_date_diz_tit.get(d, 0.0)), float(by_date_diz_tx.get(d, 0.0)))
-        ofe = float(by_date_ofe.get(d, 0.0))
+        # Oferta por dia = MAIOR entre ServiceLog.oferta (se houver) e Transação(categoria 'Oferta')
+        ofe = max(float(by_date_ofe_sl.get(d, 0.0)), float(by_date_ofe_tx.get(d, 0.0)))
         rows.append({
             "Data do Culto": d,
             "Dízimo": dz,
@@ -1351,6 +1371,7 @@ def _entrada_summary_df(
             "Total": dz + ofe,
         })
     return pd.DataFrame(rows)
+
 
 
 
@@ -1966,6 +1987,7 @@ def get_all_aggregated_data_for_ia():
 def get_dashboard_summary(cong_id: int, start: date, end: date):
     """
     Busca e calcula os 5 totais financeiros essenciais para uma congregação e período.
+    Agora considera ServiceLog.oferta como fonte alternativa para Ofertas (usa MAIOR entre fontes).
     """
     with SessionLocal() as db:
         # 1. Total de Saídas
@@ -1974,30 +1996,40 @@ def get_dashboard_summary(cong_id: int, start: date, end: date):
             Transaction.date >= start, Transaction.date < end,
             Transaction.type == 'SAÍDA'
         )
-        total_saida = db.scalar(q_saidas)
+        total_saida = float(db.scalar(q_saidas) or 0.0)
 
-        # 2. Total de Ofertas
-        q_ofertas = select(func.coalesce(func.sum(Transaction.amount), 0.0)).join(Category).where(
+        # 2. Total de Ofertas: calcular separadamente (transações) e (ServiceLog), depois usar max()
+        q_ofertas_tx = select(func.coalesce(func.sum(Transaction.amount), 0.0)).join(Category).where(
             Transaction.congregation_id == cong_id,
             Transaction.date >= start, Transaction.date < end,
-            Category.name == 'Oferta'
+            Transaction.type.in_((TYPE_IN, "RECEITA")),
+            func.lower(func.replace(Category.name, " ", "")) == "oferta"
         )
-        total_oferta = db.scalar(q_ofertas)
-        
-        # 3. Total de Dízimos (de Transações)
+        total_oferta_tx = float(db.scalar(q_ofertas_tx) or 0.0)
+
+        q_ofertas_sl = select(func.coalesce(func.sum(ServiceLog.oferta), 0.0)).where(
+            ServiceLog.congregation_id == cong_id,
+            ServiceLog.date >= start, ServiceLog.date < end
+        )
+        total_oferta_sl = float(db.scalar(q_ofertas_sl) or 0.0)
+
+        # Aplica regra: use a maior soma entre as fontes
+        total_oferta = max(total_oferta_tx, total_oferta_sl)
+
+        # 3. Total de Dízimos (de Transações) — case-insensitive
         q_dizimos_trans = select(func.coalesce(func.sum(Transaction.amount), 0.0)).join(Category).where(
             Transaction.congregation_id == cong_id,
             Transaction.date >= start, Transaction.date < end,
-            Category.name == 'Dízimo'
+            func.lower(func.replace(Category.name, " ", "")) == "dizimo"
         )
-        total_dizimo_transacao = db.scalar(q_dizimos_trans)
+        total_dizimo_transacao = float(db.scalar(q_dizimos_trans) or 0.0)
 
         # 4. Total de Dízimos (Nominais)
         q_dizimos_nominal = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
             Tithe.congregation_id == cong_id,
             Tithe.date >= start, Tithe.date < end
         )
-        total_dizimo_nominal = db.scalar(q_dizimos_nominal)
+        total_dizimo_nominal = float(db.scalar(q_dizimos_nominal) or 0.0)
 
         # Aplicando a regra de negócio para o total de dízimo
         total_dizimo = max(total_dizimo_transacao, total_dizimo_nominal)
@@ -2013,6 +2045,7 @@ def get_dashboard_summary(cong_id: int, start: date, end: date):
             "total_saida": total_saida,
             "saldo": saldo,
         }
+
 
 @st.cache_data
 # 1. O parâmetro 'db' foi REMOVIDO daqui
@@ -2036,18 +2069,27 @@ def _collect_month_data(cong_id: int, start: date, end: date, sub_cong_id: Optio
             Transaction.congregation_id == cong_id
         )
 
+        # ServiceLog (para somar ofertas do resumo do culto)
+        sl_query = select(ServiceLog).where(
+            ServiceLog.date >= start, ServiceLog.date < end,
+            ServiceLog.congregation_id == cong_id
+        )
+
         if sub_cong_id is not None:
             tx_in_query = tx_in_query.where(Transaction.sub_congregation_id == sub_cong_id)
             tithes_query = tithes_query.where(Tithe.sub_congregation_id == sub_cong_id)
             tx_out_query = tx_out_query.where(Transaction.sub_congregation_id == sub_cong_id)
+            sl_query = sl_query.where(ServiceLog.sub_congregation_id == sub_cong_id)
         else:
             tx_in_query = tx_in_query.where(Transaction.sub_congregation_id.is_(None))
             tithes_query = tithes_query.where(Tithe.sub_congregation_id.is_(None))
             tx_out_query = tx_out_query.where(Transaction.sub_congregation_id.is_(None))
+            sl_query = sl_query.where(ServiceLog.sub_congregation_id.is_(None))
         
         tx_in = db.scalars(tx_in_query.order_by(Transaction.date)).all()
         tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
         tx_out = db.scalars(tx_out_query.order_by(Transaction.date)).all()
+        sls = db.scalars(sl_query.order_by(ServiceLog.date)).all()
 
         def _is_dizimo_tx(t: Transaction) -> bool:
             return t.category and _norm(t.category.name) in ("dizimo", "dízimo")
@@ -2059,7 +2101,14 @@ def _collect_month_data(cong_id: int, start: date, end: date, sub_cong_id: Optio
         total_dizimos_tithe = sum(float(t.amount) for t in tithes)
         total_dizimos_trans = sum(float(t.amount) for t in tx_in if _is_dizimo_tx(t))
         total_dizimos_final = max(total_dizimos_tithe, total_dizimos_trans)
-        total_ofertas = sum(float(t.amount) for t in tx_in if _is_oferta_tx(t))
+
+        # Soma das ofertas por transação no mês
+        total_ofertas_tx = sum(float(t.amount) for t in tx_in if _is_oferta_tx(t))
+        # Soma das ofertas registradas no ServiceLog (Resumo do Culto) no mês
+        total_ofertas_sl = sum(float(s.oferta or 0.0) for s in sls)
+        # Regra: total_ofertas = MAIOR entre as fontes (soma mensal)
+        total_ofertas = max(total_ofertas_sl, total_ofertas_tx)
+
         total_missoes = sum(float(t.amount) for t in tx_in if _is_mission_entry(t))
         total_entradas_outros = sum(float(t.amount) for t in tx_in if not (_is_dizimo_tx(t) or _is_oferta_tx(t) or _is_mission_entry(t)))
         total_geral_entradas_sem_missoes = total_dizimos_final + total_ofertas + total_entradas_outros
@@ -2074,6 +2123,7 @@ def _collect_month_data(cong_id: int, start: date, end: date, sub_cong_id: Optio
                 "saidas_total": total_saidas, "saldo": saldo
             }
         }
+
     
  
 @st.cache_data(ttl=600)
