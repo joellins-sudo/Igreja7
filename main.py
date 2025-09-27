@@ -406,9 +406,10 @@ MONTHS_SHORT = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov
 @st.cache_data
 def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame, contexto: str) -> str:
     """
-    Versão ajustada: inclui cálculo separado das ofertas de 'Missões' (transações com categoria Missões)
-    além das ofertas do resumo do culto (ServiceLog.oferta) e das transações com categoria 'Oferta'.
-    Mantém o comportamento de respostas curtas e o fallback local.
+    Versão corrigida: garante que as Ofertas do Culto (ServiceLog),
+    Ofertas lançadas como transação categoria 'Oferta' e Ofertas 'Missões'
+    sejam sempre tratadas e apresentadas de forma SEPARADA.
+    Não altera outras funcionalidades.
     """
     import re
     from datetime import date
@@ -417,8 +418,8 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
     except Exception:
         OpenAI = None
 
-    # ---------- Helpers internos ----------
-    def _get_colname(df: pd.DataFrame, names):
+    # helpers (assumem disponíveis globalmente: MONTHS, today_bahia, month_bounds, format_currency, _to_float_brl)
+    def _get_colname(df, names):
         if df is None:
             return None
         cols = {c.lower(): c for c in df.columns}
@@ -427,16 +428,15 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
                 return cols[n.lower()]
         return None
 
-    def _col_exists(df: pd.DataFrame, names):
+    def _col_exists(df, names):
         return _get_colname(df, names) is not None
 
     def _parse_year_month_from_context(ctx: str):
-        # tenta extrair "Setembro de 2025", "09/2025" ou "2025-09"
         if not ctx:
             return None, None
         mY = re.search(r"(20\d{2})", ctx)
         year = int(mY.group(1)) if mY else None
-        meses_map = {m.lower(): i+1 for i,m in enumerate(MONTHS)}
+        meses_map = {m.lower(): i+1 for i, m in enumerate(MONTHS)}
         for name, idx in meses_map.items():
             if re.search(r"\b" + re.escape(name.lower()) + r"\b", ctx.lower()):
                 return year or today_bahia().year, idx
@@ -449,32 +449,7 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
             return int(y_m.group(1)), int(y_m.group(2))
         return (year, None)
 
-    # ---------- Construir resumo curto a partir do dataframe (se existir) ----------
-    resumo_items = []
-    if dados_df is not None and not dados_df.empty:
-        # dízimos diretos na tabela (se houver)
-        diz_col = _get_colname(dados_df, ["Dízimo", "Dizimo", "dizimo", "tithe", "tithes"])
-        if diz_col:
-            try:
-                total_diz = float(dados_df[diz_col].dropna().map(_to_float_brl).sum() or 0.0)
-                resumo_items.append(("dizimos_tab", total_diz))
-            except Exception:
-                pass
-        # oferta na tabela (se existir)
-        of_col = _get_colname(dados_df, ["Oferta", "oferta", "ofertas", "offer"])
-        if of_col:
-            try:
-                total_of = float(dados_df[of_col].dropna().map(_to_float_brl).sum() or 0.0)
-                resumo_items.append(("ofertas_tab", total_of))
-            except Exception:
-                pass
-
-    # ---------- Se não houver ofertas na tabela, buscar no DB (ServiceLog / Transactions) ----------
-    oferta_sl_total = None
-    oferta_tx_total = None
-    missao_tx_total = None
-    need_db_oferta = not _col_exists(dados_df, ["Oferta", "oferta", "ofertas", "offer"]) or (not resumo_items)
-    # determina período a partir do contexto
+    # Construir período
     year_ctx, month_ctx = _parse_year_month_from_context(contexto or "")
     if month_ctx is None or year_ctx is None:
         t = today_bahia()
@@ -483,95 +458,102 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
     start = date(int(year_ctx), int(month_ctx), 1)
     _, end = month_bounds(start)
 
-    # tenta identificar congregação no contexto (se mencionada)
-    cong_id_candidate = None
+    # detectar se DataFrame já contém colunas úteis (apenas para informar ao modelo; não mistura valores)
+    resumo_items = []
+    if dados_df is not None and not dados_df.empty:
+        diz_col = _get_colname(dados_df, ["Dízimo", "Dizimo", "dizimo", "tithe", "tithes"])
+        if diz_col:
+            try:
+                total_diz = float(dados_df[diz_col].dropna().map(_to_float_brl).sum() or 0.0)
+                resumo_items.append(("dizimos_tab", total_diz))
+            except Exception:
+                pass
+        of_col = _get_colname(dados_df, ["Oferta", "oferta", "ofertas", "offer"])
+        if of_col:
+            try:
+                total_of = float(dados_df[of_col].dropna().map(_to_float_brl).sum() or 0.0)
+                resumo_items.append(("ofertas_tab", total_of))
+            except Exception:
+                pass
+
+    # buscar no DB — CALCULAR SEPARADO
+    oferta_sl_total = 0.0        # Ofertas registradas em ServiceLog.oferta (oferta do culto)
+    oferta_tx_total = 0.0        # Ofertas registradas como Transactions na categoria 'Oferta'
+    missao_tx_total = 0.0        # Ofertas registradas como Transactions na categoria 'Missões'
     try:
         with SessionLocal() as db:
-            all_congs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
-            for c in all_congs:
-                if c.name and (c.name.lower() in (contexto or "").lower() or _norm(c.name) in _norm(contexto or "")):
-                    cong_id_candidate = c.id
-                    break
-    except Exception:
-        cong_id_candidate = None
-
-    if need_db_oferta:
-        try:
-            with SessionLocal() as db:
-                # ServiceLog.oferta total no mês (ofertas do culto)
-                q_sl = select(func.coalesce(func.sum(ServiceLog.oferta), 0.0)).where(
-                    ServiceLog.date >= start, ServiceLog.date < end
-                )
+            # ServiceLog.oferta (ofertas do culto)
+            q_sl = select(func.coalesce(func.sum(ServiceLog.oferta), 0.0)).where(
+                ServiceLog.date >= start, ServiceLog.date < end
+            )
+            # tenta identificar congregação no contexto (se houver)
+            try:
+                all_congs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+                cong_id_candidate = None
+                for c in all_congs:
+                    if c.name and (c.name.lower() in (contexto or "").lower()):
+                        cong_id_candidate = c.id
+                        break
                 if cong_id_candidate:
                     q_sl = q_sl.where(ServiceLog.congregation_id == cong_id_candidate)
-                oferta_sl_total = float(db.scalar(q_sl) or 0.0)
+            except Exception:
+                cong_id_candidate = None
+            oferta_sl_total = float(db.scalar(q_sl) or 0.0)
 
-                # Transactions categoria 'Oferta'
-                cat_of = db.scalar(select(Category).where(func.lower(Category.name) == "oferta"))
-                if not cat_of:
-                    cat_of = db.scalar(select(Category).where(func.lower(Category.name).in_(["oferta","ofertas"])))
-                if cat_of:
-                    q_tx = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
-                        Transaction.date >= start, Transaction.date < end,
-                        Transaction.category_id == cat_of.id,
-                        Transaction.type.in_((TYPE_IN, "RECEITA"))
-                    )
-                    if cong_id_candidate:
-                        q_tx = q_tx.where(Transaction.congregation_id == cong_id_candidate)
-                    oferta_tx_total = float(db.scalar(q_tx) or 0.0)
-                else:
-                    oferta_tx_total = 0.0
+            # Transações categoria 'Oferta' (entrada)
+            cat_of = db.scalar(select(Category).where(func.lower(Category.name) == "oferta"))
+            if not cat_of:
+                cat_of = db.scalar(select(Category).where(func.lower(Category.name).in_(["oferta","ofertas"])))
+            if cat_of:
+                q_tx_of = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+                    Transaction.date >= start, Transaction.date < end,
+                    Transaction.category_id == cat_of.id,
+                    Transaction.type.in_((TYPE_IN, "RECEITA"))
+                )
+                if cong_id_candidate:
+                    q_tx_of = q_tx_of.where(Transaction.congregation_id == cong_id_candidate)
+                oferta_tx_total = float(db.scalar(q_tx_of) or 0.0)
+            else:
+                oferta_tx_total = 0.0
 
-                # Transactions categoria 'Missões' (ofertas lançadas como missões)
-                cat_missoes = db.scalar(select(Category).where(func.lower(Category.name).in_(["missões", "missoes", "missões (entrada)", "missoes (entrada)"])))
-                if cat_missoes:
-                    q_mis = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
-                        Transaction.date >= start, Transaction.date < end,
-                        Transaction.category_id == cat_missoes.id,
-                        Transaction.type.in_((TYPE_IN, "RECEITA"))
-                    )
-                    if cong_id_candidate:
-                        q_mis = q_mis.where(Transaction.congregation_id == cong_id_candidate)
-                    missao_tx_total = float(db.scalar(q_mis) or 0.0)
-                else:
-                    missao_tx_total = 0.0
+            # Transações categoria 'Missões' (entrada) — SEPARADO
+            cat_missoes = db.scalar(select(Category).where(func.lower(Category.name).in_(["missões","missoes","missões (entrada)","missoes (entrada)"])))
+            if cat_missoes:
+                q_tx_mis = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+                    Transaction.date >= start, Transaction.date < end,
+                    Transaction.category_id == cat_missoes.id,
+                    Transaction.type.in_((TYPE_IN, "RECEITA"))
+                )
+                if cong_id_candidate:
+                    q_tx_mis = q_tx_mis.where(Transaction.congregation_id == cong_id_candidate)
+                missao_tx_total = float(db.scalar(q_tx_mis) or 0.0)
+            else:
+                missao_tx_total = 0.0
+    except Exception:
+        # se der erro, mantemos zeros — não somar
+        oferta_sl_total = oferta_sl_total or 0.0
+        oferta_tx_total = oferta_tx_total or 0.0
+        missao_tx_total = missao_tx_total or 0.0
 
-        except Exception:
-            oferta_sl_total = oferta_sl_total or 0.0
-            oferta_tx_total = oferta_tx_total or 0.0
-            missao_tx_total = missao_tx_total or 0.0
-
-    # ---------- Monta instrução curta para o modelo (não revelar fontes na resposta) ----------
+    # montar instrução curta ao modelo: pedir resposta limpa e separatista
     prompt_sistema = (
-        "Você é um assistente financeiro. Responda de forma CURTA, PRÁTICA e DIRETA.\n"
-        "NORMAS DE FORMATO:\n"
-        "- Não explique os passos nem cite quais bases ou tabelas foram consultadas.\n"
-        "- Responda APENAS ao que foi pedido; não acrescente informações extras.\n"
-        "- Ao apresentar valores, use o formato: R$ 1.234,56.\n"
-        "- Use bullets ou linhas curtas quando fizer listas.\n"
-        "- Se o usuário pedir 'tudo sobre' X, entregue um resumo objetivo (totais e, quando aplicável, quebra por 'Dinheiro' e 'PIX').\n"
-        "- Não inclua texto técnico, mensagens de debug ou instruções internas.\n"
+        "Você é um assistente financeiro. Responda CURTO, PRÁTICO e DIRETO.\n"
+        "- Não explique passos nem cite bases consultadas.\n"
+        "- Não some ofertas de 'Culto' com ofertas de 'Missões'. Apresente cada uma separadamente.\n"
+        "- Responda apenas ao pedido. Use formato R$ 1.234,56.\n"
     )
 
-    # montar texto curto com os dados coletados para enviar ao modelo (mas instruindo-o a não mencionar fontes)
     texto_resumo_para_modelo = []
-    # informações vindas do dataframe (se houver)
     for key, val in resumo_items:
         if key == "dizimos_tab":
             texto_resumo_para_modelo.append(f"Dízimos (tabela): {format_currency(val)}")
         if key == "ofertas_tab":
             texto_resumo_para_modelo.append(f"Ofertas (tabela): {format_currency(val)}")
-    # números do DB (se obtidos)
-    if oferta_sl_total is not None:
-        texto_resumo_para_modelo.append(f"Ofertas do Culto (ServiceLog): {format_currency(oferta_sl_total)}")
-    if oferta_tx_total is not None:
-        texto_resumo_para_modelo.append(f"Ofertas (transações - categoria 'Oferta'): {format_currency(oferta_tx_total)}")
-    if missao_tx_total is not None:
-        texto_resumo_para_modelo.append(f"Ofertas Missões (transações - categoria 'Missões'): {format_currency(missao_tx_total)}")
-    # junta em bloco
-    resumo_texto = "\n".join(texto_resumo_para_modelo) if texto_resumo_para_modelo else "Sem dados tabulares iniciais; cálculos serão feitos pelo sistema."
+    texto_resumo_para_modelo.append(f"Ofertas do Culto (ServiceLog): {format_currency(oferta_sl_total)}")
+    texto_resumo_para_modelo.append(f"Ofertas (transações - categoria 'Oferta'): {format_currency(oferta_tx_total)}")
+    texto_resumo_para_modelo.append(f"Ofertas Missões (transações - categoria 'Missões'): {format_currency(missao_tx_total)}")
+    resumo_texto = "\n".join(texto_resumo_para_modelo)
 
-    # limita amostra do DataFrame para envio (se necessário)
     dados_texto = ""
     try:
         if dados_df is not None and not dados_df.empty:
@@ -584,18 +566,15 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
         f"Dados resumidos para o período ({MONTHS[month_ctx-1]} {year_ctx}):\n{resumo_texto}\n\n"
         f"Amostra (se houver):\n```markdown\n{dados_texto}\n```\n\n"
         f"Pergunta: {pergunta_usuario}\n\n"
-        "INSTRUÇÃO EXPLÍCITA AO ASSISTENTE: responda curto, direto, apenas o que foi pedido. "
-        "NÃO cite bases, nem passos, nem debug. Use R$ x.xxx,xx."
+        "INSTRUÇÃO: responda curto e apenas o que foi pedido. NÃO mencione as bases consultadas."
     )
 
-    # ---------- Se OpenAI indisponível: gerar resposta local sucinta ----------
+    # Se OpenAI não estiver disponível: gerar resposta local curta, com itens sempre separados
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key or OpenAI is None:
-        # Resposta local: calcular os itens mais comuns pedidos pelo usuário de forma concisa
         try:
-            # organizar intervalo e agregações gerais
             with SessionLocal() as db:
-                # totais de dízimos (transações categoria 'Dízimo' + tithes) -> aplicar regra (maior)
+                # dízimos (tithes + transações categoria dízimo) -> manter como antes
                 cat_diz = db.scalar(select(Category).where(func.lower(Category.name).in_(("dízimo","dizimo"))))
                 q_diz_tx = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
                     Transaction.date >= start, Transaction.date < end,
@@ -604,21 +583,14 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
                 if cat_diz:
                     q_diz_tx = q_diz_tx.where(Transaction.category_id == cat_diz.id)
                 total_diz_tx = float(db.scalar(q_diz_tx) or 0.0)
-
                 q_tithe = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
                     Tithe.date >= start, Tithe.date < end
                 )
                 total_tithe = float(db.scalar(q_tithe) or 0.0)
-
                 total_diz_final = max(total_tithe, total_diz_tx)
 
-                # ofertas: manter a separação
-                total_oferta_culto = oferta_sl_total or 0.0
-                total_oferta_categoria_of = oferta_tx_total or 0.0
-                total_oferta_missoes = missao_tx_total or 0.0
-
-                # saídas (excluindo 'Missões' como saída)
-                cat_miss_out = db.scalar(select(Category).where(func.lower(Category.name).in_(("missões (saída)","missoes (saída)","missões","missoes")) , Category.type == TYPE_OUT))
+                # saídas (excluindo missões)
+                cat_miss_out = db.scalar(select(Category).where(func.lower(Category.name).in_(("missões","missoes")) , Category.type == TYPE_OUT))
                 q_saidas = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
                     Transaction.date >= start, Transaction.date < end,
                     Transaction.type.in_(("SAÍDA","DESPESA"))
@@ -627,7 +599,7 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
                     q_saidas = q_saidas.where(Transaction.category_id != cat_miss_out.id)
                 total_saidas = float(db.scalar(q_saidas) or 0.0)
 
-                # dizimistas por forma de pagamento (Dinheiro x PIX)
+                # dizimistas por forma
                 q_pix = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
                     Tithe.date >= start, Tithe.date < end,
                     func.upper(func.coalesce(Tithe.payment_method, "")) == "PIX"
@@ -639,43 +611,31 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
                 )
                 total_cash = float(db.scalar(q_cash) or 0.0)
 
-                # montar resposta concisa conforme pergunta (heurística simples: checar palavras-chave)
                 qlow = pergunta_usuario.strip().lower()
                 parts = []
 
-                # se o usuário pedir especificamente "missões", devolve separado
-                if "miss" in qlow or "missões" in qlow or "missoes" in qlow:
-                    parts.append(f"Ofertas Missões: {format_currency(total_oferta_missoes)}")
+                # sempre apresentar ofertas separadas quando perguntado por ofertas
+                if "oferta" in qlow or "ofertas" in qlow:
+                    parts.append(f"Ofertas do Culto: {format_currency(oferta_sl_total)}")
+                    parts.append(f"Ofertas (categoria 'Oferta'): {format_currency(oferta_tx_total)}")
+                    parts.append(f"Ofertas Missões: {format_currency(missao_tx_total)}")
 
-                # ofertas do culto (ServiceLog.oferta)
-                if "culto" in qlow or "cultos" in qlow or "ofertas do culto" in qlow:
-                    parts.append(f"Ofertas do Culto: {format_currency(total_oferta_culto)}")
-
-                # ofertas gerais (categoria 'Oferta')
-                if ("oferta" in qlow or "ofertas" in qlow) and not ("miss" in qlow or "culto" in qlow):
-                    # se o usuário só pediu "ofertas", exibimos os 3 valores relevantes, sem explicações
-                    parts.append(f"Ofertas (categoria 'Oferta'): {format_currency(total_oferta_categoria_of)}")
-                    # também adicionamos culto e missões se existirem para visão completa quando a pergunta é genérica
-                    if total_oferta_culto:
-                        parts.append(f"Ofertas do Culto: {format_currency(total_oferta_culto)}")
-                    if total_oferta_missoes:
-                        parts.append(f"Ofertas Missões: {format_currency(total_oferta_missoes)}")
-
-                # outras chaves
-                if "dízimo" in qlow or "dizimo" in qlow or "dízimos" in qlow:
+                if "dízimo" in qlow or "dizimo" in qlow:
                     parts.append(f"Dízimos (mês): {format_currency(total_diz_final)}")
+
                 if "saída" in qlow or "saidas" in qlow or "saídas" in qlow:
                     parts.append(f"Saídas (exceto Missões) (mês): {format_currency(total_saidas)}")
+
                 if "dizimistas" in qlow or "pix" in qlow or "dinheiro" in qlow:
                     parts.append(f"Dizimistas por forma: PIX {format_currency(total_pix)} • Outros {format_currency(total_cash)}")
 
-                # fallback genérico se nada detectado: retornar 3 totais principais
+                # fallback genérico: retorna os itens chaves, todos separados (NUNCA somados)
                 if not parts:
                     parts = [
                         f"Dízimos (mês): {format_currency(total_diz_final)}",
-                        f"Ofertas do Culto (mês): {format_currency(total_oferta_culto)}",
-                        f"Ofertas Missões (mês): {format_currency(total_oferta_missoes)}",
-                        f"Ofertas (categoria 'Oferta') (mês): {format_currency(total_oferta_categoria_of)}",
+                        f"Ofertas do Culto (mês): {format_currency(oferta_sl_total)}",
+                        f"Ofertas Missões (mês): {format_currency(missao_tx_total)}",
+                        f"Ofertas (categoria 'Oferta') (mês): {format_currency(oferta_tx_total)}",
                         f"Saídas (exceto Missões) (mês): {format_currency(total_saidas)}"
                     ]
 
@@ -683,7 +643,7 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
         except Exception as e:
             return "Erro ao calcular localmente: " + str(e)
 
-    # ---------- Se OpenAI configurada: chamar modelo com instruções de respostas curtas ----------
+    # Se OpenAI disponível: chamar modelo (com instruções estritas de não somar)
     try:
         client = OpenAI(api_key=api_key)
         resp = client.chat.completions.create(
@@ -696,13 +656,11 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
             max_tokens=400
         )
         text = resp.choices[0].message.content
-        # garante que a resposta seja enxuta: remove linhas em branco duplas no começo/fim
         text = "\n".join([ln.rstrip() for ln in text.strip().splitlines() if ln.strip() != ""])
         return text
-    except Exception as e:
-        # fallback explicando brevemente que a IA falhou e provendo resposta local succinta
+    except Exception:
+        # fallback breve (mesma estrutura do bloco acima)
         try:
-            # reutiliza o bloco local de cálculo rápido (o mesmo do fallback)
             with SessionLocal() as db:
                 cat_diz = db.scalar(select(Category).where(func.lower(Category.name).in_(("dízimo","dizimo"))))
                 q_diz_tx = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
@@ -718,11 +676,7 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
                 total_tithe = float(db.scalar(q_tithe) or 0.0)
                 total_diz_final = max(total_tithe, total_diz_tx)
 
-                total_oferta_culto = oferta_sl_total or 0.0
-                total_oferta_categoria_of = oferta_tx_total or 0.0
-                total_oferta_missoes = missao_tx_total or 0.0
-
-                cat_miss_out = db.scalar(select(Category).where(func.lower(Category.name).in_(("missões (saída)","missoes (saída)","missões","missoes")) , Category.type == TYPE_OUT))
+                cat_miss_out = db.scalar(select(Category).where(func.lower(Category.name).in_(("missões","missoes")) , Category.type == TYPE_OUT))
                 q_saidas = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
                     Transaction.date >= start, Transaction.date < end,
                     Transaction.type.in_(("SAÍDA","DESPESA"))
@@ -744,9 +698,9 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
 
                 parts = [
                     f"Dízimos (mês): {format_currency(total_diz_final)}",
-                    f"Ofertas do Culto (mês): {format_currency(total_oferta_culto)}",
-                    f"Ofertas Missões (mês): {format_currency(total_oferta_missoes)}",
-                    f"Ofertas (categoria 'Oferta') (mês): {format_currency(total_oferta_categoria_of)}",
+                    f"Ofertas do Culto (mês): {format_currency(oferta_sl_total)}",
+                    f"Ofertas Missões (mês): {format_currency(missao_tx_total)}",
+                    f"Ofertas (categoria 'Oferta') (mês): {format_currency(oferta_tx_total)}",
                     f"Saídas (exceto Missões) (mês): {format_currency(total_saidas)}",
                     f"Dizimistas por forma: PIX {format_currency(total_pix)} • Outros {format_currency(total_cash)}"
                 ]
