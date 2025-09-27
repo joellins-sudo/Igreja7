@@ -78,74 +78,54 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import joinedload
 import datetime
 
-def render_ai_context_selector(user, db, key_prefix="ai"):
-    """
-    Renderiza o seletor de contexto para a análise IA:
-      - Para SEDE: adiciona a opção "Todas as Congregações"
-      - Retorna: (cong_id, sub_cong_id, label)
-        * cong_id is None => todas as congregações
-        * sub_cong_id == SUB_ALL => incluir todas as sub-congregações (quando cong_id is None)
-        * sub_cong_id is None => filtrar registros com sub_congregation_id IS NULL (comportamento antigo)
-        * sub_cong_id == <id> => filtrar por sub
-    """
-    # usuário com perfil SEDE: mostrar "Todas as Congregações" + lista
-    if user.role == "SEDE":
-        congs_all = order_congs_sede_first(cong_options_for(user, db))
-        labels = ["Todas as Congregações"] + [c.name for c in congs_all]
-        sel_label = st.selectbox("Congregação", labels, key=f"{key_prefix}_cong_sel")
-        if sel_label == "Todas as Congregações":
-            cong_id = None
-            sub_cong_id = SUB_ALL
-            label = "Todas as Congregações"
-        else:
-            cong_obj = next((c for c in congs_all if c.name == sel_label), None)
-            if cong_obj is None:
-                st.error("Congregação selecionada não encontrada.")
-                return None, None, None
-            cong_id = cong_obj.id
-            # carregar sub-congregações dessa congregação
-            sub_congs = db.scalars(
-                select(SubCongregation).where(SubCongregation.congregation_id == cong_obj.id)
-            ).all()
-            if sub_congs:
-                mapping = {f"{cong_obj.name} (Principal)": None}
-                for s in sub_congs:
-                    mapping[s.name] = s.id
-                chosen = st.selectbox(
-                    "Unidade (sub-congregação)",
-                    list(mapping.keys()),
-                    key=f"{key_prefix}_sub_sel"
-                )
-                sub_cong_id = mapping[chosen]
-            else:
-                sub_cong_id = None
-            label = cong_obj.name
-    else:
-        # usuário normal: fixo na sua congregação
-        cong_obj = db.get(Congregation, user.congregation_id)
-        if not cong_obj:
-            st.error("Sua congregação não foi encontrada.")
-            return None, None, None
-        st.markdown(f"**Congregação:** {cong_obj.name}")
-        cong_id = cong_obj.id
-        sub_congs = db.scalars(
-            select(SubCongregation).where(SubCongregation.congregation_id == cong_obj.id)
-        ).all()
-        if sub_congs:
-            mapping = {f"{cong_obj.name} (Principal)": None}
-            for s in sub_congs:
-                mapping[s.name] = s.id
-            chosen = st.selectbox(
-                "Unidade (sub-congregação)",
-                list(mapping.keys()),
-                key=f"{key_prefix}_sub_sel_user"
-            )
-            sub_cong_id = mapping[chosen]
-        else:
-            sub_cong_id = None
-        label = cong_obj.name
+from sqlalchemy import select
 
-    return cong_id, sub_cong_id, label
+def render_ai_context_selector(user, db, key_prefix: str = "ai"):
+    """
+    Renderiza o seletor de congregação para a página do Assistente IA.
+    Retorna: (congregation_id_or_None_for_all, sub_cong_id_or_None, label_str)
+    - Para usuários com role == "SEDE" mostra a opção "Todas as Congregações".
+    - Para usuários não-SEDE retorna apenas a congregação do usuário (não permite All).
+    Usa as funções já presentes no projeto: cong_options_for(user, db) quando existir.
+    """
+    # tenta obter lista de congregações usando sua função cong_options_for (se existir)
+    try:
+        congs = cong_options_for(user, db)  # presume que retorna lista de Congregation objects
+    except Exception:
+        # fallback simples: busca todas do DB
+        try:
+            congs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+        except Exception:
+            congs = []
+
+    # se for SEDE, adiciona opção "Todas as Congregações"
+    if getattr(user, "role", None) == "SEDE":
+        labels = ["Todas as Congregações"] + [c.name for c in congs]
+        sel = st.selectbox("Congregação", labels, key=f"{key_prefix}_cong_sel")
+        if sel == "Todas as Congregações":
+            return (None, None, "Todas as Congregações")
+        else:
+            # encontra objeto congregação
+            chosen = next((c for c in congs if c.name == sel), None)
+            if chosen:
+                return (chosen.id, None, chosen.name)
+            else:
+                return (None, None, sel)
+    else:
+        # não-SEDE: mostrar apenas a congregação do usuário (ou as permitidas)
+        try:
+            cong_obj = db.get(Congregation, user.congregation_id)
+            label = cong_obj.name if cong_obj else "Sem congregação"
+            st.markdown(f"**Congregação**: {label}")
+            return (user.congregation_id, None, label)
+        except Exception:
+            # fallback: simples selector com nomes disponíveis (se houver)
+            if congs:
+                chosen = congs[0]
+                st.markdown(f"**Congregação**: {chosen.name}")
+                return (chosen.id, None, chosen.name)
+            return (None, None, "—")
+
 
 
 def _build_common_date_and_congreg_filters(model, start_date, end_date, cong_id=None, sub_cong_id=None):
@@ -172,68 +152,120 @@ def _build_common_date_and_congreg_filters(model, start_date, end_date, cong_id=
     return conds
 
 
+from sqlalchemy import select, func
+from sqlalchemy.orm import joinedload
+
 def summarize_financials_for_ai(db, start_date, end_date, cong_id=None, sub_cong_id=None):
     """
-    Retorna um dicionário resumo com:
-      - total_dizimos (Tithe)
-      - total_ofertas_culto (ServiceLog.oferta, EXCETO 'Culto de Missões')
-      - total_ofertas_missoes (ServiceLog.oferta somente tipo 'Culto de Missões')
-      - total_ofertas_transacoes (Transaction tipo entrada com categoria 'Oferta')
-    Observa: mantém lógica separada entre 'ofertas culto' e 'ofertas missões' (não soma).
+    Retorna dicionário com totais:
+      - total_dizimos
+      - total_ofertas_culto  (ServiceLog.oferta, EXCETO 'Culto de Missões')
+      - total_ofertas_missoes (ServiceLog.oferta, APENAS 'Culto de Missões')
+      - total_ofertas_transacoes (Transaction entradas cujo Category.name contém 'oferta')
+      - by_payment_method: dict { 'Dinheiro': val, 'PIX': val, ... } para Tithe
+    Aplica filtros de congregação/sub-congregação se fornecidos.
     """
-    result = {
+    out = {
         "total_dizimos": 0.0,
         "total_ofertas_culto": 0.0,
         "total_ofertas_missoes": 0.0,
-        "total_ofertas_transacoes": 0.0
+        "total_ofertas_transacoes": 0.0,
+        "by_payment_method": {}
     }
 
-    # Dízimos (Tithe)
-    conds = _build_common_date_and_congreg_filters(Tithe, start_date, end_date, cong_id, sub_cong_id)
-    total_diz = db.scalar(select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(*conds)) or 0.0
-    result["total_dizimos"] = float(total_diz)
+    # filtros base
+    filters_tithe = [Tithe.date >= start_date, Tithe.date < end_date]
+    filters_log = [ServiceLog.date >= start_date, ServiceLog.date < end_date]
+    filters_tx = [Transaction.date >= start_date, Transaction.date < end_date]
 
-    # ServiceLog: ofertas separadas por tipo
-    conds_sl_all = _build_common_date_and_congreg_filters(ServiceLog, start_date, end_date, cong_id, sub_cong_id)
-    # Missões
-    total_missoes = db.scalar(
-        select(func.coalesce(func.sum(ServiceLog.oferta), 0.0)).where(*conds_sl_all, ServiceLog.service_type == "Culto de Missões")
-    ) or 0.0
-    result["total_ofertas_missoes"] = float(total_missoes)
-    # Cultos (exceto Missões)
-    total_culto = db.scalar(
-        select(func.coalesce(func.sum(ServiceLog.oferta), 0.0)).where(*conds_sl_all, ServiceLog.service_type != "Culto de Missões")
-    ) or 0.0
-    result["total_ofertas_culto"] = float(total_culto)
+    if cong_id is not None:
+        filters_tithe.append(Tithe.congregation_id == cong_id)
+        filters_log.append(ServiceLog.congregation_id == cong_id)
+        filters_tx.append(Transaction.congregation_id == cong_id)
+    if sub_cong_id is not None:
+        filters_tithe.append(Tithe.sub_congregation_id == sub_cong_id)
+        filters_log.append(ServiceLog.sub_congregation_id == sub_cong_id)
+        filters_tx.append(Transaction.sub_congregation_id == sub_cong_id)
 
-    # Transações de entrada com categoria 'Oferta' (checa Category)
-    # JOIN Transaction -> Category
-    tx_subconds = _build_common_date_and_congreg_filters(Transaction, start_date, end_date, cong_id, sub_cong_id)
-    # buscar id(s) de categorias 'Oferta' (pode ser mais de uma variação)
-    cat_offer_ids = [c.id for c in db.scalars(select(Category).where(func.lower(Category.name).like("%oferta%"), Category.type == TYPE_IN)).all()]
-    if cat_offer_ids:
-        total_tx_off = db.scalar(
-            select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(*tx_subconds, Transaction.type == TYPE_IN, Transaction.category_id.in_(cat_offer_ids))
-        ) or 0.0
-        result["total_ofertas_transacoes"] = float(total_tx_off)
-    else:
-        result["total_ofertas_transacoes"] = 0.0
+    try:
+        total_diz = float(db.scalar(
+            select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(*filters_tithe)
+        ) or 0.0)
+        out["total_dizimos"] = round(total_diz, 2)
+    except Exception:
+        out["total_dizimos"] = 0.0
 
-    return result
+    # SERVICELOG: ofertas separadas (culto normal x culto de missões)
+    try:
+        total_ofe_missao = float(db.scalar(
+            select(func.coalesce(func.sum(ServiceLog.oferta), 0.0)).where(
+                *filters_log, ServiceLog.service_type == "Culto de Missões"
+            )
+        ) or 0.0)
+        out["total_ofertas_missoes"] = round(total_ofe_missao, 2)
+    except Exception:
+        out["total_ofertas_missoes"] = 0.0
+
+    try:
+        total_ofe_culto = float(db.scalar(
+            select(func.coalesce(func.sum(ServiceLog.oferta), 0.0)).where(
+                *filters_log, ServiceLog.service_type != "Culto de Missões"
+            )
+        ) or 0.0)
+        out["total_ofertas_culto"] = round(total_ofe_culto, 2)
+    except Exception:
+        out["total_ofertas_culto"] = 0.0
+
+    # TRANSACTIONS: procurar entradas cuja categoria contenha 'oferta' (ou nome exato)
+    try:
+        # detecta constante TYPE_IN se existir, senão usa 'ENTRADA' como fallback
+        try:
+            tx_in_type = TYPE_IN
+        except NameError:
+            tx_in_type = "ENTRADA"
+
+        tx_q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).join(Category).where(
+            *filters_tx,
+            Transaction.type == tx_in_type,
+            func.lower(Category.name).like("%oferta%")
+        )
+        total_ofe_tx = float(db.scalar(tx_q) or 0.0)
+        out["total_ofertas_transacoes"] = round(total_ofe_tx, 2)
+    except Exception:
+        out["total_ofertas_transacoes"] = 0.0
+
+    # Breakdown por forma de pagamento (para dizimos)
+    try:
+        pay_q = select(Tithe.payment_method, func.coalesce(func.sum(Tithe.amount), 0.0)).where(
+            *filters_tithe
+        ).group_by(Tithe.payment_method)
+        rows = db.execute(pay_q).all()
+        bypm = {}
+        for pm, val in rows:
+            key = pm or "Não informado"
+            bypm[key] = float(val or 0.0)
+        out["by_payment_method"] = bypm
+    except Exception:
+        out["by_payment_method"] = {}
+
+    return out
 
 
-def format_currency_br(value):
-    """Formata número float -> R$ 1.234,56 (simples)."""
+
+def format_currency_br(value: float) -> str:
+    """
+    Formata números em padrão brasileiro: R$ 1.234,56
+    Seguro para valores None e outros tipos.
+    """
     try:
         v = float(value or 0.0)
     except Exception:
         v = 0.0
-    # separar inteiros e decimais
-    inteiro = int(abs(v))
-    dec = int(round((abs(v) - inteiro) * 100))
-    s_int = f"{inteiro:,}".replace(",", ".")
-    sign = "-" if v < 0 else ""
-    return f"{sign}R$ {s_int},{dec:02d}"
+    # Formata com separador de milhar '.' e decimal ','
+    s = f"{v:,.2f}"  # ex: 1,234.56  (inglês)
+    s = s.replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"R$ {s}"
+
 
 
 def format_ai_response(summary: dict, question: str = ""):
@@ -1176,102 +1208,6 @@ def _build_common_date_and_congreg_filters(model, start_date, end_date, cong_id=
         else:
             conds.append(model.sub_congregation_id == sub_cong_id)
     return conds
-
-
-def summarize_financials_for_ai(db, start_date, end_date, cong_id=None, sub_cong_id=None):
-    """
-    Retorna um dicionário com totais e quebras necessárias para a IA responder:
-      - total_dizimos
-      - total_ofertas_culto (ofertas do resumo de culto + transações de 'oferta' não-missão)
-      - total_ofertas_missoes (transações com categoria 'missões' e tx.type == ENTRADA)
-      - total_entradas_por_categoria (dict categoria -> valor)
-      - total_saidas_excl_missoes (SAÍDA excluindo categoria 'missões')
-      - tithes_by_payment (dict pagamento -> valor)
-    NOTA: mantém o comportamento de filtrar sub_congregation_id quando sub_cong_id é None.
-    """
-    # modelos: ajuste import se necessário
-    from models import Tithe, Transaction, Category, ServiceLog
-
-    # 1) Total de dízimos nominais
-    conds_tithe = _build_common_date_and_congreg_filters(Tithe, start_date, end_date, cong_id, sub_cong_id)
-    total_dizimos = float(db.scalar(select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(*conds_tithe)) or 0.0)
-
-    # 2) Ofertas registradas no resumo de culto (ServiceLog.oferta) EXCLUINDO 'Culto de Missões'
-    conds_service = _build_common_date_and_congreg_filters(ServiceLog, start_date, end_date, cong_id, sub_cong_id)
-    conds_service.append(ServiceLog.service_type != "Culto de Missões")
-    total_ofertas_service = float(db.scalar(select(func.coalesce(func.sum(ServiceLog.oferta), 0.0)).where(*conds_service)) or 0.0)
-
-    # 3) Transações de ENTRADA agrupadas por categoria (para separar 'missões' de 'oferta' e outras)
-    conds_tx_in = _build_common_date_and_congreg_filters(Transaction, start_date, end_date, cong_id, sub_cong_id)
-    conds_tx_in.append(Transaction.type == TX_TYPE_IN)
-
-    # Agrupa por categoria (nome em minúsculas) — soma por categoria
-    rows = db.execute(
-        select(func.lower(Category.name), func.coalesce(func.sum(Transaction.amount), 0.0))
-        .join(Category, Transaction.category_id == Category.id)
-        .where(*conds_tx_in)
-        .group_by(func.lower(Category.name))
-    ).all()
-
-    total_ofertas_missoes = 0.0
-    total_tx_in_other = 0.0
-    tx_in_by_category = {}
-    for cat_name_lower, soma in rows:
-        valor = float(soma or 0.0)
-        tx_in_by_category[cat_name_lower] = valor
-        if cat_name_lower.strip() == "missões" or cat_name_lower.strip() == "missoes":
-            total_ofertas_missoes += valor
-        else:
-            total_tx_in_other += valor
-
-    # 4) Decide o que é considerado "oferta de culto" para apresentar ao usuário:
-    #    - soma ServiceLog.oferta (resumo de culto, exceto Culto de Missões) + transações ENTRADA de categorias que contenham 'ofert'
-    offers_tx_from_named_offers = 0.0
-    for cat_lower, v in tx_in_by_category.items():
-        if "ofert" in cat_lower:  # captura 'oferta', 'ofertas', etc.
-            offers_tx_from_named_offers += v
-
-    total_ofertas_culto = float(total_ofertas_service) + float(offers_tx_from_named_offers)
-
-    # 5) Saídas (SAÍDA) excluindo categorias 'missões'
-    conds_tx_out = _build_common_date_and_congreg_filters(Transaction, start_date, end_date, cong_id, sub_cong_id)
-    conds_tx_out.append(Transaction.type == TX_TYPE_OUT)
-    rows_out = db.execute(
-        select(func.lower(Category.name), func.coalesce(func.sum(Transaction.amount), 0.0))
-        .join(Category, Transaction.category_id == Category.id)
-        .where(*conds_tx_out)
-        .group_by(func.lower(Category.name))
-    ).all()
-
-    total_saidas_excl_missoes = 0.0
-    tx_out_by_category = {}
-    for cat_name_lower, soma in rows_out:
-        valor = float(soma or 0.0)
-        tx_out_by_category[cat_name_lower] = valor
-        if cat_name_lower.strip() in ("missões", "missoes"):
-            # ignora
-            continue
-        total_saidas_excl_missoes += valor
-
-    # 6) Quebra de dizimos por forma de pagamento (se existir campo payment_method)
-    tithe_pay_rows = db.execute(
-        select(Tithe.payment_method, func.coalesce(func.sum(Tithe.amount), 0.0))
-        .where(*conds_tithe)
-        .group_by(Tithe.payment_method)
-    ).all()
-    tithes_by_payment = { (pm or "Não informado"): float(val or 0.0) for pm, val in tithe_pay_rows }
-
-    # Monta o dicionário de retorno
-    summary = {
-        "total_dizimos": total_dizimos,
-        "total_ofertas_culto": total_ofertas_culto,
-        "total_ofertas_missoes": total_ofertas_missoes,
-        "tx_in_by_category": tx_in_by_category,
-        "tx_out_by_category": tx_out_by_category,
-        "total_saidas_excl_missoes": total_saidas_excl_missoes,
-        "tithes_by_payment": tithes_by_payment,
-    }
-    return summary
 
 
 def format_ai_response(summary, question=None):
