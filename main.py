@@ -70,6 +70,190 @@ ADJ_HIER_OUT_DESC = "[Ajuste via Relatório Hierárquico (Saída)]"
 
 st.set_page_config(page_title=APP_NAME, page_icon="⛪", layout="wide")
 
+# --- COLE AQUI: funções de suporte para "Todas as Congregações" e resumo IA ---
+
+SUB_ALL = "__ALL__"
+
+from sqlalchemy import select, func
+from sqlalchemy.orm import joinedload
+import datetime
+
+def render_ai_context_selector(user, db, key_prefix="ai"):
+    """
+    Renderiza o seletor de contexto para a análise IA:
+      - Para SEDE: adiciona a opção "Todas as Congregações"
+      - Retorna: (cong_id, sub_cong_id, label)
+        * cong_id is None => todas as congregações
+        * sub_cong_id == SUB_ALL => incluir todas as sub-congregações (quando cong_id is None)
+        * sub_cong_id is None => filtrar registros com sub_congregation_id IS NULL (comportamento antigo)
+        * sub_cong_id == <id> => filtrar por sub
+    """
+    # usuário com perfil SEDE: mostrar "Todas as Congregações" + lista
+    if user.role == "SEDE":
+        congs_all = order_congs_sede_first(cong_options_for(user, db))
+        labels = ["Todas as Congregações"] + [c.name for c in congs_all]
+        sel_label = st.selectbox("Congregação", labels, key=f"{key_prefix}_cong_sel")
+        if sel_label == "Todas as Congregações":
+            cong_id = None
+            sub_cong_id = SUB_ALL
+            label = "Todas as Congregações"
+        else:
+            cong_obj = next((c for c in congs_all if c.name == sel_label), None)
+            if cong_obj is None:
+                st.error("Congregação selecionada não encontrada.")
+                return None, None, None
+            cong_id = cong_obj.id
+            # carregar sub-congregações dessa congregação
+            sub_congs = db.scalars(
+                select(SubCongregation).where(SubCongregation.congregation_id == cong_obj.id)
+            ).all()
+            if sub_congs:
+                mapping = {f"{cong_obj.name} (Principal)": None}
+                for s in sub_congs:
+                    mapping[s.name] = s.id
+                chosen = st.selectbox(
+                    "Unidade (sub-congregação)",
+                    list(mapping.keys()),
+                    key=f"{key_prefix}_sub_sel"
+                )
+                sub_cong_id = mapping[chosen]
+            else:
+                sub_cong_id = None
+            label = cong_obj.name
+    else:
+        # usuário normal: fixo na sua congregação
+        cong_obj = db.get(Congregation, user.congregation_id)
+        if not cong_obj:
+            st.error("Sua congregação não foi encontrada.")
+            return None, None, None
+        st.markdown(f"**Congregação:** {cong_obj.name}")
+        cong_id = cong_obj.id
+        sub_congs = db.scalars(
+            select(SubCongregation).where(SubCongregation.congregation_id == cong_obj.id)
+        ).all()
+        if sub_congs:
+            mapping = {f"{cong_obj.name} (Principal)": None}
+            for s in sub_congs:
+                mapping[s.name] = s.id
+            chosen = st.selectbox(
+                "Unidade (sub-congregação)",
+                list(mapping.keys()),
+                key=f"{key_prefix}_sub_sel_user"
+            )
+            sub_cong_id = mapping[chosen]
+        else:
+            sub_cong_id = None
+        label = cong_obj.name
+
+    return cong_id, sub_cong_id, label
+
+
+def _build_common_date_and_congreg_filters(model, start_date, end_date, cong_id=None, sub_cong_id=None):
+    """
+    Gera a lista de condições (WHERE) para as queries, suportando:
+      - cong_id is None => NÃO filtra por congregation (todas)
+      - sub_cong_id == SUB_ALL => NÃO filtra por sub (inclui todos)
+      - sub_cong_id is None => filtra sub_congregation_id IS NULL (comportamento antigo)
+      - sub_cong_id == <id> => filtra por esse sub
+    """
+    conds = [model.date >= start_date, model.date < end_date]
+    if cong_id is not None:
+        conds.append(model.congregation_id == cong_id)
+
+    if hasattr(model, "sub_congregation_id"):
+        if sub_cong_id == SUB_ALL:
+            # não adiciona filtro por sub -> incluir todos
+            pass
+        elif sub_cong_id is None:
+            conds.append(model.sub_congregation_id.is_(None))
+        else:
+            conds.append(model.sub_congregation_id == sub_cong_id)
+
+    return conds
+
+
+def summarize_financials_for_ai(db, start_date, end_date, cong_id=None, sub_cong_id=None):
+    """
+    Retorna um dicionário resumo com:
+      - total_dizimos (Tithe)
+      - total_ofertas_culto (ServiceLog.oferta, EXCETO 'Culto de Missões')
+      - total_ofertas_missoes (ServiceLog.oferta somente tipo 'Culto de Missões')
+      - total_ofertas_transacoes (Transaction tipo entrada com categoria 'Oferta')
+    Observa: mantém lógica separada entre 'ofertas culto' e 'ofertas missões' (não soma).
+    """
+    result = {
+        "total_dizimos": 0.0,
+        "total_ofertas_culto": 0.0,
+        "total_ofertas_missoes": 0.0,
+        "total_ofertas_transacoes": 0.0
+    }
+
+    # Dízimos (Tithe)
+    conds = _build_common_date_and_congreg_filters(Tithe, start_date, end_date, cong_id, sub_cong_id)
+    total_diz = db.scalar(select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(*conds)) or 0.0
+    result["total_dizimos"] = float(total_diz)
+
+    # ServiceLog: ofertas separadas por tipo
+    conds_sl_all = _build_common_date_and_congreg_filters(ServiceLog, start_date, end_date, cong_id, sub_cong_id)
+    # Missões
+    total_missoes = db.scalar(
+        select(func.coalesce(func.sum(ServiceLog.oferta), 0.0)).where(*conds_sl_all, ServiceLog.service_type == "Culto de Missões")
+    ) or 0.0
+    result["total_ofertas_missoes"] = float(total_missoes)
+    # Cultos (exceto Missões)
+    total_culto = db.scalar(
+        select(func.coalesce(func.sum(ServiceLog.oferta), 0.0)).where(*conds_sl_all, ServiceLog.service_type != "Culto de Missões")
+    ) or 0.0
+    result["total_ofertas_culto"] = float(total_culto)
+
+    # Transações de entrada com categoria 'Oferta' (checa Category)
+    # JOIN Transaction -> Category
+    tx_subconds = _build_common_date_and_congreg_filters(Transaction, start_date, end_date, cong_id, sub_cong_id)
+    # buscar id(s) de categorias 'Oferta' (pode ser mais de uma variação)
+    cat_offer_ids = [c.id for c in db.scalars(select(Category).where(func.lower(Category.name).like("%oferta%"), Category.type == TYPE_IN)).all()]
+    if cat_offer_ids:
+        total_tx_off = db.scalar(
+            select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(*tx_subconds, Transaction.type == TYPE_IN, Transaction.category_id.in_(cat_offer_ids))
+        ) or 0.0
+        result["total_ofertas_transacoes"] = float(total_tx_off)
+    else:
+        result["total_ofertas_transacoes"] = 0.0
+
+    return result
+
+
+def format_currency_br(value):
+    """Formata número float -> R$ 1.234,56 (simples)."""
+    try:
+        v = float(value or 0.0)
+    except Exception:
+        v = 0.0
+    # separar inteiros e decimais
+    inteiro = int(abs(v))
+    dec = int(round((abs(v) - inteiro) * 100))
+    s_int = f"{inteiro:,}".replace(",", ".")
+    sign = "-" if v < 0 else ""
+    return f"{sign}R$ {s_int},{dec:02d}"
+
+
+def format_ai_response(summary: dict, question: str = ""):
+    """
+    Gera um texto limpo e direto (sem listar fontes) para exibir no UI.
+    Mantém as quantias separadas (ofertas de culto != ofertas de missões).
+    """
+    lines = []
+    # Pergunta (opcional) — não fazemos explicações extras, apenas resultados
+    if question:
+        lines.append(f"Pergunta: {question.strip()}")
+    # Resultados
+    lines.append(f"Total Dízimos: {format_currency_br(summary.get('total_dizimos', 0.0))}")
+    lines.append(f"Total Ofertas (Cultos): {format_currency_br(summary.get('total_ofertas_culto', 0.0))}")
+    lines.append(f"Total Ofertas (Missões): {format_currency_br(summary.get('total_ofertas_missoes', 0.0))}")
+    lines.append(f"Total Ofertas (Transações categoria 'Oferta'): {format_currency_br(summary.get('total_ofertas_transacoes', 0.0))}")
+    return "\n".join(lines)
+
+# --- FIM DAS FUNÇÕES ---
+
 # ================== CSS do cartão de login (estilo SEI) ==================
 # ================== CSS do cartão de login (estilo ADRF) ==================
 # ================== LOGIN SEI: CSS/HTML (trabalhando com Streamlit) ==================
@@ -1219,6 +1403,9 @@ def now_bahia() -> datetime:
         return datetime.now()
 
 
+
+
+
 def today_bahia() -> date:
     return now_bahia().date()
 
@@ -1275,8 +1462,6 @@ def get_month_selector(label: str = "Mês de referência", key_prefix: str = "ma
     return date(int(y), int(m), 1)
 
 # === AVISO VISUAL PARA CULTO DE MISSÕES (apenas UI, sem alterar dados) ===
-import re
-
 import re
 
 def _has_culto_missoes_in_df(df: pd.DataFrame) -> bool:
@@ -5403,75 +5588,80 @@ def main():
 # ===================== PAGE: ASSISTENTE IA (ORDEM DE EXECUÇÃO CORRIGIDA) =====================
 # ===================== PAGE: ASSISTENTE IA (VERSÃO ESTÁVEL E FINAL) =====================
 def page_assistente_ia(user: "User"):
-    # Verificação de permissão geral
-    if user.role not in ["SEDE", "TESOUREIRO MISSIONÁRIO"]:
-        st.warning("🔒 Acesso negado. Esta funcionalidade está disponível apenas para os perfis SEDE e TESOUREIRO MISSIONÁRIO.")
-        return
-
-    st.markdown("<h1 class='page-title'>🤖 Assistente Financeiro IA</h1>", unsafe_allow_html=True)
-    st.info("Selecione um contexto (congregação e período) e faça sua pergunta em linguagem natural sobre os dados financeiros.")
+    """
+    Página do Assistente IA — permite selecionar contexto (inclui 'Todas as Congregações' para SEDE),
+    escolher mês/ano, escrever a pergunta e obter um resumo limpo e direto.
+    Não altera a lógica do banco — apenas agrega a opção 'Todas as Congregações' e melhora formatação.
+    """
+    ensure_seed()
 
     with SessionLocal() as db:
-        # --- SEÇÃO UNIFICADA DE FILTROS ---
-        st.markdown("#### 1. Selecione o Contexto da Análise")
-        congs_all = order_congs_sede_first(cong_options_for(user, db))
-        
-        col_cong, col_filtros = st.columns([2, 3])
-        
-        with col_cong:
-            cong_sel_name = st.selectbox("Congregação", [c.name for c in congs_all], key="ia_cong_sel_stable")
-            cong_selecionada_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
+        st.markdown("<h1 class='page-title'>Assistente IA</h1>", unsafe_allow_html=True)
 
-        with col_filtros:
-            ref = get_month_selector("Mês de Referência", key_prefix="ia_ref_stable")
-        
-        start, end = month_bounds(ref)
+        # === Contexto (inclui opção "Todas as Congregações" para SEDE) ===
+        cong_id, sub_cong_id, cong_label = render_ai_context_selector(user, db, key_prefix="ai")
 
-        if not cong_selecionada_obj:
-            st.warning("Nenhuma congregação selecionada. Por favor, selecione uma na lista.")
-            return
+        # Seleção do mês/ano de referência (mantém sua UI existente)
+        ref_tab = get_month_selector("Mês de Referência — Mês", key="ai_ref_month")
+        start_tab, end_tab = month_bounds(ref_tab)
 
-        st.markdown("---")
-        st.markdown("#### 2. Faça sua Pergunta")
-        
-        placeholder_text = "Ex: Qual o total de dízimos? Liste as 3 maiores saídas. Quem foi o dizimista com maior valor?"
-        pergunta = st.text_area("Sua pergunta:", key="ia_pergunta_stable", height=120, placeholder=placeholder_text)
-        
-        if st.button("Analisar com IA", type="primary", use_container_width=True):
-            if pergunta.strip():
-                with st.spinner("Buscando e preparando os dados..."):
-                    
-                    dados_para_ia_df = pd.DataFrame()
-                    contexto_str = f"{cong_selecionada_obj.name} - {ref.strftime('%B de %Y')}"
-                    
-                    # Prepara dados de forma diferente para cada perfil
-                    if user.role == 'SEDE':
-                        dados_completos = _collect_month_data(cong_selecionada_obj.id, start, end)
-                        # Lógica de preparação de dados robusta para SEDE
-                        combined_rows = []
-                        for t in dados_completos.get("tx_in", []):
-                            combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
-                        for t in dados_completos.get("tithes", []):
-                            combined_rows.append({"Data": t.date, "Tipo": "Entrada", "Categoria": "Dízimo Nominal", "Descricao": f"Dizimista: {t.tither_name}, Pgto: {t.payment_method}", "Valor": t.amount})
-                        for t in dados_completos.get("tx_out", []):
-                            combined_rows.append({"Data": t.date, "Tipo": "Saída", "Categoria": t.category.name, "Descricao": t.description, "Valor": t.amount})
-                        dados_para_ia_df = pd.DataFrame(combined_rows)
+        st.divider()
 
-                    elif user.role == 'TESOUREIRO MISSIONÁRIO':
-                        dados_para_ia_df = get_missions_data_for_ia(cong_selecionada_obj.id, start, end)
-                        contexto_str = f"Dados de Missões de {cong_selecionada_obj.name} - {ref.strftime('%B de %Y')}"
+        # === Campo de pergunta ===
+        st.subheader("2. Faça sua Pergunta")
+        question_text = st.text_area(
+            "Sua pergunta:",
+            placeholder="Ex: Qual o total de dízimos? Liste as 3 maiores saídas. Quem foi o dizimista com maior valor?",
+            key="ai_question_text",
+            height=140
+        )
 
-                with st.spinner("O assistente está analisando os dados e elaborando uma resposta..."):
-                    resposta = responder_pergunta_financeira(
-                        pergunta_usuario=pergunta,
-                        dados_df=dados_para_ia_df,
-                        contexto=contexto_str
-                    )
-                    st.markdown("---")
-                    st.markdown(f"#### Resposta do Assistente")
-                    st.info(resposta)
+        # Botão para analisar com IA
+        analyze_clicked = st.button("Analisar com IA", key="ai_analyze_btn", type="primary")
+
+        # Área de resposta
+        resposta_container = st.empty()
+
+        if analyze_clicked:
+            # Validações simples
+            if cong_id is None and user.role != "SEDE":
+                # Usuário sem permissão para ver todas
+                resposta_container.error("Você não tem permissão para consultar 'Todas as Congregações'.")
             else:
-                st.warning("Por favor, digite uma pergunta.")
+                try:
+                    # Reabre sessão para consultas de resumo
+                    with SessionLocal() as db_q:
+                        summary = summarize_financials_for_ai(
+                            db_q, start_tab, end_tab,
+                            cong_id=cong_id, sub_cong_id=sub_cong_id
+                        )
+
+                    # Monta resposta limpa e bem formatada (sem listar fontes)
+                    lines = []
+                    # Cabeçalho curto (contexto)
+                    lines.append(f"**Resumo financeiro — {cong_label} — {ref_tab.strftime('%B/%Y') if hasattr(ref_tab, 'month') else ''}**")
+                    lines.append("")  # linha em branco
+
+                    # Valores principais (cada um em sua própria linha)
+                    lines.append(f"- **Total Dízimos:** {format_currency_br(summary.get('total_dizimos', 0.0))}")
+                    lines.append(f"- **Total Ofertas (Cultos):** {format_currency_br(summary.get('total_ofertas_culto', 0.0))}")
+                    lines.append(f"- **Total Ofertas (Missões):** {format_currency_br(summary.get('total_ofertas_missoes', 0.0))}")
+                    lines.append(f"- **Total Ofertas (Transações - categoria \"Oferta\"):** {format_currency_br(summary.get('total_ofertas_transacoes', 0.0))}")
+
+                    # Junta as linhas em markdown
+                    resposta_md = "\n".join(lines)
+
+                    # Exibe o resultado de forma limpa (caixa azul clara)
+                    resposta_container.info(resposta_md)
+
+                except Exception as e:
+                    # Mensagem amigável em caso de erro (sem vazar stack)
+                    resposta_container.error("Ocorreu um erro ao gerar a análise. Verifique os logs do servidor.")
+                    # opcional: log no console para debug do desenvolvedor
+                    import traceback
+                    print("Erro em page_assistente_ia:", e)
+                    traceback.print_exc()
+
 
             # ... (O restante do código para o Tesoureiro Missionário permanece o mesmo)
             # ...
