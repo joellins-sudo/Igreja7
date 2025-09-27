@@ -728,6 +728,89 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
                 return "\n".join(f"- {p}" for p in parts)
         except Exception:
             return "Erro ao gerar resposta (IA/API indisponível e fallback falhou)."
+def render_assistente_response(raw_text: str):
+    """
+    Renderiza a resposta da IA de forma limpa no Streamlit.
+    Uso: render_assistente_response(resposta_da_ia)
+    NÃO altera qualquer lógica de cálculo/IA — apenas pós-processa e exibe.
+    """
+    import re
+    import html
+    import streamlit as st
+    if not raw_text:
+        st.info("Sem resposta do assistente.")
+        return
+
+    # 1) Unescape HTML entities
+    text = html.unescape(str(raw_text))
+
+    # 2) Remove tags HTML que possam alterar a formatação (itálico, fontes estranhas, <font>, etc.)
+    #    Mantemos apenas quebras de linha e caracteres textuais.
+    text = re.sub(r"<\s*(br|br/)\s*>", "\n", text, flags=re.IGNORECASE)  # <br> -> newline
+    text = re.sub(r"<\s*/?\s*(p|div|span|strong|b)[^>]*>", "", text, flags=re.IGNORECASE)  # remove wrappers simples
+    # Remove tags problemáticas (i, em, font, style, etc.) e todo o resto de tags
+    text = re.sub(r"<[^>]+>", "", text)
+
+    # 3) Normalizações de espaço e pontuação
+    # Remove espaços múltiplos e tabs
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    # Remove espaços repetidos em quebras de linha
+    text = re.sub(r"\n[ \t]+", "\n", text)
+    # Coloca espaço depois de vírgula/ponto/ dois pontos quando faltam
+    text = re.sub(r"([,;:])(?=[^\s0-9])", r"\1 ", text)
+    # Garante espaço entre número e letra colados (ex: '362Total' -> '362 Total')
+    text = re.sub(r"(?<=\d)(?=[A-Za-zÀ-ÿ])", " ", text)
+    # Garante espaço entre letra e símbolo de R$ colado (ex: 'ofertasR$50' -> 'ofertas R$50')
+    text = re.sub(r"(?<=[A-Za-zÀ-ÿ])(?=R\$)", " ", text)
+    # Remove espaços antes de pontuação
+    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+    # Normaliza quebras de linha múltiplas
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = text.strip()
+
+    # 4) Detecta linhas com marcadores e transforma em <ul><li> para melhor aparência
+    lines = text.splitlines()
+    html_lines = []
+    in_list = False
+    for ln in lines:
+        stripped = ln.strip()
+        if re.match(r"^[-\*\u2022]\s+", stripped):  # - * or bullet
+            item = re.sub(r"^[-\*\u2022]\s+", "", stripped)
+            if not in_list:
+                html_lines.append("<ul style='margin:6px 0 6px 22px;padding:0;'>")
+                in_list = True
+            html_lines.append(f"<li style='margin:4px 0;line-height:1.5'>{html.escape(item)}</li>")
+        else:
+            if in_list:
+                html_lines.append("</ul>")
+                in_list = False
+            # manter linhas em parágrafo curto
+            if stripped == "":
+                html_lines.append("<div style='height:8px'></div>")
+            else:
+                html_lines.append(f"<p style='margin:6px 0;line-height:1.5'>{html.escape(stripped)}</p>")
+    if in_list:
+        html_lines.append("</ul>")
+
+    content_html = "\n".join(html_lines)
+
+    # 5) Estilo do bloco (ajuste aqui se quiser outro visual)
+    container_html = f"""
+    <div style="
+        background: #eaf6ff;
+        border-radius: 10px;
+        padding: 16px 20px;
+        color: #0b4b71;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+        font-size: 16px;
+        box-shadow: 0 1px 0 rgba(0,0,0,0.02);
+        ">
+        {content_html}
+    </div>
+    """
+
+    # 6) Exibir com unsafe_allow_html (já sanitizamos acima)
+    st.markdown(container_html, unsafe_allow_html=True)
 
 
 def build_monthly_financial_summary_for_ai(year: int, month: int) -> Dict[str, Any]:
