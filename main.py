@@ -5673,17 +5673,17 @@ def query_financial_details_for_ai(db, start_dt, end_dt, cong_id=None, sub_cong_
 
 def page_assistente_ia(user):
     """
-    Página Assistente IA (atualizada para consultas detalhadas e resposta concisa).
-    Mantém a lógica original de contexto / mês — só melhora consultas e formatação.
+    Página Assistente IA — versão restrita: responde apenas ao que o usuário pedir.
+    Substitua a versão antiga por esta. Não altera gravações ou lógica de DB.
     """
     st.markdown("<h1 class='page-title'>Assistente IA</h1>", unsafe_allow_html=True)
 
     with SessionLocal() as db:
-        # Seleção de contexto (use sua função existente; deve retornar (cong_id, sub_id, label))
+        # render_ai_context_selector deve retornar (cong_id, sub_cong_id, label)
         sel_cong_id, sel_sub_id, sel_label = render_ai_context_selector(user, db, key_prefix="ai")
 
-        # mês/ano de referência
-        ref_tab = get_month_selector("Mês de Referência — Mês")  # não passar key para evitar erro
+        # mês/ano de referência (não passe key para evitar conflito)
+        ref_tab = get_month_selector("Mês de Referência — Mês")
         start_tab, end_tab = month_bounds(ref_tab)
 
         st.divider()
@@ -5691,119 +5691,137 @@ def page_assistente_ia(user):
         user_question = st.text_area("Sua pergunta:", height=120, key="ai_question_text")
 
         if st.button("Analisar com IA", key="ai_analisar_btn"):
+            q = (user_question or "").strip().lower()
+            if not q:
+                st.warning("Digite sua pergunta (ex.: 'total dízimos', 'listar dízimos', 'ofertas missões', 'saídas por tipo').")
+                return
+
             try:
-                # detectar se a pergunta menciona uma congregação específica (quando contexto = Todas)
+                # Se contexto = Todas as congregações (sel_cong_id is None),
+                # tenta detectar nome de congregação na pergunta (substring match).
                 target_cong_id = sel_cong_id
                 target_label = sel_label or "Todas as Congregações"
                 if sel_cong_id is None:
-                    q_lower = (user_question or "").strip().lower()
-                    if q_lower:
-                        congs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
-                        for c in congs:
-                            if c.name and c.name.lower() in q_lower:
-                                target_cong_id = c.id
-                                target_label = c.name
-                                break
+                    congs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+                    for c in congs:
+                        if c.name and c.name.lower() in q:
+                            target_cong_id = c.id
+                            target_label = c.name
+                            break
 
-                # buscar detalhes
+                # busca os detalhes (função existente que não altera dados)
                 details = query_financial_details_for_ai(db, start_tab, end_tab, cong_id=target_cong_id, sub_cong_id=sel_sub_id)
 
-                q = (user_question or "").lower()
+                # Palavras-chave
+                has_diz = any(k in q for k in ("diz", "dízim", "dizimista", "dizimistas"))
+                has_ofert = "ofert" in q
+                has_miss = any(k in q for k in ("miss", "missões", "missao"))
+                has_culto = "culto" in q
+                has_saida = any(k in q for k in ("said", "saída", "saida"))
+                wants_list = any(k in q for k in ("listar", "lista", "detalhe", "detalhes", "nomes", "últimos", "ultimos"))
+                wants_payment_breakdown = any(k in q for k in ("pix", "dinheiro", "forma", "pagamento"))
+                wants_total = "total" in q or "quanto" in q or "soma" in q
 
-                # Com base no texto do usuário, montar resposta SINTÉTICA e CONCISA
+                # Se nenhuma seção foi identificada, pedir que especifique (evita respostas genéricas)
+                if not (has_diz or has_ofert or has_saida):
+                    st.info("Especifique o que deseja: 'dízimos', 'ofertas' (culto/missões), 'dizimistas', 'saídas'.")
+                    return
+
+                # Montar resposta — adiciona APENAS os blocos solicitados
                 lines = []
+                title = f"Resposta — {target_label} — {ref_tab.strftime('%m/%Y') if hasattr(ref_tab,'strftime') else str(ref_tab)}"
+                lines.append(f"<strong>{title}</strong>")
 
-                # Dízimos detalhados / solicitados
-                if "diz" in q or "dízim" in q:
-                    # Se usuário quer listagem completa: detectar palavras como "listar" ou "detalhe"
-                    wants_list = any(k in q for k in ("listar", "lista", "detalhe", "detalhes", "nomes"))
-                    lines.append(f"Total Dízimos: {format_currency_br(details['total_dizimos'])}")
-                    # por forma de pagamento (conciso)
-                    if details.get("by_payment_method"):
-                        for pm, val in details["by_payment_method"].items():
-                            lines.append(f"Dízimos ({pm}): {format_currency_br(val)}")
-                    # se pediu lista/detalhe, mostrar até 10 últimos lançamentos (conciso)
-                    if wants_list:
+                # --- Dízimos ---
+                if has_diz:
+                    # total de dízimos (sempre incluir total quando pede dizimos)
+                    lines.append(f"• Total Dízimos: {format_currency_br(details.get('total_dizimos', 0.0))}")
+
+                    # breakdown por forma de pagamento — só se solicitado explicitamente ou se perguntaram por 'pix'/'dinheiro'
+                    if wants_payment_breakdown or any(k in q for k in ("pix","dinheiro","forma","pagamento")):
+                        by_pm = details.get("by_payment_method", {})
+                        if by_pm:
+                            for pm, val in by_pm.items():
+                                lines.append(f"  ◦ Dízimos ({pm}): {format_currency_br(val)}")
+
+                    # listar dízimos/dizimistas se pediu detalhes/nomes
+                    if wants_list or any(k in q for k in ("dizimistas", "nomes")):
                         tlist = details.get("tithes_list", [])[:10]
                         if tlist:
-                            lines.append("Últimos dízimos (até 10):")
+                            lines.append("• Últimos dízimos (até 10):")
                             for t in tlist:
                                 date_s = t["date"].strftime("%d/%m/%Y") if hasattr(t["date"], "strftime") else str(t["date"])
-                                lines.append(f"  • {date_s} — {t['tither_name'] or '—'} — {format_currency_br(t['amount'])} — {t['payment_method']}")
+                                name = t["tither_name"] or "—"
+                                pm = t.get("payment_method","—")
+                                lines.append(f"  ◦ {date_s} — {name} — {format_currency_br(t['amount'])} — {pm}")
                         else:
-                            lines.append("Últimos dízimos: nenhum registro.")
-                # Ofertas
-                if "ofert" in q:
-                    # ofertas de culto (service logs)
-                    lines.append(f"Total Ofertas (Cultos): {format_currency_br(details.get('total_ofertas_culto', 0.0))}")
-                    # ofertas de missões (service logs + transações missões)
-                    miss_total = float(details.get("total_ofertas_missoes", 0.0)) + float(details.get("total_ofertas_missoes_transacoes", 0.0))
-                    lines.append(f"Total Ofertas (Missões): {format_currency_br(miss_total)}")
-                    # ofertas registradas como transações categoria 'oferta'
-                    lines.append(f"Total Ofertas (Categoria 'Oferta' - transações): {format_currency_br(details.get('total_ofertas_transacoes', 0.0))}")
-                    # se pediu detalhes, listar alguns lançamentos
-                    if any(k in q for k in ("listar", "detalhe", "detalhes", "últimos")):
-                        c_list = details.get("service_offers_culto_list", [])[:8]
-                        if c_list:
-                            lines.append("Ex.: Ofertas (Culto) — últimos lançamentos:")
+                            lines.append("• Últimos dízimos: nenhum registro.")
+
+                # --- Ofertas ---
+                if has_ofert:
+                    # decide mostrar culto / missões dependendo da pergunta:
+                    include_culto = has_culto or (has_ofert and not has_miss) or (has_ofert and not has_culto and not has_miss)
+                    include_missoes = has_miss or (has_ofert and not has_culto and not has_miss) or (has_ofert and has_miss)
+
+                    # ofertas culto
+                    if include_culto:
+                        lines.append(f"• Total Ofertas (Cultos): {format_currency_br(details.get('total_ofertas_culto', 0.0))}")
+                        if wants_list and details.get("service_offers_culto_list"):
+                            c_list = details["service_offers_culto_list"][:8]
+                            lines.append("  ◦ Ex.: Ofertas (Culto) — últimos:")
                             for it in c_list:
                                 ds = it["date"].strftime("%d/%m/%Y") if hasattr(it["date"], "strftime") else str(it["date"])
-                                lines.append(f"  • {ds} — {format_currency_br(it['oferta'])}")
-                # Saídas
-                if "said" in q or "saída" in q or "saida" in q:
-                    # total geral de saídas
-                    total_saidas = sum(details.get("total_saidas_by_category", {}).values()) if details.get("total_saidas_by_category") else 0.0
-                    lines.append(f"Total Saídas (Geral): {format_currency_br(total_saidas)}")
-                    # total por tipo (categoria)
-                    if details.get("total_saidas_by_category"):
-                        # listar categorias com valor (conciso) em ordem decrescente
-                        cat_items = sorted(details["total_saidas_by_category"].items(), key=lambda x: -x[1])[:10]
-                        for cat, val in cat_items:
-                            lines.append(f"  • {cat}: {format_currency_br(val)}")
-                    # se quiser detalhes de transações, mostrar até 8
-                    if any(k in q for k in ("listar", "detalhe", "detalhes", "últimos")):
-                        txs = details.get("saidas_list", [])[:8]
-                        if txs:
-                            lines.append("Ex.: Saídas — últimos lançamentos:")
-                            for t in txs:
-                                ds = t["date"].strftime("%d/%m/%Y") if hasattr(t["date"], "strftime") else str(t["date"])
-                                lines.append(f"  • {ds} — {t['category']} — {format_currency_br(t['amount'])}")
+                                lines.append(f"    ▸ {ds} — {format_currency_br(it['oferta'])}")
 
-                # Totais gerais entre congregações (quando o usuário pediu explicitamente "total geral" ou selecionou 'Todas')
-                if "total geral" in q or (sel_cong_id is None and ("total" in q or "resumo" in q or "geral" in q)):
-                    # Total geral entradas dízimos e ofertas (cultos) todas congregações (respecting filters above)
-                    lines.append(f"Total Geral Dízimos: {format_currency_br(details.get('total_dizimos',0.0))}")
-                    # ofertas culto e missões (incluindo transações)
-                    total_of_cult = details.get("total_ofertas_culto", 0.0)
-                    total_of_miss = float(details.get("total_ofertas_missoes",0.0)) + float(details.get("total_ofertas_missoes_transacoes",0.0))
-                    lines.append(f"Total Geral Ofertas (Cultos): {format_currency_br(total_of_cult)}")
-                    lines.append(f"Total Geral Ofertas (Missões): {format_currency_br(total_of_miss)}")
-                    lines.append(f"Total Geral Ofertas (Categoria transações): {format_currency_br(details.get('total_ofertas_transacoes',0.0))}")
-                    # saídas por tipo
-                    if details.get("total_saidas_by_category"):
-                        lines.append("Total Geral Saídas por Tipo (top):")
-                        cat_items = sorted(details["total_saidas_by_category"].items(), key=lambda x: -x[1])[:8]
-                        for cat, val in cat_items:
-                            lines.append(f"  • {cat}: {format_currency_br(val)}")
+                    # ofertas missões (service logs + transações missões)
+                    if include_missoes:
+                        miss_total = float(details.get("total_ofertas_missoes", 0.0)) + float(details.get("total_ofertas_missoes_transacoes", 0.0))
+                        lines.append(f"• Total Ofertas (Missões): {format_currency_br(miss_total)}")
+                        if wants_list and details.get("service_offers_missoes_list"):
+                            m_list = details["service_offers_missoes_list"][:8]
+                            lines.append("  ◦ Ex.: Ofertas (Missões) — últimos:")
+                            for it in m_list:
+                                ds = it["date"].strftime("%d/%m/%Y") if hasattr(it["date"], "strftime") else str(it["date"])
+                                lines.append(f"    ▸ {ds} — {format_currency_br(it['oferta'])}")
 
-                # Se nenhuma palavra-chave clara, responder com resumo conciso padrão (dízimos + ofertas culto + ofertas missões)
-                if not lines:
-                    lines.append(f"Resumo — {target_label} — {ref_tab.strftime('%m/%Y') if hasattr(ref_tab,'strftime') else str(ref_tab)}")
-                    lines.append(f"  • Dízimos: {format_currency_br(details.get('total_dizimos',0.0))}")
-                    lines.append(f"  • Ofertas (Cultos): {format_currency_br(details.get('total_ofertas_culto',0.0))}")
-                    miss_total = float(details.get("total_ofertas_missoes",0.0)) + float(details.get("total_ofertas_missoes_transacoes",0.0))
-                    lines.append(f"  • Ofertas (Missões): {format_currency_br(miss_total)}")
+                    # ofertas registradas como transações (categoria 'Oferta') — mostrar se pedirem especificamente
+                    if "categoria" in q or "transa" in q or "transações" in q or "transacoes" in q:
+                        lines.append(f"• Total Ofertas (Categoria 'Oferta' - transações): {format_currency_br(details.get('total_ofertas_transacoes',0.0))}")
 
-                # Montar bloco limpo e conciso (sem exposições de consultas)
+                # --- Saídas ---
+                if has_saida:
+                    # total geral de saídas por categoria (incluir se pediram saídas)
+                    total_by_cat = details.get("total_saidas_by_category", {})
+                    total_saidas = sum(total_by_cat.values()) if total_by_cat else 0.0
+                    lines.append(f"• Total Saídas (Geral): {format_currency_br(total_saidas)}")
+                    # listar top categorias (conciso)
+                    if total_by_cat:
+                        items = sorted(total_by_cat.items(), key=lambda x: -x[1])[:8]
+                        for cat, val in items:
+                            lines.append(f"  ◦ {cat}: {format_currency_br(val)}")
+                    # listar transações se pediu detalhes
+                    if wants_list and details.get("saidas_list"):
+                        txs = details["saidas_list"][:8]
+                        lines.append("• Ex.: Saídas — últimos lançamentos:")
+                        for t in txs:
+                            ds = t["date"].strftime("%d/%m/%Y") if hasattr(t["date"], "strftime") else str(t["date"])
+                            lines.append(f"  ◦ {ds} — {t['category']} — {format_currency_br(t['amount'])}")
+
+                # Montar HTML limpo e conciso (sem explicar consultas)
                 html_lines = []
                 for ln in lines:
-                    if ln.startswith("  •"):
-                        html_lines.append(f"<li>{ln[3:]}</li>")
-                    elif ln.startswith("  "):
+                    # título em strong já inserido
+                    if ln.startswith("<strong>"):
+                        html_lines.append(f"<li>{ln}</li>")
+                    elif ln.startswith("• "):
+                        html_lines.append(f"<li style='margin-top:6px'>{ln[2:]}</li>")
+                    elif ln.startswith("  ◦ ") or ln.startswith("  ◦"):
                         html_lines.append(f"<li style='margin-left:12px'>{ln.strip()}</li>")
+                    elif ln.startswith("    ▸") or ln.startswith("  ▸"):
+                        html_lines.append(f"<li style='margin-left:24px'>{ln.strip()}</li>")
                     else:
-                        # título/linha principal
-                        html_lines.append(f"<li><strong>{ln}</strong></li>")
+                        # items simples
+                        html_lines.append(f"<li>{ln}</li>")
 
                 html = "<div style='background:#e8f4ff;border-radius:8px;padding:16px;color:#0b4f73;'>"
                 html += "<ul style='margin:0;padding-left:18px;line-height:1.55;'>"
@@ -5815,6 +5833,9 @@ def page_assistente_ia(user):
 
             except Exception as e:
                 st.error("Ocorreu um erro ao gerar a análise. Verifique os logs do servidor.")
+                # Para depuração local, você pode descomentar a linha abaixo:
+                # st.exception(e)
+
                 # opcional: para debug local, descomente a linha abaixo
                 # st.exception(e)
             # ... (O restante do código para o Tesoureiro Missionário permanece o mesmo)
