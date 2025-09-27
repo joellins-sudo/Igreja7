@@ -5589,25 +5589,32 @@ def main():
 # ===================== PAGE: ASSISTENTE IA (VERSÃO ESTÁVEL E FINAL) =====================
 def page_assistente_ia(user: "User"):
     """
-    Página do Assistente IA — permite selecionar contexto (inclui 'Todas as Congregações' para SEDE),
-    escolher mês/ano, escrever a pergunta e obter um resumo limpo e direto.
-    Não altera a lógica do banco — apenas agrega a opção 'Todas as Congregações' e melhora formatação.
+    Página do Assistente IA — mantém toda a lógica existente.
+    Corrige erro: não passa 'key' para get_month_selector (que não aceita esse argumento).
+    Exibe resposta limpa e formatada.
+    IMPORTANTE: depende das funções auxiliares que você já tem:
+    - render_ai_context_selector(db, user, key_prefix=...)
+    - get_month_selector(prompt) -> retorna um objeto compatível com month_bounds()
+    - month_bounds(ref) -> (start_dt, end_dt)
+    - summarize_financials_for_ai(db, start, end, cong_id, sub_cong_id) -> dict com chaves esperadas
+    - format_currency_br(valor)
+    - SessionLocal
     """
     ensure_seed()
 
     with SessionLocal() as db:
         st.markdown("<h1 class='page-title'>Assistente IA</h1>", unsafe_allow_html=True)
 
-        # === Contexto (inclui opção "Todas as Congregações" para SEDE) ===
+        # Seleção do contexto (usa a sua função existente; inclui 'Todas as Congregações' quando aplicável)
         cong_id, sub_cong_id, cong_label = render_ai_context_selector(user, db, key_prefix="ai")
 
-        # Seleção do mês/ano de referência (mantém sua UI existente)
-        ref_tab = get_month_selector("Mês de Referência — Mês", key="ai_ref_month")
+        # Seleção do mês/ano de referência — sem passar 'key' (corrigido)
+        ref_tab = get_month_selector("Mês de Referência — Mês")
         start_tab, end_tab = month_bounds(ref_tab)
 
         st.divider()
 
-        # === Campo de pergunta ===
+        # Campo de pergunta
         st.subheader("2. Faça sua Pergunta")
         question_text = st.text_area(
             "Sua pergunta:",
@@ -5619,48 +5626,68 @@ def page_assistente_ia(user: "User"):
         # Botão para analisar com IA
         analyze_clicked = st.button("Analisar com IA", key="ai_analyze_btn", type="primary")
 
-        # Área de resposta
+        # Container para resposta
         resposta_container = st.empty()
 
         if analyze_clicked:
-            # Validações simples
+            # Permissões: se não for SEDE e não escolheu congregação válida, bloqueia
             if cong_id is None and user.role != "SEDE":
-                # Usuário sem permissão para ver todas
                 resposta_container.error("Você não tem permissão para consultar 'Todas as Congregações'.")
-            else:
+                return
+
+            try:
+                # Consulta resumo (reabre sessão para segurança)
+                with SessionLocal() as db_q:
+                    summary = summarize_financials_for_ai(
+                        db_q, start_tab, end_tab,
+                        cong_id=cong_id, sub_cong_id=sub_cong_id
+                    )
+
+                # Monta label do período (robusto)
                 try:
-                    # Reabre sessão para consultas de resumo
-                    with SessionLocal() as db_q:
-                        summary = summarize_financials_for_ai(
-                            db_q, start_tab, end_tab,
-                            cong_id=cong_id, sub_cong_id=sub_cong_id
-                        )
+                    # se ref_tab for date/datetime
+                    period_label = ref_tab.strftime("%m/%Y")
+                except Exception:
+                    period_label = str(ref_tab)
 
-                    # Monta resposta limpa e bem formatada (sem listar fontes)
-                    lines = []
-                    # Cabeçalho curto (contexto)
-                    lines.append(f"**Resumo financeiro — {cong_label} — {ref_tab.strftime('%B/%Y') if hasattr(ref_tab, 'month') else ''}**")
-                    lines.append("")  # linha em branco
+                # Formata resposta limpa — sem listar fontes ou dados extras
+                lines = []
+                lines.append(f"**Resumo financeiro — {cong_label} — {period_label}**")
+                lines.append("")  # linha em branco para separar
 
-                    # Valores principais (cada um em sua própria linha)
-                    lines.append(f"- **Total Dízimos:** {format_currency_br(summary.get('total_dizimos', 0.0))}")
-                    lines.append(f"- **Total Ofertas (Cultos):** {format_currency_br(summary.get('total_ofertas_culto', 0.0))}")
-                    lines.append(f"- **Total Ofertas (Missões):** {format_currency_br(summary.get('total_ofertas_missoes', 0.0))}")
-                    lines.append(f"- **Total Ofertas (Transações - categoria \"Oferta\"):** {format_currency_br(summary.get('total_ofertas_transacoes', 0.0))}")
+                # Inserir as linhas principais, cada uma em sua própria linha.
+                # Não mudamos a lógica: apenas usamos as chaves que a função de resumo deve retornar.
+                total_dizimos = summary.get("total_dizimos", 0.0)
+                total_ofertas_culto = summary.get("total_ofertas_culto", 0.0)
+                total_ofertas_missoes = summary.get("total_ofertas_missoes", 0.0)
+                total_ofertas_transacoes = summary.get("total_ofertas_transacoes", 0.0)
 
-                    # Junta as linhas em markdown
-                    resposta_md = "\n".join(lines)
+                lines.append(f"- **Total Dízimos:** {format_currency_br(total_dizimos)}")
+                lines.append(f"- **Total Ofertas (Cultos):** {format_currency_br(total_ofertas_culto)}")
+                lines.append(f"- **Total Ofertas (Missões):** {format_currency_br(total_ofertas_missoes)}")
+                lines.append(f"- **Total Ofertas (Categoria 'Oferta' - transações):** {format_currency_br(total_ofertas_transacoes)}")
 
-                    # Exibe o resultado de forma limpa (caixa azul clara)
-                    resposta_container.info(resposta_md)
+                # Se houver breakdown por forma de pagamento (opcional), exibir de forma limpa
+                pay_breakdown = summary.get("by_payment_method")
+                if isinstance(pay_breakdown, dict) and pay_breakdown:
+                    lines.append("")  # separador
+                    lines.append("- **Dízimos por forma de pagamento:**")
+                    for pm, val in pay_breakdown.items():
+                        lines.append(f"  - {pm}: {format_currency_br(val)}")
 
-                except Exception as e:
-                    # Mensagem amigável em caso de erro (sem vazar stack)
-                    resposta_container.error("Ocorreu um erro ao gerar a análise. Verifique os logs do servidor.")
-                    # opcional: log no console para debug do desenvolvedor
-                    import traceback
-                    print("Erro em page_assistente_ia:", e)
-                    traceback.print_exc()
+                resposta_md = "\n".join(lines)
+
+                # Exibe a resposta de forma limpa (caixa de informação)
+                resposta_container.info(resposta_md)
+
+            except Exception as e:
+                # Mensagem amigável sem vazar stack
+                resposta_container.error("Ocorreu um erro ao gerar a análise. Verifique os logs do servidor.")
+                # Log para desenvolvedor (mantemos para debug; não exibimos ao usuário)
+                import traceback
+                print("Erro em page_assistente_ia:", e)
+                traceback.print_exc()
+
 
 
             # ... (O restante do código para o Tesoureiro Missionário permanece o mesmo)
