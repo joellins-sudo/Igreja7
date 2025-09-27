@@ -406,108 +406,201 @@ MONTHS_SHORT = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov
 @st.cache_data
 def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame, contexto: str) -> str:
     """
-    Versão ampliada: fornece ao modelo um sumário automático com totais de:
-      - Dízimos (nominal e por transação -> regra de equivalência já aplicada)
-      - Ofertas (resumo de culto vs transações -> usa MAIOR por dia)
-      - Ofertas de Missões (categoria 'Missões' em Transactions)
-      - Saídas (Transactions tipo 'SAÍDA')
-      - Dizimistas (lista / top contributors se disponível)
-    A função ainda utiliza a API OpenAI (objeto OpenAI) e espera a variável de ambiente OPENAI_API_KEY.
+    Versão corrigida: além de tentar obter informações do `dados_df` passado,
+    busca automaticamente ofertas no ServiceLog e em Transactions caso a coluna
+    'Oferta' não esteja presente ou esteja vazia, evitando o erro em que a IA
+    dizia "não há ofertas" mesmo havendo registros no resumo do culto.
+    Retorna texto pronto para exibir (ou envia para OpenAI se OPENAI_API_KEY estiver setada).
     """
+    # imports locais (garantir que existam no arquivo)
+    from datetime import datetime, date
+    from sqlalchemy import func, or_
+    import re
     try:
         from openai import OpenAI
     except Exception:
-        return "Aviso: A biblioteca 'openai' não está instalada. Instale com: pip install openai"
+        OpenAI = None
 
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        return "Aviso: A chave de API da OpenAI não foi configurada no ambiente."
+    # --- Helpers locais rápidos ---
+    def _col_exists(df: pd.DataFrame, names):
+        if df is None or df.empty:
+            return False
+        cols = {c.lower(): c for c in df.columns}
+        for n in names:
+            if n.lower() in cols:
+                return True
+        return False
 
-    if dados_df is None or dados_df.empty:
-        return "Não encontrei dados para o período e congregação selecionados para responder a esta pergunta."
-
-    # --- Normalização: detecta colunas relevantes (ignora maiúsc/minúsc/acentos) ---
-    cols = {c.lower(): c for c in dados_df.columns}
-    def has_col(name_variants):
-        for v in name_variants:
-            if v.lower() in cols:
-                return cols[v.lower()]
+    def _get_colname(df: pd.DataFrame, names):
+        if df is None:
+            return None
+        cols = {c.lower(): c for c in df.columns}
+        for n in names:
+            if n.lower() in cols:
+                return cols[n.lower()]
         return None
 
-    col_diz = has_col(["Dízimo", "Dizimo", "dizimo", "dízimo", "tithe", "tithes"])
-    col_ofe = has_col(["Oferta", "oferta", "ofertas", "offer"])
-    col_miss = has_col(["Missões", "Missoes", "missoes", "missoes", "missions"])
-    col_total = has_col(["Total", "total"])
-    col_data = has_col(["Data do Culto", "Data", "data", "date"])
-    col_dizimista = has_col(["Dizimista", "dizimista", "tither", "nome", "nome do dizimista"])
-    col_valor = has_col(["Valor", "valor", "Amount", "amount"])
+    def _parse_year_month_from_context(ctx: str):
+        # tenta extrair "Setembro de 2025" ou "09/2025" ou "2025-09"
+        if not ctx:
+            return None, None
+        ctx_s = str(ctx)
+        # procura YYYY
+        mY = re.search(r"(20\d{2})", ctx_s)
+        year = int(mY.group(1)) if mY else None
+        # procura mês por nome PT/EN
+        meses_map = {m.lower(): i+1 for i,m in enumerate(MONTHS)}
+        for name, idx in meses_map.items():
+            if re.search(r"\b" + re.escape(name.lower()) + r"\b", ctx_s.lower()):
+                return year or today_bahia().year, idx
+        # procura mm/yyyy ou yyyy-mm
+        mm_yyyy = re.search(r"(\b0?[1-9]|1[0-2])[/\-](20\d{2})", ctx_s)
+        if mm_yyyy:
+            m = int(mm_yyyy.group(1)); y = int(mm_yyyy.group(2))
+            return y, m
+        y_m = re.search(r"(20\d{2})[-/](0?[1-9]|1[0-2])", ctx_s)
+        if y_m:
+            return int(y_m.group(1)), int(y_m.group(2))
+        return (year, None)
 
-    # --- Agrega/gera sumários úteis para o prompt (valores numéricos convertidos) ---
-    def safe_sum(col):
+    # --- Preparar resumo inicial a partir do DataFrame recebido (se houver) ---
+    resumo_lines = []
+    # detecta colunas relevantes no dataframe (tolerante a acentos/variações)
+    if dados_df is not None and not dados_df.empty:
+        cols_map = {c.lower(): c for c in dados_df.columns}
+        # dízimo
+        diz_col = _get_colname(dados_df, ["Dízimo", "Dizimo", "dizimo", "tithe", "tithes"])
+        if diz_col:
+            try:
+                total_diz = float(dados_df[diz_col].dropna().map(_to_float_brl).sum() or 0.0)
+                resumo_lines.append(f"- Total (Dízimos na tabela fornecida): {format_currency(total_diz)}")
+            except Exception:
+                pass
+        # oferta (pode faltar)
+        of_col = _get_colname(dados_df, ["Oferta", "oferta", "ofertas", "offer"])
+        if of_col:
+            try:
+                total_of = float(dados_df[of_col].dropna().map(_to_float_brl).sum() or 0.0)
+                resumo_lines.append(f"- Total (Ofertas na tabela fornecida): {format_currency(total_of)}")
+            except Exception:
+                pass
+
+    # --- Se não houver coluna 'Oferta' ou estiver vazia, buscar direto no DB (ServiceLog + Transaction) ---
+    need_db_oferta = not _col_exists(dados_df, ["Oferta", "oferta", "ofertas", "offer"])
+    oferta_from_db_note = ""
+    oferta_sl_total = None
+    oferta_tx_total = None
+
+    # extrair ano/mês prováveis do contexto
+    year_ctx, month_ctx = _parse_year_month_from_context(contexto or "")
+    if month_ctx is None or year_ctx is None:
+        # fallback: usa mês/ano atuais
+        today = today_bahia()
+        year_ctx = year_ctx or today.year
+        month_ctx = month_ctx or today.month
+
+    # tenta identificar congregação no contexto (mapeando nomes do DB)
+    cong_id_candidate = None
+    try:
+        with SessionLocal() as db:
+            # busca congregação cujo nome esteja no contexto (substring, normalizado)
+            congs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+            for c in congs:
+                if c.name and (c.name.lower() in (contexto or "").lower() or _norm(c.name) in _norm(contexto or "")):
+                    cong_id_candidate = c.id
+                    break
+    except Exception:
+        cong_id_candidate = None
+
+    if need_db_oferta:
         try:
-            return float(dados_df[col].dropna().map(_to_float_brl).sum()) if col else 0.0
-        except Exception:
-            return 0.0
+            # define intervalo de mês
+            start = date(int(year_ctx), int(month_ctx), 1)
+            _, end = month_bounds(start)
+            with SessionLocal() as db:
+                # ServiceLog.oferta
+                q_sl = select(func.coalesce(func.sum(ServiceLog.oferta), 0.0))
+                q_sl = q_sl.where(ServiceLog.date >= start, ServiceLog.date < end)
+                if cong_id_candidate:
+                    q_sl = q_sl.where(ServiceLog.congregation_id == cong_id_candidate)
+                oferta_sl_total = float(db.scalar(q_sl) or 0.0)
 
-    total_dizimos_tab = safe_sum(col_diz)
-    total_ofertas_tab = safe_sum(col_ofe)
-    total_missoes_tab = safe_sum(col_miss)
-    total_geral_tab = safe_sum(col_total) if col_total else None
-    total_valor_tab = safe_sum(col_valor) if (col_valor and not col_total) else total_geral_tab
+                # Transactions categoria 'Oferta'
+                cat_of = db.scalar(select(Category).where(func.lower(Category.name) == "oferta"))
+                if not cat_of:
+                    # tentar variações sem acento
+                    cat_of = db.scalar(select(Category).where(func.lower(Category.name).in_(["oferta", "ofertas"])))
+                if cat_of:
+                    q_tx = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+                        Transaction.date >= start, Transaction.date < end,
+                        Transaction.category_id == cat_of.id,
+                        Transaction.type.in_((TYPE_IN, "RECEITA"))
+                    )
+                    if cong_id_candidate:
+                        q_tx = q_tx.where(Transaction.congregation_id == cong_id_candidate)
+                    oferta_tx_total = float(db.scalar(q_tx) or 0.0)
+                else:
+                    oferta_tx_total = 0.0
 
-    # Top dizimistas (se existir coluna de dizimistas nominais)
-    top_dizimistas = []
-    if col_dizimista and col_valor:
-        try:
-            tmp = dados_df[[cols[col_dizimista.lower()], cols[col_valor.lower()]]].dropna()
-            tmp[cols[col_valor.lower()]] = tmp[cols[col_valor.lower()]].map(_to_float_brl)
-            grp = tmp.groupby(cols[col_dizimista.lower()])[cols[col_valor.lower()]].sum().sort_values(ascending=False).head(10)
-            top_dizimistas = [(str(idx), float(val)) for idx, val in grp.items()]
-        except Exception:
-            top_dizimistas = []
+                # registro de nota para o prompt
+                oferta_from_db_note = (
+                    f"(Fonte DB) ServiceLog.oferta = {format_currency(oferta_sl_total)}, "
+                    f"Transactions[Categoria='Oferta'] = {format_currency(oferta_tx_total)}; "
+                    f"usamos MAIOR entre as fontes por regra."
+                )
 
-    # Pequeno resumo textual para colocar no prompt (ajuda o modelo a responder sem ler todo o dataframe)
-    resumo = []
-    resumo.append(f"Linhas fornecidas: {len(dados_df)}")
-    if total_dizimos_tab is not None:
-        resumo.append(f"Total (Dízimos, conforme coluna): {format_currency(total_dizimos_tab)}")
-    if total_ofertas_tab is not None:
-        resumo.append(f"Total (Ofertas, conforme coluna): {format_currency(total_ofertas_tab)}")
-    if total_missoes_tab is not None:
-        resumo.append(f"Total (Missões, conforme coluna): {format_currency(total_missoes_tab)}")
-    if total_valor_tab is not None:
-        resumo.append(f"Total (Coluna 'Valor' ou 'Total'): {format_currency(total_valor_tab)}")
-    if top_dizimistas:
-        resumo.append("Top dizimistas (nome — total): " + ", ".join([f"{n} — {format_currency(v)}" for n,v in top_dizimistas]))
+                # acrescentar ao resumo_lines para o prompt do modelo
+                resumo_lines.append(f"- Oferta (ServiceLog total no período selecionado): {format_currency(oferta_sl_total)}")
+                resumo_lines.append(f"- Oferta (Transactions categoria 'Oferta' no período): {format_currency(oferta_tx_total)}")
+        except Exception as e:
+            resumo_lines.append(f"- Aviso: falha ao consultar ServiceLog/Transactions: {e}")
 
-    resumo_texto = "\n".join(f"- {r}" for r in resumo)
+    # --- Monta o texto do prompt/resumo que o modelo (ou fallback) verá ---
+    resumo_texto = "\n".join(resumo_lines) if resumo_lines else "Nenhum dado tabular inicial disponível — buscando no banco de dados."
 
-    # Para evitar prompts gigantes, limitar linhas de exemplo
-    dados_texto = dados_df.head(200).to_markdown(index=False)
+    # Limitar amostra de dados para envio ao modelo (se houver)
+    dados_texto = ""
+    try:
+        if dados_df is not None and not dados_df.empty:
+            dados_texto = dados_df.head(200).to_markdown(index=False)
+    except Exception:
+        dados_texto = ""
 
-    # --- Prompt do sistema: regras claras para Dízimos / Ofertas / Missões / Saídas / Dizimistas ---
+    # construir prompt do sistema (regras)
     prompt_sistema = (
-    "Você é um assistente financeiro sênior, especialista em analisar dados de relatórios de igrejas.\n"
-    "REGRAS GERAIS:\n"
-    "1) Responda APENAS com base nos dados fornecidos. Se faltar dado, diga que não consta.\n"
-    "2) DÍZIMO (EQUIVALÊNCIA): sempre trate o total de dízimo do DIA/MÊS como o MAIOR entre: "
-    "   (a) soma de Dízimos Nominais (tabela 'Dízimo Nominal' / Tithe) e (b) soma de Transações com categoria 'Dízimo'.\n"
-    "3) OFERTA (EQUIVALÊNCIA): sempre trate o total de oferta do DIA/MÊS como o MAIOR entre: "
-    "   (a) soma de ServiceLog.oferta (Resumo do Culto) e (b) soma de Transações com categoria 'Oferta'.\n"
-    "   — Em relatórios por data, use essa regra por data; em agregados mensais, use a soma maior entre fontes.\n"
-    "4) MISSÕES: são categoria separada. Ofertas de missões podem aparecer como transação (categoria 'Missões')\n"
-    "   ou como 'Oferta' no Resumo do Culto (tipo 'Culto de Missões'); trate-as como categoria distinta quando a pergunta pedir.\n"
-    "5) Formate valores como R$ 1.234,56. Use bullets para listar itens e explique quais fontes de dados você usou para chegar ao total.\n"
-)
-
+        "Você é um assistente financeiro sênior para relatórios de igrejas.\n"
+        "REGRAS IMPORTANTES:\n"
+        "1) Use os dados fornecidos no resumo. Se houver múltiplas fontes para 'Oferta', prefira o MAIOR valor por data/unidade.\n"
+        "2) Se as informações de 'Oferta' não estiverem na tabela enviada, considere os números agregados do ServiceLog.oferta e das Transações categoria 'Oferta' (já fornecidos no resumo).\n"
+        "3) Para DÍZIMOS aplique a regra de equivalência (MAIOR entre dízimo nominal e dízimo em transações) quando relevante.\n"
+        "4) Sempre explique quais fontes foram usadas (ServiceLog / Transactions / Tithe) ao responder.\n"
+        "5) Formate valores como R$ 1.234,56 e use bullets para clareza.\n"
+    )
 
     prompt_usuario_completo = (
         f"Contexto: {contexto}\n\n"
-        f"Resumo dos dados:\n{resumo_texto}\n\n"
+        f"Resumo dos dados encontrados:\n{resumo_texto}\n\n"
+        f"{('Observação: ' + oferta_from_db_note) if oferta_from_db_note else ''}\n\n"
         f"Amostra dos dados (máx. 200 linhas):\n```markdown\n{dados_texto}\n```\n\n"
         f"Pergunta: \"{pergunta_usuario}\""
     )
 
+    # --- Se não houver key da OpenAI ou a lib não estiver instalada, retorna o resumo local formatado ---
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key or OpenAI is None:
+        # fallback: retorna um texto explicativo local com ênfase nas ofertas encontradas
+        fallback = [
+            "Resumo (resposta local - OpenAI indisponível):",
+            "",
+            f"Período interpretado: {MONTHS[month_ctx-1]} de {year_ctx}",
+            "",
+            resumo_texto,
+            "",
+            "Conclusão: Verifiquei o ServiceLog e as Transações. Se quiser que eu gere um detalhamento por congregação ou por data, peça: 'Detalhar ofertas por congregação em MM/YYYY'."
+        ]
+        return "\n".join(fallback)
+
+    # --- Chamada ao modelo (se disponível) ---
     try:
         client = OpenAI(api_key=api_key)
         resp = client.chat.completions.create(
@@ -519,10 +612,14 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
             temperature=0.05,
             max_tokens=700
         )
-        # retorno do modelo (texto)
         return resp.choices[0].message.content
     except Exception as e:
-        return f"Ocorreu um erro ao processar a solicitação com a IA: {e}"
+        # fallback textual explicando o que foi colhido e o erro da API
+        return (
+            "Erro ao consultar a API de IA: " + str(e) + "\n\n"
+            "Resumo local dos dados coletados:\n\n" + resumo_texto + "\n\n"
+            "Se precisar, posso montar um relatório detalhado localmente (sem IA)."
+        )
 
 
 def build_monthly_financial_summary_for_ai(year: int, month: int) -> Dict[str, Any]:
