@@ -2045,7 +2045,7 @@ def get_dashboard_summary(cong_id: int, start: date, end: date):
             "total_saida": total_saida,
             "saldo": saldo,
         }
-
+ 
 
 @st.cache_data
 # 1. O parâmetro 'db' foi REMOVIDO daqui
