@@ -525,6 +525,226 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
         return f"Ocorreu um erro ao processar a solicitação com a IA: {e}"
 
 
+def build_monthly_financial_summary_for_ai(year: int, month: int) -> Dict[str, Any]:
+    """
+    Retorna um dicionário com:
+      - 'by_congregation': lista de dicts por congregação com chaves:
+          'congregacao', 'tithe_nominal', 'tithe_tx', 'tithe_total',
+          'oferta_sl', 'oferta_tx', 'oferta_total',
+          'saidas_total_excl_missoes',
+          'dizimistas_pix_count','dizimistas_pix_total',
+          'dizimistas_other_count','dizimistas_other_total'
+      - 'grand_totals': agregados para todo o conjunto
+    Usa SessionLocal internamente.
+    """
+    from datetime import date
+    from sqlalchemy import func, and_, or_
+
+    start = date(year, month, 1)
+    _, end = month_bounds(start)
+
+    results = []
+    grand = defaultdict(float)
+    with SessionLocal() as db:
+        congs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+        # Pre-lookup categorias relevantes
+        cat_oferta = db.scalar(select(Category).where(func.lower(Category.name) == "oferta"))
+        cat_dizimo = db.scalar(select(Category).where(func.lower(Category.name).in_(("dízimo","dizimo"))))
+        # Missões de saída podem ter nome 'Missões (Saída)' ou conter 'missões' - vamos detectar pelos nomes
+        missao_cat_ids_out = [c.id for c in db.scalars(select(Category).where(func.lower(Category.name).like("%miss%"), Category.type == TYPE_OUT)).all()]
+
+        for c in congs:
+            cong_id = c.id
+
+            # TITHES: nominal
+            q_tithe_nom = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
+                Tithe.congregation_id == cong_id, Tithe.date >= start, Tithe.date < end
+            )
+            tithe_nom = float(db.scalar(q_tithe_nom) or 0.0)
+
+            # TITHES: transações categoria "Dízimo"
+            tithe_tx = 0.0
+            if cat_dizimo:
+                q_tithe_tx = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+                    Transaction.congregation_id == cong_id,
+                    Transaction.date >= start, Transaction.date < end,
+                    Transaction.type.in_((TYPE_IN, "RECEITA")),
+                    Transaction.category_id == cat_dizimo.id
+                )
+                tithe_tx = float(db.scalar(q_tithe_tx) or 0.0)
+            tithe_total = max(tithe_nom, tithe_tx)
+
+            # OFERTA: ServiceLog.oferta
+            q_of_sl = select(func.coalesce(func.sum(ServiceLog.oferta), 0.0)).where(
+                ServiceLog.congregation_id == cong_id,
+                ServiceLog.date >= start, ServiceLog.date < end
+            )
+            of_sl = float(db.scalar(q_of_sl) or 0.0)
+
+            # OFERTA: Transaction categoria Oferta
+            of_tx = 0.0
+            if cat_oferta:
+                q_of_tx = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+                    Transaction.congregation_id == cong_id,
+                    Transaction.date >= start, Transaction.date < end,
+                    Transaction.type.in_((TYPE_IN, "RECEITA")),
+                    Transaction.category_id == cat_oferta.id
+                )
+                of_tx = float(db.scalar(q_of_tx) or 0.0)
+            of_total = max(of_sl, of_tx)
+
+            # SAÍDAS: todas as saídas, menos as de Missões
+            q_out = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+                Transaction.congregation_id == cong_id,
+                Transaction.date >= start, Transaction.date < end,
+                Transaction.type.in_((TYPE_OUT, "DESPESA"))
+            )
+            # Excluir categorias de missões por id (se existirem)
+            if missao_cat_ids_out:
+                q_out = q_out.where(~Transaction.category_id.in_(missao_cat_ids_out))
+            else:
+                # fallback: excluir categorias cujo nome contenha 'miss'
+                subq_miss_names = db.scalars(select(Category.id).where(func.lower(Category.name).like("%miss%"))).all()
+                if subq_miss_names:
+                    q_out = q_out.where(~Transaction.category_id.in_(list(subq_miss_names)))
+            saidas_total = float(db.scalar(q_out) or 0.0)
+
+            # DIZIMISTAS: distingue PIX vs Outros
+            q_pix_sum = select(func.coalesce(func.sum(Tithe.amount), 0.0), func.count(Tithe.id)).where(
+                Tithe.congregation_id == cong_id,
+                Tithe.date >= start, Tithe.date < end,
+                func.upper(func.coalesce(Tithe.payment_method, "")) == "PIX"
+            )
+            pix_sum, pix_count = db.execute(q_pix_sum).one()
+            pix_sum = float(pix_sum or 0.0); pix_count = int(pix_count or 0)
+
+            q_other_sum = select(func.coalesce(func.sum(Tithe.amount), 0.0), func.count(Tithe.id)).where(
+                Tithe.congregation_id == cong_id,
+                Tithe.date >= start, Tithe.date < end,
+                func.coalesce(func.upper(Tithe.payment_method), "") != "PIX"
+            )
+            other_sum, other_count = db.execute(q_other_sum).one()
+            other_sum = float(other_sum or 0.0); other_count = int(other_count or 0)
+
+            results.append({
+                "congregacao": c.name,
+                "congregation_id": cong_id,
+                "tithe_nominal": tithe_nom,
+                "tithe_tx": tithe_tx,
+                "tithe_total": tithe_total,
+                "oferta_sl": of_sl,
+                "oferta_tx": of_tx,
+                "oferta_total": of_total,
+                "saidas_total_excl_missoes": saidas_total,
+                "dizimistas_pix_count": pix_count,
+                "dizimistas_pix_total": pix_sum,
+                "dizimistas_other_count": other_count,
+                "dizimistas_other_total": other_sum
+            })
+
+            # acumula grand totals
+            grand["tithe_nominal"] += tithe_nom
+            grand["tithe_tx"] += tithe_tx
+            grand["tithe_total"] += tithe_total
+            grand["oferta_sl"] += of_sl
+            grand["oferta_tx"] += of_tx
+            grand["oferta_total"] += of_total
+            grand["saidas_total_excl_missoes"] += saidas_total
+            grand["dizimistas_pix_count"] += pix_count
+            grand["dizimistas_pix_total"] += pix_sum
+            grand["dizimistas_other_count"] += other_count
+            grand["dizimistas_other_total"] += other_sum
+
+    # formata saída
+    return {"by_congregation": results, "grand_totals": dict(grand), "year": year, "month": month}
+
+
+def responder_pergunta_financeira_mes(year: int, month: int) -> str:
+    """
+    Gera e retorna um relatório textual (em PT-BR) com:
+      - Tudo sobre DÍZIMOS (por congregação e total)
+      - Tudo sobre OFERTAS (por congregação e total)
+      - Tudo sobre SAÍDAS (por congregação e total) EXCLUINDO saídas de Missões
+      - Tudo sobre DIZIMISTAS: contagem e soma por forma de pagamento (PIX vs outros)
+    Se OPENAI_API_KEY estiver presente o texto será enviado ao modelo com instruções para
+    formatar/explicar; senão, será retornado o relatório localmente formatado.
+    """
+    try:
+        payload = build_monthly_financial_summary_for_ai(year, month)
+    except Exception as e:
+        return f"Erro ao coletar dados: {e}"
+
+    # Monta um relatório textual bem organizado (fallback local)
+    header = f"Relatório financeiro - {MONTHS[month-1]} de {year}\n\n"
+    sections = []
+
+    # GRAND TOTALS
+    g = payload["grand_totals"]
+    sec_grand = [
+        "### Totais Consolidados (todas as congregações)",
+        f"- Dízimos (nominal total): {format_currency(g.get('tithe_nominal',0))}",
+        f"- Dízimos (transações): {format_currency(g.get('tithe_tx',0))}",
+        f"- Dízimos (usamos MAIOR entre nominal e transações por unidade): {format_currency(g.get('tithe_total',0))}",
+        f"- Ofertas (ResumoCulto): {format_currency(g.get('oferta_sl',0))}",
+        f"- Ofertas (Transações): {format_currency(g.get('oferta_tx',0))}",
+        f"- Ofertas (usamos MAIOR entre ResumoCulto e Transações por unidade): {format_currency(g.get('oferta_total',0))}",
+        f"- Saídas totais (excl. Missões): {format_currency(g.get('saidas_total_excl_missoes',0))}",
+        f"- Dizimistas por PIX: {int(g.get('dizimistas_pix_count',0))} registros — total {format_currency(g.get('dizimistas_pix_total',0))}",
+        f"- Dizimistas por Dinheiro/Outros: {int(g.get('dizimistas_other_count',0))} registros — total {format_currency(g.get('dizimistas_other_total',0))}",
+    ]
+    sections.append("\n".join(sec_grand))
+
+    # POR CONGREGAÇÃO (lista com detalhes)
+    lines = ["### Detalhamento por congregação"]
+    for r in sorted(payload["by_congregation"], key=lambda x: _norm(x["congregacao"])):
+        lines.append(f"\n**{r['congregacao']}**:")
+        lines.append(f"  - Dízimo (nominal): {format_currency(r['tithe_nominal'])}")
+        lines.append(f"  - Dízimo (transações): {format_currency(r['tithe_tx'])}")
+        lines.append(f"  - Dízimo final (MAIOR): {format_currency(r['tithe_total'])}")
+        lines.append(f"  - Oferta (ResumoCulto): {format_currency(r['oferta_sl'])}")
+        lines.append(f"  - Oferta (Transações): {format_currency(r['oferta_tx'])}")
+        lines.append(f"  - Oferta final (MAIOR): {format_currency(r['oferta_total'])}")
+        lines.append(f"  - Saídas (excl. Missões): {format_currency(r['saidas_total_excl_missoes'])}")
+        lines.append(f"  - Dizimistas PIX: {int(r['dizimistas_pix_count'])} → {format_currency(r['dizimistas_pix_total'])}")
+        lines.append(f"  - Dizimistas Outros: {int(r['dizimistas_other_count'])} → {format_currency(r['dizimistas_other_total'])}")
+
+    sections.append("\n".join(lines))
+
+    report_text = header + "\n\n".join(sections)
+
+    # Se houver OPENAI_API_KEY, envie para o modelo pedindo formatação/resumo executivo
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        # Fallback: retornar relatório local
+        return report_text
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
+        system = (
+            "Você é um assistente financeiro que fornece relatórios concisos e bem estruturados.\n"
+            "Tarefa: usando os dados fornecidos, gere uma resposta com 4 seções claramente marcadas:\n"
+            "  1) DÍZIMOS — explicando a regra de equivalência e mostrando totals por congregação e consolidado.\n"
+            "  2) OFERTAS — explicar as duas fontes (ResumoCulto vs Transações) e mostrar totals (usar MAIOR por unidade antes do agregado).\n"
+            "  3) SAÍDAS (EXCETO MISSÕES) — fornecer total por congregação e consolidado; enfatizar que saídas de MISSÕES foram excluídas.\n"
+            "  4) DIZIMISTAS — separar PIX vs outros (contagem + total) e listar comportamentos relevantes.\n"
+            "Formate com bullets e tabelas simples em markdown; sempre explique que fontes foram usadas (ServiceLog vs Transaction vs Tithe).\n"
+            "Se algum valor for zero ou inexistente, indique claramente 'não consta'.\n"
+        )
+        user_prompt = f"Dados (resumo já agregado por congregação):\n\n{report_text}\n\nPor favor, produza a saída pedida."
+        resp = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role":"system","content":system},{"role":"user","content":user_prompt}],
+            temperature=0.0,
+            max_tokens=800
+        )
+        return resp.choices[0].message.content
+    except Exception as e:
+        # Em caso de erro com a API, retornar o relatório bruto
+        return report_text + f"\n\n(Erro ao chamar OpenAI: {e})"
+        
+
+
 def now_bahia() -> datetime:
     try:
         return datetime.now(TZ_BA) if TZ_BA else datetime.now()
