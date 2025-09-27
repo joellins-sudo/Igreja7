@@ -959,17 +959,23 @@ def order_congs_sede_first(congs: List[Congregation]) -> List[Congregation]:
 def sidebar_common(user: "User") -> str:
     """Desenha o menu lateral e retorna a página selecionada."""
     MENU_PAGES = {
-    "Lançamentos": "📥", "Relatório de Entrada": "📊", "Relatório de Saída": "📉",
-    "Relatório de Missões": "🌍", "Relatório de Dizimistas": "🧾", "Visão Geral": "🏁",
-    "Assistente IA": "🤖",  # <-- ADICIONE ESTA LINHA
-    "Cadastro": "🛠️",
-}
+        "Lançamentos": "📥", "Relatório de Entrada": "📊", "Relatório de Saída": "📉",
+        "Relatório de Missões": "🌍", "Relatório de Dizimistas": "🧾", "Visão Geral": "🏁",
+        "Assistente IA": "🤖", "Cadastro": "🛠️",
+    }
     
     role = getattr(user, "role", "")
     if role == "SEDE":
-        menu_options_plain = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral", "Assistente IA", "Cadastro"]
+        menu_options_plain = [
+            "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
+            "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral",
+            "Assistente IA", "Cadastro"
+        ]
     elif role == "TESOUREIRO":
-        menu_options_plain = ["Lançamentos", "Relatório de Entrada", "Relatório de Saída", "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"]
+        menu_options_plain = [
+            "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
+            "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"
+        ]
     elif role == "TESOUREIRO MISSIONÁRIO":
         menu_options_plain = ["Relatório de Missões", "Assistente IA"]
     else:
@@ -978,9 +984,9 @@ def sidebar_common(user: "User") -> str:
     menu_labels_pretty = [f"{MENU_PAGES.get(opt, '•')} {opt}" for opt in menu_options_plain]
     label_to_page = {label: page for label, page in zip(menu_labels_pretty, menu_options_plain)}
 
-    session_key = "main_menu_page"  
+    session_key = "main_menu_page"
     current_page_name = st.session_state.get(session_key, menu_options_plain[0])
-    
+
     try:
         default_index = menu_options_plain.index(current_page_name)
     except ValueError:
@@ -995,15 +1001,15 @@ def sidebar_common(user: "User") -> str:
         st.write(f"👤 **{getattr(user, 'username', 'Usuário')}** — *{getattr(user, 'role', '')}*")
 
         sel_label = st.radio(
-            "Menu", options=menu_labels_pretty, index=default_index, 
+            "Menu", options=menu_labels_pretty, index=default_index,
             key=session_key, label_visibility="collapsed"
         )
         page = label_to_page.get(sel_label, menu_options_plain[0])
-        
+
         st.divider()
         if st.button("Sair"):
             logout()
-            
+
     return page
 
 # ======= NOVO: helper padrão para botões 'Salvar alterações' =======
@@ -1752,12 +1758,12 @@ def _editor_entradas_agg_all(congs_all: List[Congregation], start: date, end: da
         # Primeiro, colete os dados de todas as unidades (principais e subs)
         for c in congs_all:
             # Dados da congregação principal
-            principal_totals = _collect_month_data(cong.id, start, end, sub_cong_id=None)["totals"]
+            principal_totals = _collect_month_data(c.id, start, end, sub_cong_id=None)["totals"]
             rows_data.append({
                 "unidade_display": f"{c.name} (Principal)",
                 "valor": float(principal_totals["entradas_total_sem_missoes"]),
                 "cong_id": c.id,
-                "cong_name": c.name, # Adicionado para ordenação primária
+                "cong_name": c.name,
                 "sub_id": None,
                 "is_sub": False
             })
@@ -1770,7 +1776,7 @@ def _editor_entradas_agg_all(congs_all: List[Congregation], start: date, end: da
                     "unidade_display": f"↳ {sub.name}",
                     "valor": float(sub_totals["entradas_total_sem_missoes"]),
                     "cong_id": c.id,
-                    "cong_name": c.name, # Adicionado para ordenação primária
+                    "cong_name": c.name,
                     "sub_id": sub.id,
                     "is_sub": True
                 })
@@ -1789,8 +1795,10 @@ def _editor_entradas_agg_all(congs_all: List[Congregation], start: date, end: da
 
         total_geral = 0.0
         if not df_view.empty:
-            total_geral = df_view["Total (R$)"].map(_to_float_brl).sum()
+            # df_view["Total (R$)"] está formatado como string pelo style; compute pelo df_full
+            total_geral = df_full["valor"].sum()
         st.metric("Total Geral de Entradas (todas as unidades)", format_currency(total_geral))
+
         # REMOVIDO: Botão de salvar e sua lógica
 
 def _editor_saidas_agg_all(congs_all: List[Congregation], start: date, end: date):
@@ -1811,7 +1819,7 @@ def _editor_saidas_agg_all(congs_all: List[Congregation], start: date, end: date
 
 # ===================== FUNÇÃO DE COLETA GERAL PARA IA DA SEDE =====================
 # ===================== FUNÇÃO DE COLETA DETALHADA PARA IA DA SEDE =====================
-@st.cache_data(ttl="1h") # Cache de 1 hora
+@st.cache_data(ttl=3600) # Cache de 1 hora
 def get_all_aggregated_data_for_ia():
     """
     Busca um resumo de TODAS as transações e dízimos, já aplicando a regra de negócio
@@ -1857,7 +1865,7 @@ def get_all_aggregated_data_for_ia():
 
 # ===================== FUNÇÃO DE RESUMO RÁPIDO PARA DASHBOARD =====================
 # ===================== FUNÇÃO DE RESUMO RÁPIDO PARA DASHBOARD =====================
-@st.cache_data(ttl="10m") # Cache de 10 minutos para dados atualizados
+@st.cache_data(ttl=600) # Cache de 10 minutos para dados atualizados
 def get_dashboard_summary(cong_id: int, start: date, end: date):
     """
     Busca e calcula os 5 totais financeiros essenciais para uma congregação e período.
@@ -1971,7 +1979,7 @@ def _collect_month_data(cong_id: int, start: date, end: date, sub_cong_id: Optio
         }
     
  
-@st.cache_data(ttl="10m")
+@st.cache_data(ttl=600)
 def build_ai_month_df(cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
     """
     Monta a tabela diária do mês para a IA com:
@@ -3817,7 +3825,7 @@ def page_relatorio_missoes_congregacao(user: "User"):
         # (Se você tinha outras seções específicas aqui, mantenha abaixo sem alterações.)
         # Ex.: visualizações, exportações, etc.
 
-@st.cache_data(ttl="10m")
+@st.cache_data(ttl=600)
 def get_missions_data_for_ia(cong_id: int, start: date, end: date):
     """
     Busca todas as transações de ENTRADA (Missões) e SAÍDA (Missões)
@@ -4595,4 +4603,3 @@ def page_assistente_ia(user: "User"):
             
 if __name__ == "__main__":
     main()
-   
