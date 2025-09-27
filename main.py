@@ -487,19 +487,19 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
 
     # --- Prompt do sistema: regras claras para Dízimos / Ofertas / Missões / Saídas / Dizimistas ---
     prompt_sistema = (
-        "Você é um assistente financeiro sênior para relatórios de igrejas. "
-        "Responda estritamente com base nos dados e no resumo fornecidos — NÃO invente números nem use conhecimento externo.\n\n"
-        "REGRAS IMPORTANTES:\n"
-        "1) DÍZIMOS: quando existirem duas fontes para dízimos (dízimos nominais em tabela 'Tithe' e dízimos lançados como Transações com categoria 'Dízimo'), "
-        "trate o total de dízimo do dia/mês como o MAIOR entre as duas fontes (regra de equivalência). Use essa regra ao calcular totais.\n"
-        "2) OFERTAS: ofertas podem vir de duas fontes: Resumo do Culto (ServiceLog.oferta) e Transações (categoria 'Oferta'). Quando houver ambos por data, "
-        "tratar o valor por culto como o MAIOR entre as fontes (não somar). Em relatórios por período, some os valores por data após aplicar essa regra.\n"
-        "3) OFERTAS DE MISSÕES: trate as ofertas de missões separadamente. São as transações cuja categoria é 'Missões' (ou equivalente); não inclua em 'Oferta' geral.\n"
-        "4) SAÍDAS: são todas as transações com tipo 'SAÍDA' (ou tipos equivalentes). Some por categoria ou por data conforme a pergunta.\n"
-        "5) DIZIMISTAS: quando perguntado por nomes/contagens/top, utilize apenas a fonte nominal (tabelas de 'Tithe' / coluna 'Dizimista').\n"
-        "6) FORMATAÇÃO: sempre formate valores como R$ 1.234,56. Use bullets/marcadores para listar itens. Se faltar dado, diga claramente que não consta no conjunto fornecido.\n"
-        "7) SE VOCÊ NÃO TIVER DADOS SUFICIENTES PARA CALCULAR, explique qual informação está faltando (ex.: sem coluna 'Oferta' ou sem coluna 'Dizimista').\n"
-    )
+    "Você é um assistente financeiro sênior, especialista em analisar dados de relatórios de igrejas.\n"
+    "REGRAS GERAIS:\n"
+    "1) Responda APENAS com base nos dados fornecidos. Se faltar dado, diga que não consta.\n"
+    "2) DÍZIMO (EQUIVALÊNCIA): sempre trate o total de dízimo do DIA/MÊS como o MAIOR entre: "
+    "   (a) soma de Dízimos Nominais (tabela 'Dízimo Nominal' / Tithe) e (b) soma de Transações com categoria 'Dízimo'.\n"
+    "3) OFERTA (EQUIVALÊNCIA): sempre trate o total de oferta do DIA/MÊS como o MAIOR entre: "
+    "   (a) soma de ServiceLog.oferta (Resumo do Culto) e (b) soma de Transações com categoria 'Oferta'.\n"
+    "   — Em relatórios por data, use essa regra por data; em agregados mensais, use a soma maior entre fontes.\n"
+    "4) MISSÕES: são categoria separada. Ofertas de missões podem aparecer como transação (categoria 'Missões')\n"
+    "   ou como 'Oferta' no Resumo do Culto (tipo 'Culto de Missões'); trate-as como categoria distinta quando a pergunta pedir.\n"
+    "5) Formate valores como R$ 1.234,56. Use bullets para listar itens e explique quais fontes de dados você usou para chegar ao total.\n"
+)
+
 
     prompt_usuario_completo = (
         f"Contexto: {contexto}\n\n"
@@ -1889,21 +1889,25 @@ def _editor_saidas_agg_all(congs_all: List[Congregation], start: date, end: date
 
 # ===================== FUNÇÃO DE COLETA GERAL PARA IA DA SEDE =====================
 # ===================== FUNÇÃO DE COLETA DETALHADA PARA IA DA SEDE =====================
-@st.cache_data(ttl=3600) # Cache de 1 hora
+@st.cache_data(ttl=3600)  # Cache 1h
 def get_all_aggregated_data_for_ia():
     """
-    Busca um resumo de TODAS as transações e dízimos, já aplicando a regra de negócio
-    de equivalência de dízimos. Retorna dados agregados por congregação, ano e mês.
+    Retorna DataFrame com linhas agregadas por congregação/ano/mês,
+    incluindo as fontes:
+      - Transactions (categorias)
+      - Tithes (dízimos nominais)
+      - ServiceLog.oferta (resumo do culto)
+    Além disso, cria uma coluna 'Categoria' padronizada e 'Valor'.
     """
     with SessionLocal() as db:
-        # 1. Busca todas as transações (Entradas e Saídas)
-        q_transactions = select(
+        # 1) Transactions (Entradas e Saídas) por cong/ano/mes/categoria
+        q_tx = select(
             Congregation.name.label("Congregacao"),
-            func.extract('year', Transaction.date).label('Ano'),
-            func.extract('month', Transaction.date).label('Mes'),
+            func.extract('year', Transaction.date).label("Ano"),
+            func.extract('month', Transaction.date).label("Mes"),
             Transaction.type.label("Tipo"),
             Category.name.label("Categoria"),
-            func.sum(Transaction.amount).label("Valor")
+            func.coalesce(func.sum(Transaction.amount), 0.0).label("Valor")
         ).join(Congregation).join(Category).group_by(
             Congregation.name,
             func.extract('year', Transaction.date),
@@ -1911,27 +1915,50 @@ def get_all_aggregated_data_for_ia():
             Transaction.type,
             Category.name
         )
-        df_transactions = pd.read_sql(q_transactions, db.bind)
+        df_tx = pd.read_sql(q_tx, db.bind)
 
-        # 2. Busca todos os dízimos nominais
-        q_tithes = select(
+        # 2) Tithes (dízimos nominais) por cong/ano/mes
+        q_tithe = select(
             Congregation.name.label("Congregacao"),
-            func.extract('year', Tithe.date).label('Ano'),
-            func.extract('month', Tithe.date).label('Mes'),
-            func.sum(Tithe.amount).label("Valor")
+            func.extract('year', Tithe.date).label("Ano"),
+            func.extract('month', Tithe.date).label("Mes"),
+            func.literal("DOAÇÃO").label("Tipo"),
+            func.literal("Dízimo Nominal").label("Categoria"),
+            func.coalesce(func.sum(Tithe.amount), 0.0).label("Valor")
         ).join(Congregation).group_by(
             Congregation.name,
             func.extract('year', Tithe.date),
             func.extract('month', Tithe.date)
         )
-        df_tithes = pd.read_sql(q_tithes, db.bind)
-        if not df_tithes.empty:
-            df_tithes["Tipo"] = "Entrada"
-            df_tithes["Categoria"] = "Dízimo Nominal"
+        df_tithe = pd.read_sql(q_tithe, db.bind)
 
-        # 3. Combina tudo
-        df_final = pd.concat([df_transactions, df_tithes], ignore_index=True)
+        # 3) ServiceLog.oferta por cong/ano/mes (Resumo do Culto — fonte importante para Ofertas)
+        q_sl_ofe = select(
+            Congregation.name.label("Congregacao"),
+            func.extract('year', ServiceLog.date).label("Ano"),
+            func.extract('month', ServiceLog.date).label("Mes"),
+            func.literal("DOAÇÃO").label("Tipo"),
+            func.literal("Oferta (ResumoCulto)").label("Categoria"),
+            func.coalesce(func.sum(ServiceLog.oferta), 0.0).label("Valor")
+        ).join(Congregation).group_by(
+            Congregation.name,
+            func.extract('year', ServiceLog.date),
+            func.extract('month', ServiceLog.date)
+        )
+        df_sl_ofe = pd.read_sql(q_sl_ofe, db.bind)
+
+        # 4) Combina tudo
+        df_final = pd.concat([df_tx, df_tithe, df_sl_ofe], ignore_index=True, sort=False)
+
+        # Normaliza colunas (string safe)
+        if not df_final.empty:
+            df_final["Categoria"] = df_final["Categoria"].astype(str)
+            df_final["Valor"] = df_final["Valor"].astype(float)
+            df_final["Ano"] = df_final["Ano"].astype(int)
+            df_final["Mes"] = df_final["Mes"].astype(int)
+
         return df_final
+
 
 # ===================== FUNÇÃO DE RESUMO RÁPIDO PARA DASHBOARD =====================
 # ===================== FUNÇÃO DE RESUMO RÁPIDO PARA DASHBOARD =====================
