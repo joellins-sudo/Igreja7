@@ -1396,17 +1396,22 @@ def responder_pergunta_financeira_mes(year: int, month: int) -> str:
         
 
 
-def now_bahia() -> datetime:
-    try:
-        return datetime.now(TZ_BA) if TZ_BA else datetime.now()
-    except Exception:
-        return datetime.now()
+import datetime
 
+def now_bahia():
+    """
+    Retorna datetime.now() seguro — usa datetime.datetime.now() para evitar
+    o AttributeError quando 'datetime' foi importado como módulo.
+    Se quiser validar timezone mais tarde, podemos ajustar aqui.
+    """
+    # se você quiser usar timezone fixa, podemos alterar aqui; por enquanto
+    # retornamos a hora local do servidor.
+    return datetime.datetime.now()
 
-
-
-
-def today_bahia() -> date:
+def today_bahia():
+    """
+    Retorna a data (date) atual baseada em now_bahia().
+    """
     return now_bahia().date()
 
 # NOVO HELPER: Função genérica para limpar campos
@@ -5589,26 +5594,18 @@ def main():
 # ===================== PAGE: ASSISTENTE IA (VERSÃO ESTÁVEL E FINAL) =====================
 def page_assistente_ia(user: "User"):
     """
-    Página do Assistente IA — mantém toda a lógica existente.
-    Corrige erro: não passa 'key' para get_month_selector (que não aceita esse argumento).
-    Exibe resposta limpa e formatada.
-    IMPORTANTE: depende das funções auxiliares que você já tem:
-    - render_ai_context_selector(db, user, key_prefix=...)
-    - get_month_selector(prompt) -> retorna um objeto compatível com month_bounds()
-    - month_bounds(ref) -> (start_dt, end_dt)
-    - summarize_financials_for_ai(db, start, end, cong_id, sub_cong_id) -> dict com chaves esperadas
-    - format_currency_br(valor)
-    - SessionLocal
+    Página do Assistente IA (substitua pela sua versão antiga).
+    Mantém a lógica existente — apenas usa now_bahia() / today_bahia() corrigidos.
     """
     ensure_seed()
 
     with SessionLocal() as db:
         st.markdown("<h1 class='page-title'>Assistente IA</h1>", unsafe_allow_html=True)
 
-        # Seleção do contexto (usa a sua função existente; inclui 'Todas as Congregações' quando aplicável)
+        # Seleção do contexto (inclui 'Todas as Congregações' se sua função suportar)
         cong_id, sub_cong_id, cong_label = render_ai_context_selector(user, db, key_prefix="ai")
 
-        # Seleção do mês/ano de referência — sem passar 'key' (corrigido)
+        # Seleção do mês/ano de referência — não passa 'key' (compatível com sua get_month_selector)
         ref_tab = get_month_selector("Mês de Referência — Mês")
         start_tab, end_tab = month_bounds(ref_tab)
 
@@ -5645,7 +5642,6 @@ def page_assistente_ia(user: "User"):
 
                 # Monta label do período (robusto)
                 try:
-                    # se ref_tab for date/datetime
                     period_label = ref_tab.strftime("%m/%Y")
                 except Exception:
                     period_label = str(ref_tab)
@@ -5653,10 +5649,8 @@ def page_assistente_ia(user: "User"):
                 # Formata resposta limpa — sem listar fontes ou dados extras
                 lines = []
                 lines.append(f"**Resumo financeiro — {cong_label} — {period_label}**")
-                lines.append("")  # linha em branco para separar
+                lines.append("")
 
-                # Inserir as linhas principais, cada uma em sua própria linha.
-                # Não mudamos a lógica: apenas usamos as chaves que a função de resumo deve retornar.
                 total_dizimos = summary.get("total_dizimos", 0.0)
                 total_ofertas_culto = summary.get("total_ofertas_culto", 0.0)
                 total_ofertas_missoes = summary.get("total_ofertas_missoes", 0.0)
@@ -5667,10 +5661,10 @@ def page_assistente_ia(user: "User"):
                 lines.append(f"- **Total Ofertas (Missões):** {format_currency_br(total_ofertas_missoes)}")
                 lines.append(f"- **Total Ofertas (Categoria 'Oferta' - transações):** {format_currency_br(total_ofertas_transacoes)}")
 
-                # Se houver breakdown por forma de pagamento (opcional), exibir de forma limpa
+                # Breakdown por forma de pagamento (opcional)
                 pay_breakdown = summary.get("by_payment_method")
                 if isinstance(pay_breakdown, dict) and pay_breakdown:
-                    lines.append("")  # separador
+                    lines.append("")
                     lines.append("- **Dízimos por forma de pagamento:**")
                     for pm, val in pay_breakdown.items():
                         lines.append(f"  - {pm}: {format_currency_br(val)}")
@@ -5681,13 +5675,10 @@ def page_assistente_ia(user: "User"):
                 resposta_container.info(resposta_md)
 
             except Exception as e:
-                # Mensagem amigável sem vazar stack
                 resposta_container.error("Ocorreu um erro ao gerar a análise. Verifique os logs do servidor.")
-                # Log para desenvolvedor (mantemos para debug; não exibimos ao usuário)
                 import traceback
                 print("Erro em page_assistente_ia:", e)
                 traceback.print_exc()
-
 
 
             # ... (O restante do código para o Tesoureiro Missionário permanece o mesmo)
