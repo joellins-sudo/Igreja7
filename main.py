@@ -2346,13 +2346,7 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 # ===================== PAGE: LANÇAMENTOS (com modo Tabela fora do form) =====================
 # APAGUE SUA FUNÇÃO page_lancamentos ANTIGA E SUBSTITUA POR ESTA VERSÃO FINAL
 
-# Substitua sua função page_lancamentos inteira por esta versão
-# Substitua sua função page_lancamentos inteira por esta versão CORRIGIDA E TESTADA
-# Substitua esta função inteira
-# Substitua sua função page_lancamentos inteira por esta
-# Substitua sua função page_lancamentos inteira por esta
-# Substitua sua função page_lancamentos inteira por esta
-# Substitua sua função page_lancamentos inteira por esta
+
 def page_lancamentos(user: "User"):
     ensure_seed()
 
@@ -2368,6 +2362,24 @@ def page_lancamentos(user: "User"):
         del st.session_state.status_message
 
     with SessionLocal() as db:
+        # DEBUG: mostrar qual database está sendo usado (temporário — remova em produção)
+        try:
+            db_url = os.environ.get("DATABASE_URL") or str(get_engine().url)
+            st.caption(f"DEBUG: DATABASE_URL = {db_url}")
+        except Exception:
+            pass
+
+        # DEBUG: últimos 8 service logs (temporário)
+        try:
+            recent = db.scalars(select(ServiceLog).order_by(ServiceLog.date.desc()).limit(8)).all()
+            if recent:
+                st.write("DEBUG: últimos ServiceLog (id, date, type, dizimo, oferta, cong, sub):")
+                st.table([{"id": r.id, "date": r.date, "type": r.service_type, "diz": r.dizimo, "ofe": r.oferta, "cong": r.congregation_id, "sub": r.sub_congregation_id} for r in recent])
+            else:
+                st.caption("DEBUG: nenhum ServiceLog encontrado (últimos 8).")
+        except Exception:
+            pass
+
         st.markdown(f"<h1 class='page-title'>Lançamentos</h1>", unsafe_allow_html=True)
 
         # Seleção da congregação principal por perfil
@@ -2440,66 +2452,89 @@ def page_lancamentos(user: "User"):
                         if ent_dizimo <= 0 and ent_oferta <= 0:
                             st.session_state.status_message = ("warning", "Nenhum valor foi inserido.")
                         else:
-                            log_existente = db.scalar(
-                                select(ServiceLog).where(
-                                    ServiceLog.date == ent_data,
-                                    ServiceLog.service_type == ent_tipo,
-                                    ServiceLog.congregation_id == target_cong_obj.id,
-                                    ServiceLog.sub_congregation_id == target_sub_cong_id
-                                )
-                            )
-
-                            if ent_tipo == "Culto de Missões":
-                                if ent_oferta > 0:
-                                    cat_missoes = db.scalar(
-                                        select(Category).where(
-                                            func.lower(Category.name) == 'missões',
-                                            Category.type == TYPE_IN
-                                        )
+                            try:
+                                log_existente = db.scalar(
+                                    select(ServiceLog).where(
+                                        ServiceLog.date == ent_data,
+                                        ServiceLog.service_type == ent_tipo,
+                                        ServiceLog.congregation_id == target_cong_obj.id,
+                                        ServiceLog.sub_congregation_id == target_sub_cong_id
                                     )
-                                    if cat_missoes:
-                                        db.add(Transaction(
-                                            date=ent_data, type=TYPE_IN,
-                                            category_id=cat_missoes.id, amount=ent_oferta,
-                                            description="Oferta do Culto de Missões",
+                                )
+
+                                if ent_tipo == "Culto de Missões":
+                                    if ent_oferta > 0:
+                                        cat_missoes = db.scalar(
+                                            select(Category).where(
+                                                func.lower(Category.name) == 'missões',
+                                                Category.type == TYPE_IN
+                                            )
+                                        )
+                                        if cat_missoes:
+                                            db.add(Transaction(
+                                                date=ent_data, type=TYPE_IN,
+                                                category_id=cat_missoes.id, amount=ent_oferta,
+                                                description="Oferta do Culto de Missões",
+                                                congregation_id=target_cong_obj.id,
+                                                sub_congregation_id=target_sub_cong_id
+                                            ))
+                                        else:
+                                            st.session_state.status_message = (
+                                                "error",
+                                                "ERRO: Categoria 'Missões' não encontrada. A oferta não foi salva."
+                                            )
+                                            db.rollback()
+                                            st.rerun()
+
+                                    if log_existente:
+                                        log_existente.dizimo += ent_dizimo
+                                    else:
+                                        db.add(ServiceLog(
+                                            date=ent_data, service_type=ent_tipo,
+                                            dizimo=ent_dizimo, oferta=0.0,
                                             congregation_id=target_cong_obj.id,
                                             sub_congregation_id=target_sub_cong_id
                                         ))
+
+                                    st.session_state.status_message = (
+                                        "success",
+                                        "Atenção: As ofertas do Culto de Missões são lançadas automaticamente no menu 'Relatório de Missões'."
+                                    )
+                                else:
+                                    if log_existente:
+                                        log_existente.dizimo += ent_dizimo
+                                        log_existente.oferta += ent_oferta
                                     else:
-                                        st.session_state.status_message = (
-                                            "error",
-                                            "ERRO: Categoria 'Missões' não encontrada. A oferta não foi salva."
-                                        )
-                                        db.rollback()
+                                        db.add(ServiceLog(
+                                            date=ent_data, service_type=ent_tipo,
+                                            dizimo=ent_dizimo, oferta=ent_oferta,
+                                            congregation_id=target_cong_obj.id,
+                                            sub_congregation_id=target_sub_cong_id
+                                        ))
+                                    st.session_state.status_message = ("success", "Registro de culto salvo com sucesso!")
 
-                                if log_existente:
-                                    log_existente.dizimo += ent_dizimo
-                                else:
-                                    db.add(ServiceLog(
-                                        date=ent_data, service_type=ent_tipo,
-                                        dizimo=ent_dizimo, oferta=0.0,
-                                        congregation_id=target_cong_obj.id,
-                                        sub_congregation_id=target_sub_cong_id
-                                    ))
-
-                                st.session_state.status_message = (
-                                    "success",
-                                    "Atenção: As ofertas do Culto de Missões são lançadas automaticamente no menu 'Relatório de Missões'."
-                                )
-                            else:
-                                if log_existente:
-                                    log_existente.dizimo += ent_dizimo
-                                    log_existente.oferta += ent_oferta
-                                else:
-                                    db.add(ServiceLog(
-                                        date=ent_data, service_type=ent_tipo,
-                                        dizimo=ent_dizimo, oferta=ent_oferta,
-                                        congregation_id=target_cong_obj.id,
-                                        sub_congregation_id=target_sub_cong_id
-                                    ))
-                                st.session_state.status_message = ("success", "Registro de culto salvo com sucesso!")
-
-                            db.commit()
+                                # tenta commitar e limpa cache para forçar leitura atualizada
+                                try:
+                                    db.commit()
+                                    try:
+                                        st.cache_data.clear()
+                                    except Exception:
+                                        pass
+                                except IntegrityError as ie:
+                                    db.rollback()
+                                    st.session_state.status_message = ("error", "Erro de integridade: possível lançamento duplicado para a mesma data/tipo/unidade.")
+                                    st.exception(ie)
+                                except Exception as e:
+                                    db.rollback()
+                                    st.session_state.status_message = ("error", f"Erro inesperado ao salvar: {str(e)}")
+                                    st.exception(e)
+                            except Exception as e:
+                                try:
+                                    db.rollback()
+                                except Exception:
+                                    pass
+                                st.session_state.status_message = ("error", f"Erro ao processar entrada: {e}")
+                                st.exception(e)
                         st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -2513,14 +2548,35 @@ def page_lancamentos(user: "User"):
                     dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência"], key="dz_pay")
                     if st.form_submit_button("Salvar DIZIMISTA"):
                         if dz_valor > 0 and dz_nome.strip():
-                            db.add(Tithe(
-                                date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor,
-                                congregation_id=target_cong_obj.id,
-                                sub_congregation_id=target_sub_cong_id,
-                                payment_method=dz_payment
-                            ))
-                            db.commit()
-                            st.session_state.status_message = ("success", "Dízimo registrado com sucesso!")
+                            try:
+                                db.add(Tithe(
+                                    date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor,
+                                    congregation_id=target_cong_obj.id,
+                                    sub_congregation_id=target_sub_cong_id,
+                                    payment_method=dz_payment
+                                ))
+                                try:
+                                    db.commit()
+                                    try:
+                                        st.cache_data.clear()
+                                    except Exception:
+                                        pass
+                                    st.session_state.status_message = ("success", "Dízimo registrado com sucesso!")
+                                except IntegrityError as ie:
+                                    db.rollback()
+                                    st.session_state.status_message = ("error", "Erro de integridade ao salvar dízimo.")
+                                    st.exception(ie)
+                                except Exception as e:
+                                    db.rollback()
+                                    st.session_state.status_message = ("error", f"Erro inesperado ao salvar dízimo: {e}")
+                                    st.exception(e)
+                            except Exception as e:
+                                try:
+                                    db.rollback()
+                                except Exception:
+                                    pass
+                                st.session_state.status_message = ("error", f"Erro ao processar dízimo: {e}")
+                                st.exception(e)
                         else:
                             st.session_state.status_message = ("warning", "Preencha o nome e o valor do dízimo.")
                         st.rerun()
@@ -2542,14 +2598,35 @@ def page_lancamentos(user: "User"):
                     if st.form_submit_button("Salvar SAÍDA"):
                         cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
                         if sai_valor > 0 and cat_obj:
-                            db.add(Transaction(
-                                date=sai_data, type="SAÍDA", category_id=cat_obj.id,
-                                amount=sai_valor, description=(sai_desc or None),
-                                congregation_id=target_cong_obj.id,
-                                sub_congregation_id=target_sub_cong_id
-                            ))
-                            db.commit()
-                            st.session_state.status_message = ("success", "Saída registrada com sucesso!")
+                            try:
+                                db.add(Transaction(
+                                    date=sai_data, type="SAÍDA", category_id=cat_obj.id,
+                                    amount=sai_valor, description=(sai_desc or None),
+                                    congregation_id=target_cong_obj.id,
+                                    sub_congregation_id=target_sub_cong_id
+                                ))
+                                try:
+                                    db.commit()
+                                    try:
+                                        st.cache_data.clear()
+                                    except Exception:
+                                        pass
+                                    st.session_state.status_message = ("success", "Saída registrada com sucesso!")
+                                except IntegrityError as ie:
+                                    db.rollback()
+                                    st.session_state.status_message = ("error", "Erro de integridade ao salvar saída.")
+                                    st.exception(ie)
+                                except Exception as e:
+                                    db.rollback()
+                                    st.session_state.status_message = ("error", f"Erro inesperado ao salvar saída: {e}")
+                                    st.exception(e)
+                            except Exception as e:
+                                try:
+                                    db.rollback()
+                                except Exception:
+                                    pass
+                                st.session_state.status_message = ("error", f"Erro ao processar saída: {e}")
+                                st.exception(e)
                         else:
                             st.session_state.status_message = ("warning", "Preencha o valor e a categoria da saída.")
                         st.rerun()
@@ -2662,32 +2739,43 @@ def page_lancamentos(user: "User"):
 
             # Botão salvar mudanças do resumo (ServiceLog + Missões automática)
             def on_save_click():
-                result = _apply_service_log_changes(
-                    df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id
-                )
-                if result == "missao_ok":
-                    st.session_state.status_message = (
-                        "success",
-                        "Atenção: As ofertas do Culto de Missões são lançadas automaticamente no menu 'Relatório de Missões'."
+                try:
+                    result = _apply_service_log_changes(
+                        df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id
                     )
-                elif result == "geral_ok":
-                    st.session_state.status_message = ("success", "Alterações salvas com sucesso!")
-                elif result == "erro_integridade":
-                    st.session_state.status_message = (
-                        "error",
-                        "Erro: Tentativa de criar um lançamento duplicado. Verifique os dados."
-                    )
-                elif result == "erro_categoria":
-                    st.session_state.status_message = (
-                        "error",
-                        "ERRO CRÍTICO: Categoria 'Missões' (Entrada) não encontrada."
-                    )
-                elif result == "erro_geral":
-                    st.session_state.status_message = (
-                        "error",
-                        "Ocorreu um erro inesperado ao salvar."
-                    )
-                st.rerun()
+                    # _apply_service_log_changes já faz commit internamente; limpamos cache em caso de sucesso
+                    try:
+                        st.cache_data.clear()
+                    except Exception:
+                        pass
+
+                    if result == "missao_ok":
+                        st.session_state.status_message = (
+                            "success",
+                            "Atenção: As ofertas do Culto de Missões são lançadas automaticamente no menu 'Relatório de Missões'."
+                        )
+                    elif result == "geral_ok":
+                        st.session_state.status_message = ("success", "Alterações salvas com sucesso!")
+                    elif result == "erro_integridade":
+                        st.session_state.status_message = (
+                            "error",
+                            "Erro: Tentativa de criar um lançamento duplicado. Verifique os dados."
+                        )
+                    elif result == "erro_categoria":
+                        st.session_state.status_message = (
+                            "error",
+                            "ERRO CRÍTICO: Categoria 'Missões' (Entrada) não encontrada."
+                        )
+                    elif result == "erro_geral":
+                        st.session_state.status_message = (
+                            "error",
+                            "Ocorreu um erro inesperado ao salvar."
+                        )
+                except Exception as e:
+                    st.session_state.status_message = ("error", f"Erro ao salvar alterações: {e}")
+                    st.exception(e)
+                finally:
+                    st.rerun()
 
             st.button(
                 "Salvar alterações na tabela",
@@ -2721,7 +2809,6 @@ def page_lancamentos(user: "User"):
                 txs_out, f"Saídas - {contexto_tabela}", tx_type_hint="SAÍDA",
                 force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id
             )
-
 
             # ... (demais seções permanecem iguais)
 
