@@ -946,6 +946,185 @@ def build_monthly_financial_summary_for_ai(year: int, month: int) -> Dict[str, A
     # formata saída
     return {"by_congregation": results, "grand_totals": dict(grand), "year": year, "month": month}
 
+# imports necessários - adapte se seus nomes estiverem em outro módulo
+from sqlalchemy import select, func
+from sqlalchemy.orm import joinedload
+
+# constantes (ajuste se o seu projeto usar valores diferentes)
+TX_TYPE_IN = "ENTRADA"
+TX_TYPE_OUT = "SAÍDA"
+
+# Helper: formata moeda em pt-BR (R$ 1.234,56)
+def format_currency(amount):
+    """
+    Recebe float/Decimal e retorna string no formato 'R$ 1.234,56'.
+    Garante separadores corretos e 2 casas decimais.
+    """
+    try:
+        a = float(amount or 0.0)
+    except Exception:
+        a = 0.0
+    # arredonda para 2 decimais
+    a = round(a + 0.0000001, 2)
+    # separa parte inteira e decimal
+    inteiro = int(abs(a))
+    dec = int(round((abs(a) - inteiro) * 100))
+    # formata milhares com "."
+    inteiro_str = f"{inteiro:,}".replace(",", ".")
+    sinal = "-" if a < 0 else ""
+    return f"{sinal}R$ {inteiro_str},{dec:02d}"
+
+
+def _build_common_date_and_congreg_filters(model, start_date, end_date, cong_id=None, sub_cong_id=None):
+    """
+    Retorna uma lista de condições reuseable: datas + congreg/subcong.
+    Preserva a lógica antiga: se sub_cong_id is None -> filtra sub_congregation_id IS NULL.
+    Se cong_id is None -> não filtra por congregation (ou seja, TODAS as congregações).
+    """
+    conds = [model.date >= start_date, model.date < end_date]
+    if cong_id is not None:
+        # filtra por congregação específica
+        conds.append(model.congregation_id == cong_id)
+    # mantém comportamento original: se sub_cong_id for None, requer sub_congregation_id IS NULL
+    if hasattr(model, "sub_congregation_id"):
+        if sub_cong_id is None:
+            conds.append(model.sub_congregation_id.is_(None))
+        else:
+            conds.append(model.sub_congregation_id == sub_cong_id)
+    return conds
+
+
+def summarize_financials_for_ai(db, start_date, end_date, cong_id=None, sub_cong_id=None):
+    """
+    Retorna um dicionário com totais e quebras necessárias para a IA responder:
+      - total_dizimos
+      - total_ofertas_culto (ofertas do resumo de culto + transações de 'oferta' não-missão)
+      - total_ofertas_missoes (transações com categoria 'missões' e tx.type == ENTRADA)
+      - total_entradas_por_categoria (dict categoria -> valor)
+      - total_saidas_excl_missoes (SAÍDA excluindo categoria 'missões')
+      - tithes_by_payment (dict pagamento -> valor)
+    NOTA: mantém o comportamento de filtrar sub_congregation_id quando sub_cong_id é None.
+    """
+    # modelos: ajuste import se necessário
+    from models import Tithe, Transaction, Category, ServiceLog
+
+    # 1) Total de dízimos nominais
+    conds_tithe = _build_common_date_and_congreg_filters(Tithe, start_date, end_date, cong_id, sub_cong_id)
+    total_dizimos = float(db.scalar(select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(*conds_tithe)) or 0.0)
+
+    # 2) Ofertas registradas no resumo de culto (ServiceLog.oferta) EXCLUINDO 'Culto de Missões'
+    conds_service = _build_common_date_and_congreg_filters(ServiceLog, start_date, end_date, cong_id, sub_cong_id)
+    conds_service.append(ServiceLog.service_type != "Culto de Missões")
+    total_ofertas_service = float(db.scalar(select(func.coalesce(func.sum(ServiceLog.oferta), 0.0)).where(*conds_service)) or 0.0)
+
+    # 3) Transações de ENTRADA agrupadas por categoria (para separar 'missões' de 'oferta' e outras)
+    conds_tx_in = _build_common_date_and_congreg_filters(Transaction, start_date, end_date, cong_id, sub_cong_id)
+    conds_tx_in.append(Transaction.type == TX_TYPE_IN)
+
+    # Agrupa por categoria (nome em minúsculas) — soma por categoria
+    rows = db.execute(
+        select(func.lower(Category.name), func.coalesce(func.sum(Transaction.amount), 0.0))
+        .join(Category, Transaction.category_id == Category.id)
+        .where(*conds_tx_in)
+        .group_by(func.lower(Category.name))
+    ).all()
+
+    total_ofertas_missoes = 0.0
+    total_tx_in_other = 0.0
+    tx_in_by_category = {}
+    for cat_name_lower, soma in rows:
+        valor = float(soma or 0.0)
+        tx_in_by_category[cat_name_lower] = valor
+        if cat_name_lower.strip() == "missões" or cat_name_lower.strip() == "missoes":
+            total_ofertas_missoes += valor
+        else:
+            total_tx_in_other += valor
+
+    # 4) Decide o que é considerado "oferta de culto" para apresentar ao usuário:
+    #    - soma ServiceLog.oferta (resumo de culto, exceto Culto de Missões) + transações ENTRADA de categorias que contenham 'ofert'
+    offers_tx_from_named_offers = 0.0
+    for cat_lower, v in tx_in_by_category.items():
+        if "ofert" in cat_lower:  # captura 'oferta', 'ofertas', etc.
+            offers_tx_from_named_offers += v
+
+    total_ofertas_culto = float(total_ofertas_service) + float(offers_tx_from_named_offers)
+
+    # 5) Saídas (SAÍDA) excluindo categorias 'missões'
+    conds_tx_out = _build_common_date_and_congreg_filters(Transaction, start_date, end_date, cong_id, sub_cong_id)
+    conds_tx_out.append(Transaction.type == TX_TYPE_OUT)
+    rows_out = db.execute(
+        select(func.lower(Category.name), func.coalesce(func.sum(Transaction.amount), 0.0))
+        .join(Category, Transaction.category_id == Category.id)
+        .where(*conds_tx_out)
+        .group_by(func.lower(Category.name))
+    ).all()
+
+    total_saidas_excl_missoes = 0.0
+    tx_out_by_category = {}
+    for cat_name_lower, soma in rows_out:
+        valor = float(soma or 0.0)
+        tx_out_by_category[cat_name_lower] = valor
+        if cat_name_lower.strip() in ("missões", "missoes"):
+            # ignora
+            continue
+        total_saidas_excl_missoes += valor
+
+    # 6) Quebra de dizimos por forma de pagamento (se existir campo payment_method)
+    tithe_pay_rows = db.execute(
+        select(Tithe.payment_method, func.coalesce(func.sum(Tithe.amount), 0.0))
+        .where(*conds_tithe)
+        .group_by(Tithe.payment_method)
+    ).all()
+    tithes_by_payment = { (pm or "Não informado"): float(val or 0.0) for pm, val in tithe_pay_rows }
+
+    # Monta o dicionário de retorno
+    summary = {
+        "total_dizimos": total_dizimos,
+        "total_ofertas_culto": total_ofertas_culto,
+        "total_ofertas_missoes": total_ofertas_missoes,
+        "tx_in_by_category": tx_in_by_category,
+        "tx_out_by_category": tx_out_by_category,
+        "total_saidas_excl_missoes": total_saidas_excl_missoes,
+        "tithes_by_payment": tithes_by_payment,
+    }
+    return summary
+
+
+def format_ai_response(summary, question=None):
+    """
+    Recebe o summary gerado por summarize_financials_for_ai e retorna UMA STRING limpa,
+    com frases curtas e separadas, sem mencionar 'fontes' nem debug.
+    Mantém cada tipo de valor separado (oferta culto vs missões).
+    """
+    lines = []
+    # Se o usuário pediu algo específico, você pode usar question para ajustar, mas aqui
+    # apenas formatamos tudo de forma direta e legível.
+    lines.append(f"Ofertas do Culto: {format_currency(summary.get('total_ofertas_culto', 0.0))}.")
+    lines.append(f"Ofertas de Missões: {format_currency(summary.get('total_ofertas_missoes', 0.0))}.")
+    lines.append(f"Dízimos (total): {format_currency(summary.get('total_dizimos', 0.0))}.")
+    # Saídas (excluindo Missões)
+    lines.append(f"Saídas (excluindo Missões): {format_currency(summary.get('total_saidas_excl_missoes', 0.0))}.")
+
+    # Pagamento — mostra apenas se houver valores
+    tpb = summary.get("tithes_by_payment", {})
+    if tpb:
+        parts = []
+        for pay, val in tpb.items():
+            parts.append(f"{pay}: {format_currency(val)}")
+        lines.append("Dízimos por forma de pagamento — " + "; ".join(parts) + ".")
+
+    # Se quiser mostrar categorias de entrada / saída (opcional, curto)
+    # Aqui deixamos opcional e curta: só mostra categorias de entrada importantes (maiores que zero)
+    tx_in_cat = summary.get("tx_in_by_category", {})
+    if tx_in_cat:
+        # seleciona até 5 categorias com maior valor para não ficar longo
+        items = sorted(tx_in_cat.items(), key=lambda kv: kv[1], reverse=True)
+        shown = [f"{k}: {format_currency(v)}" for k, v in items[:5] if v > 0]
+        if shown:
+            lines.append("Entradas por categoria (top): " + "; ".join(shown) + ".")
+
+    # Junta as linhas em um parágrafo com quebras de linha simples para exibição
+    return "\n".join(lines)
 
 def responder_pergunta_financeira_mes(year: int, month: int) -> str:
     """
