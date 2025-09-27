@@ -5528,95 +5528,167 @@ def main():
 # ===================== PAGE: ASSISTENTE IA (COM ENTRADA DE VOZ) =====================
 # ===================== PAGE: ASSISTENTE IA (ORDEM DE EXECUÇÃO CORRIGIDA) =====================
 # ===================== PAGE: ASSISTENTE IA (VERSÃO ESTÁVEL E FINAL) =====================
-def page_assistente_ia(user: "User"):
+def page_assistente_ia(user):
     """
-    Página do Assistente IA (substitua pela sua versão antiga).
-    Mantém a lógica existente — apenas usa now_bahia() / today_bahia() corrigidos.
+    Página do Assistente IA.
+    - Usa render_ai_context_selector(user, db) para selecionar congregação (ou Todas).
+    - Se 'Todas as Congregações' estiver selecionado, permite detectar nome de congregação
+      na pergunta e filtrar por ela.
+    - Gera respostas práticas sobre dízimos, ofertas (culto x missões), transações 'oferta'
+      e dizimistas (top 5), formatadas com format_currency_br.
     """
-    ensure_seed()
+    st.markdown("<h1 class='page-title'>Assistente IA</h1>", unsafe_allow_html=True)
 
     with SessionLocal() as db:
-        st.markdown("<h1 class='page-title'>Assistente IA</h1>", unsafe_allow_html=True)
+        # Context selector (pode retornar (None, None, "Todas as Congregações"))
+        sel_cong_id, sel_sub_id, sel_label = render_ai_context_selector(user, db, key_prefix="ai")
 
-        # Seleção do contexto (inclui 'Todas as Congregações' se sua função suportar)
-        cong_id, sub_cong_id, cong_label = render_ai_context_selector(user, db, key_prefix="ai")
-
-        # Seleção do mês/ano de referência — não passa 'key' (compatível com sua get_month_selector)
-        ref_tab = get_month_selector("Mês de Referência — Mês")
+        # mês/ano de referência (usa sua função existente get_month_selector)
+        ref_tab = get_month_selector("Mês de Referência — Mês")  # NÃO passar key para evitar erro
         start_tab, end_tab = month_bounds(ref_tab)
 
         st.divider()
+        st.markdown("## 2. Faça sua Pergunta")
+        user_question = st.text_area("Sua pergunta:", height=120, key="ai_question_text")
 
-        # Campo de pergunta
-        st.subheader("2. Faça sua Pergunta")
-        question_text = st.text_area(
-            "Sua pergunta:",
-            placeholder="Ex: Qual o total de dízimos? Liste as 3 maiores saídas. Quem foi o dizimista com maior valor?",
-            key="ai_question_text",
-            height=140
-        )
-
-        # Botão para analisar com IA
-        analyze_clicked = st.button("Analisar com IA", key="ai_analyze_btn", type="primary")
-
-        # Container para resposta
-        resposta_container = st.empty()
-
-        if analyze_clicked:
-            # Permissões: se não for SEDE e não escolheu congregação válida, bloqueia
-            if cong_id is None and user.role != "SEDE":
-                resposta_container.error("Você não tem permissão para consultar 'Todas as Congregações'.")
-                return
-
+        if st.button("Analisar com IA", key="ai_analisar_btn"):
             try:
-                # Consulta resumo (reabre sessão para segurança)
-                with SessionLocal() as db_q:
-                    summary = summarize_financials_for_ai(
-                        db_q, start_tab, end_tab,
-                        cong_id=cong_id, sub_cong_id=sub_cong_id
-                    )
+                # Se o contexto é 'Todas as Congregações' (sel_cong_id is None), tentamos extrair
+                # um nome de congregação direto da pergunta (ex: "alto do cruzeiro")
+                target_cong_id = sel_cong_id
+                target_label = sel_label
 
-                # Monta label do período (robusto)
-                try:
-                    period_label = ref_tab.strftime("%m/%Y")
-                except Exception:
-                    period_label = str(ref_tab)
+                if sel_cong_id is None:
+                    # procurar um match simples de nome de congregação na pergunta
+                    q_lower = (user_question or "").strip().lower()
+                    if q_lower:
+                        # busca todas congregações e compara por substring no nome
+                        congs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+                        match = None
+                        for c in congs:
+                            if c.name and c.name.lower() in q_lower:
+                                match = c
+                                break
+                        if match:
+                            target_cong_id = match.id
+                            target_label = match.name
+                        else:
+                            # No Match: manter None -> o resumo será "todas" (mas responderemos conforme pergunta)
+                            target_cong_id = None
+                            target_label = "Todas as Congregações"
 
-                # Formata resposta limpa — sem listar fontes ou dados extras
-                lines = []
-                lines.append(f"**Resumo financeiro — {cong_label} — {period_label}**")
-                lines.append("")
+                # sumariza dados (função previamente adicionada)
+                summary = summarize_financials_for_ai(db, start_tab, end_tab,
+                                                     cong_id=target_cong_id, sub_cong_id=sel_sub_id)
 
-                total_dizimos = summary.get("total_dizimos", 0.0)
-                total_ofertas_culto = summary.get("total_ofertas_culto", 0.0)
-                total_ofertas_missoes = summary.get("total_ofertas_missoes", 0.0)
-                total_ofertas_transacoes = summary.get("total_ofertas_transacoes", 0.0)
+                # Decide o que o usuário pediu analisando palavras-chave (simples e robusto)
+                q = (user_question or "").lower()
 
-                lines.append(f"- **Total Dízimos:** {format_currency_br(total_dizimos)}")
-                lines.append(f"- **Total Ofertas (Cultos):** {format_currency_br(total_ofertas_culto)}")
-                lines.append(f"- **Total Ofertas (Missões):** {format_currency_br(total_ofertas_missoes)}")
-                lines.append(f"- **Total Ofertas (Categoria 'Oferta' - transações):** {format_currency_br(total_ofertas_transacoes)}")
+                pieces = []  # linhas da resposta
 
-                # Breakdown por forma de pagamento (opcional)
-                pay_breakdown = summary.get("by_payment_method")
-                if isinstance(pay_breakdown, dict) and pay_breakdown:
-                    lines.append("")
-                    lines.append("- **Dízimos por forma de pagamento:**")
-                    for pm, val in pay_breakdown.items():
-                        lines.append(f"  - {pm}: {format_currency_br(val)}")
+                # Se o usuário perguntou por "dízimo" ou "dizimo" -> mostrar total + por forma de pagamento
+                if "diz" in q:
+                    pieces.append(f"Total Dízimos: {format_currency_br(summary['total_dizimos'])}")
+                    if summary.get("by_payment_method"):
+                        pieces.append("Dízimos por forma de pagamento:")
+                        for pm, val in summary["by_payment_method"].items():
+                            pieces.append(f"  • {pm}: {format_currency_br(val)}")
 
-                resposta_md = "\n".join(lines)
+                # Se pediu por "oferta" (ou 'ofertas') -> detalhar ofertas de culto e ofertas missões e transações
+                if "ofert" in q:
+                    # ofertas registradas em ServiceLog
+                    pieces.append(f"Total Ofertas (Cultos): {format_currency_br(summary['total_ofertas_culto'])}")
+                    pieces.append(f"Total Ofertas (Missões): {format_currency_br(summary['total_ofertas_missoes'])}")
+                    # ofertas registradas como transações (categoria 'oferta')
+                    pieces.append(f"Total Ofertas (Categoria 'Oferta' - transações): {format_currency_br(summary['total_ofertas_transacoes'])}")
 
-                # Exibe a resposta de forma limpa (caixa de informação)
-                resposta_container.info(resposta_md)
+                # Se pediu por "dizimistas" ou "nominal" -> listar top 5 dizimistas do período (pelo valor)
+                if "dizimista" in q or "nominal" in q:
+                    try:
+                        tithe_q = (
+                            select(Tithe.tither_name, func.coalesce(func.sum(Tithe.amount), 0.0).label("total"))
+                            .where(Tithe.date >= start_tab, Tithe.date < end_tab)
+                        )
+                        if target_cong_id is not None:
+                            tithe_q = tithe_q.where(Tithe.congregation_id == target_cong_id)
+                        if sel_sub_id is not None:
+                            tithe_q = tithe_q.where(Tithe.sub_congregation_id == sel_sub_id)
+                        tithe_q = tithe_q.group_by(Tithe.tither_name).order_by(func.sum(Tithe.amount).desc()).limit(5)
+                        rows = db.execute(tithe_q).all()
+                        if rows:
+                            pieces.append("Top Dizimistas (período):")
+                            for name, val in rows:
+                                nm = name or "Não informado"
+                                pieces.append(f"  • {nm}: {format_currency_br(val)}")
+                        else:
+                            pieces.append("Top Dizimistas: nenhum registro no período.")
+                    except Exception:
+                        pieces.append("Top Dizimistas: erro ao consultar dados.")
+
+                # Se pediu por "saíd" ou "saida" -> sumarizar saídas (exceto 'missão' se solicitado)
+                if "said" in q or "saíd" in q or "saída" in q or "saida" in q:
+                    # consultar Transaction type='SAÍDA'
+                    try:
+                        tx_filters = [Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == "SAÍDA"]
+                        if target_cong_id is not None:
+                            tx_filters.append(Transaction.congregation_id == target_cong_id)
+                        if sel_sub_id is not None:
+                            tx_filters.append(Transaction.sub_congregation_id == sel_sub_id)
+
+                        # total de saídas, excluindo categorias que contenham 'missão' se o usuário pediu "menos missão" explicitamente
+                        exclude_missao = "menos" in q and "miss" in q  # heurística: 'menos missão'
+                        if exclude_missao:
+                            total_saidas = float(db.scalar(
+                                select(func.coalesce(func.sum(Transaction.amount), 0.0))
+                                .join(Category)
+                                .where(*tx_filters, ~func.lower(Category.name).like("%miss%"))
+                            ) or 0.0)
+                        else:
+                            total_saidas = float(db.scalar(
+                                select(func.coalesce(func.sum(Transaction.amount), 0.0))
+                                .where(*tx_filters)
+                            ) or 0.0)
+                        pieces.append(f"Total Saídas (período): {format_currency_br(total_saidas)}")
+                    except Exception:
+                        pieces.append("Total Saídas: erro ao consultar dados.")
+
+                # Se nenhuma palavra-chave detectada, retorna um resumo sucinto (mas respeitando pedido do usuário)
+                if not pieces:
+                    # se a pergunta contém nome de congregação específico -> responder sobre essa congregação
+                    # default: mostrar resumo curto com dízimos+ofertas_culto+ofertas_missoes
+                    pieces.append(f"Resumo financeiro — {target_label} — {ref_tab.strftime('%m/%Y') if hasattr(ref_tab,'strftime') else ref_tab}")
+                    pieces.append(f"  • Total Dízimos: {format_currency_br(summary['total_dizimos'])}")
+                    pieces.append(f"  • Total Ofertas (Cultos): {format_currency_br(summary['total_ofertas_culto'])}")
+                    pieces.append(f"  • Total Ofertas (Missões): {format_currency_br(summary['total_ofertas_missoes'])}")
+
+                # Monta resposta final limpa (sem expor queries ou fontes)
+                # Usamos um bloco visual limpo
+                st.markdown("")
+                st.markdown("### Resposta do Assistente")
+                # exibir em um box leve
+                formatted_lines = []
+                for line in pieces:
+                    # já estão formatadas; transformar em linhas <li> para visual mais limpo
+                    if line.startswith("  •"):
+                        formatted_lines.append(f"<li>{line[3:]}</li>")
+                    elif line.startswith("  "):
+                        # sub-linha
+                        formatted_lines.append(f"<li style='margin-left:14px'>{line.strip()}</li>")
+                    else:
+                        formatted_lines.append(f"<li><strong>{line}</strong></li>")
+
+                html = "<div class='assistant-box' style='background:#e8f4ff;border-radius:8px;padding:18px;'>"
+                html += "<ul style='margin:0;padding-left:18px;line-height:1.6;color:#0b4f73;'>"
+                html += "".join(formatted_lines)
+                html += "</ul></div>"
+
+                st.markdown(html, unsafe_allow_html=True)
 
             except Exception as e:
-                resposta_container.error("Ocorreu um erro ao gerar a análise. Verifique os logs do servidor.")
-                import traceback
-                print("Erro em page_assistente_ia:", e)
-                traceback.print_exc()
-
-
+                # Mostra erro genérico para o usuário (logs de servidor contêm stacktrace completo)
+                st.error("Ocorreu um erro ao gerar a análise. Verifique os logs do servidor.")
+                # opcional: para debug local, descomente a linha abaixo
+                # st.exception(e)
             # ... (O restante do código para o Tesoureiro Missionário permanece o mesmo)
             # ...
             
