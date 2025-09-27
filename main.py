@@ -2229,34 +2229,30 @@ def build_ai_month_df(cong_id: int, start: date, end: date, sub_cong_id: Optiona
 
 # SUBSTITUA SUA FUNÇÃO _load_service_logs INTEIRA POR ESTA VERSÃO CORRIGIDA
 @st.cache_data
-# 1. O parâmetro '_db: Session' foi REMOVIDO daqui
 def _load_service_logs(cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None) -> pd.DataFrame:
     """Carrega os resumos de culto para a tabela de edição, com ordenação customizada."""
-    
-    # 2. Adicionamos esta linha para criar a conexão DENTRO da função
     with SessionLocal() as db:
-        # 3. Todo o código original foi recuado (indentado) para ficar dentro do 'with'
-        log_filter = and_(
+        # filtro base (tratando None explicitamente para evitar 'col = NULL' em SQL)
+        filters = [
             ServiceLog.congregation_id == cong_id,
             ServiceLog.date >= start,
             ServiceLog.date < end,
-            ServiceLog.sub_congregation_id == sub_cong_id
-        )
-        
-        # ===== NOVA LÓGICA DE ORDENAÇÃO =====
-        # Cria uma regra de "ranking" para o tipo de culto
+        ]
+        if sub_cong_id is None:
+            filters.append(ServiceLog.sub_congregation_id.is_(None))
+        else:
+            filters.append(ServiceLog.sub_congregation_id == sub_cong_id)
+
+        # ordenação customizada por tipo de culto (mantém data como principal)
         from sqlalchemy import case
         custom_sort_order = case(
             (ServiceLog.service_type == "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)", 1),
             (ServiceLog.service_type == "Culto da Noite (Padrão)", 2),
             (ServiceLog.service_type == "Evento Especial", 3),
-            else_=4  # Garante que "Outro" e tipos futuros fiquem por último
+            else_=4
         )
 
-        # Aplica a ordenação primária por data e a secundária pela regra customizada
-        query = select(ServiceLog).where(log_filter).order_by(ServiceLog.date, custom_sort_order)
-        # ===== FIM DA NOVA LÓGICA =====
-        
+        query = select(ServiceLog).where(and_(*filters)).order_by(ServiceLog.date, custom_sort_order)
         logs = db.scalars(query).all()
 
         if not logs:
@@ -2264,17 +2260,16 @@ def _load_service_logs(cong_id: int, start: date, end: date, sub_cong_id: Option
 
         data = []
         for log in logs:
-            total = log.dizimo + log.oferta
             data.append({
                 "ID": log.id,
                 "Data do Culto": log.date,
                 "Tipo de Culto": log.service_type,
-                "Dízimo": log.dizimo,
-                "Oferta": log.oferta,
-                "Total": total
+                "Dízimo": float(log.dizimo or 0.0),
+                "Oferta": float(log.oferta or 0.0),
+                "Total": float((log.dizimo or 0.0) + (log.oferta or 0.0))
             })
-        
         return pd.DataFrame(data)
+
 
 # Substitua esta função inteira
 # Substitua sua função _apply_service_log_changes inteira por esta
@@ -2362,24 +2357,6 @@ def page_lancamentos(user: "User"):
         del st.session_state.status_message
 
     with SessionLocal() as db:
-        # DEBUG: mostrar qual database está sendo usado (temporário — remova em produção)
-        try:
-            db_url = os.environ.get("DATABASE_URL") or str(get_engine().url)
-            st.caption(f"DEBUG: DATABASE_URL = {db_url}")
-        except Exception:
-            pass
-
-        # DEBUG: últimos 8 service logs (temporário)
-        try:
-            recent = db.scalars(select(ServiceLog).order_by(ServiceLog.date.desc()).limit(8)).all()
-            if recent:
-                st.write("DEBUG: últimos ServiceLog (id, date, type, dizimo, oferta, cong, sub):")
-                st.table([{"id": r.id, "date": r.date, "type": r.service_type, "diz": r.dizimo, "ofe": r.oferta, "cong": r.congregation_id, "sub": r.sub_congregation_id} for r in recent])
-            else:
-                st.caption("DEBUG: nenhum ServiceLog encontrado (últimos 8).")
-        except Exception:
-            pass
-
         st.markdown(f"<h1 class='page-title'>Lançamentos</h1>", unsafe_allow_html=True)
 
         # Seleção da congregação principal por perfil
@@ -2453,16 +2430,18 @@ def page_lancamentos(user: "User"):
                             st.session_state.status_message = ("warning", "Nenhum valor foi inserido.")
                         else:
                             try:
+                                # Busca log existente, tratando sub_congregacao corretamente
                                 log_existente = db.scalar(
                                     select(ServiceLog).where(
                                         ServiceLog.date == ent_data,
                                         ServiceLog.service_type == ent_tipo,
                                         ServiceLog.congregation_id == target_cong_obj.id,
-                                        ServiceLog.sub_congregation_id == target_sub_cong_id
+                                        ServiceLog.sub_congregation_id.is_(None) if target_sub_cong_id is None else (ServiceLog.sub_congregation_id == target_sub_cong_id)
                                     )
                                 )
 
                                 if ent_tipo == "Culto de Missões":
+                                    # Ofertas de missões viram Transaction categoria 'Missões'
                                     if ent_oferta > 0:
                                         cat_missoes = db.scalar(
                                             select(Category).where(
@@ -2473,7 +2452,7 @@ def page_lancamentos(user: "User"):
                                         if cat_missoes:
                                             db.add(Transaction(
                                                 date=ent_data, type=TYPE_IN,
-                                                category_id=cat_missoes.id, amount=ent_oferta,
+                                                category_id=cat_missoes.id, amount=float(ent_oferta),
                                                 description="Oferta do Culto de Missões",
                                                 congregation_id=target_cong_obj.id,
                                                 sub_congregation_id=target_sub_cong_id
@@ -2487,11 +2466,11 @@ def page_lancamentos(user: "User"):
                                             st.rerun()
 
                                     if log_existente:
-                                        log_existente.dizimo += ent_dizimo
+                                        log_existente.dizimo = (log_existente.dizimo or 0.0) + float(ent_dizimo)
                                     else:
                                         db.add(ServiceLog(
                                             date=ent_data, service_type=ent_tipo,
-                                            dizimo=ent_dizimo, oferta=0.0,
+                                            dizimo=float(ent_dizimo), oferta=0.0,
                                             congregation_id=target_cong_obj.id,
                                             sub_congregation_id=target_sub_cong_id
                                         ))
@@ -2501,24 +2480,26 @@ def page_lancamentos(user: "User"):
                                         "Atenção: As ofertas do Culto de Missões são lançadas automaticamente no menu 'Relatório de Missões'."
                                     )
                                 else:
+                                    # Caso normal: grava ServiceLog (dízimo + oferta)
                                     if log_existente:
-                                        log_existente.dizimo += ent_dizimo
-                                        log_existente.oferta += ent_oferta
+                                        log_existente.dizimo = (log_existente.dizimo or 0.0) + float(ent_dizimo)
+                                        log_existente.oferta = (log_existente.oferta or 0.0) + float(ent_oferta)
                                     else:
                                         db.add(ServiceLog(
                                             date=ent_data, service_type=ent_tipo,
-                                            dizimo=ent_dizimo, oferta=ent_oferta,
+                                            dizimo=float(ent_dizimo), oferta=float(ent_oferta),
                                             congregation_id=target_cong_obj.id,
                                             sub_congregation_id=target_sub_cong_id
                                         ))
                                     st.session_state.status_message = ("success", "Registro de culto salvo com sucesso!")
 
-                                # tenta commitar e limpa cache para forçar leitura atualizada
+                                # Commit + limpar cache para forçar leitura atualizada
                                 try:
                                     db.commit()
                                     try:
                                         st.cache_data.clear()
                                     except Exception:
+                                        # Não fatal: apenas garante que, se falhar, não interrompe a UX
                                         pass
                                 except IntegrityError as ie:
                                     db.rollback()
@@ -2535,6 +2516,7 @@ def page_lancamentos(user: "User"):
                                     pass
                                 st.session_state.status_message = ("error", f"Erro ao processar entrada: {e}")
                                 st.exception(e)
+
                         st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -2550,32 +2532,20 @@ def page_lancamentos(user: "User"):
                         if dz_valor > 0 and dz_nome.strip():
                             try:
                                 db.add(Tithe(
-                                    date=dz_data, tither_name=dz_nome.strip(), amount=dz_valor,
+                                    date=dz_data, tither_name=dz_nome.strip(), amount=float(dz_valor),
                                     congregation_id=target_cong_obj.id,
                                     sub_congregation_id=target_sub_cong_id,
                                     payment_method=dz_payment
                                 ))
+                                db.commit()
                                 try:
-                                    db.commit()
-                                    try:
-                                        st.cache_data.clear()
-                                    except Exception:
-                                        pass
-                                    st.session_state.status_message = ("success", "Dízimo registrado com sucesso!")
-                                except IntegrityError as ie:
-                                    db.rollback()
-                                    st.session_state.status_message = ("error", "Erro de integridade ao salvar dízimo.")
-                                    st.exception(ie)
-                                except Exception as e:
-                                    db.rollback()
-                                    st.session_state.status_message = ("error", f"Erro inesperado ao salvar dízimo: {e}")
-                                    st.exception(e)
-                            except Exception as e:
-                                try:
-                                    db.rollback()
+                                    st.cache_data.clear()
                                 except Exception:
                                     pass
-                                st.session_state.status_message = ("error", f"Erro ao processar dízimo: {e}")
+                                st.session_state.status_message = ("success", "Dízimo registrado com sucesso!")
+                            except Exception as e:
+                                db.rollback()
+                                st.session_state.status_message = ("error", f"Erro ao salvar dízimo: {e}")
                                 st.exception(e)
                         else:
                             st.session_state.status_message = ("warning", "Preencha o nome e o valor do dízimo.")
@@ -2601,31 +2571,19 @@ def page_lancamentos(user: "User"):
                             try:
                                 db.add(Transaction(
                                     date=sai_data, type="SAÍDA", category_id=cat_obj.id,
-                                    amount=sai_valor, description=(sai_desc or None),
+                                    amount=float(sai_valor), description=(sai_desc or None),
                                     congregation_id=target_cong_obj.id,
                                     sub_congregation_id=target_sub_cong_id
                                 ))
+                                db.commit()
                                 try:
-                                    db.commit()
-                                    try:
-                                        st.cache_data.clear()
-                                    except Exception:
-                                        pass
-                                    st.session_state.status_message = ("success", "Saída registrada com sucesso!")
-                                except IntegrityError as ie:
-                                    db.rollback()
-                                    st.session_state.status_message = ("error", "Erro de integridade ao salvar saída.")
-                                    st.exception(ie)
-                                except Exception as e:
-                                    db.rollback()
-                                    st.session_state.status_message = ("error", f"Erro inesperado ao salvar saída: {e}")
-                                    st.exception(e)
-                            except Exception as e:
-                                try:
-                                    db.rollback()
+                                    st.cache_data.clear()
                                 except Exception:
                                     pass
-                                st.session_state.status_message = ("error", f"Erro ao processar saída: {e}")
+                                st.session_state.status_message = ("success", "Saída registrada com sucesso!")
+                            except Exception as e:
+                                db.rollback()
+                                st.session_state.status_message = ("error", f"Erro ao salvar saída: {e}")
                                 st.exception(e)
                         else:
                             st.session_state.status_message = ("warning", "Preencha o valor e a categoria da saída.")
@@ -2739,43 +2697,38 @@ def page_lancamentos(user: "User"):
 
             # Botão salvar mudanças do resumo (ServiceLog + Missões automática)
             def on_save_click():
+                result = _apply_service_log_changes(
+                    df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id
+                )
+                # limpa cache para refletir mudanças imediatas
                 try:
-                    result = _apply_service_log_changes(
-                        df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id
-                    )
-                    # _apply_service_log_changes já faz commit internamente; limpamos cache em caso de sucesso
-                    try:
-                        st.cache_data.clear()
-                    except Exception:
-                        pass
+                    st.cache_data.clear()
+                except Exception:
+                    pass
 
-                    if result == "missao_ok":
-                        st.session_state.status_message = (
-                            "success",
-                            "Atenção: As ofertas do Culto de Missões são lançadas automaticamente no menu 'Relatório de Missões'."
-                        )
-                    elif result == "geral_ok":
-                        st.session_state.status_message = ("success", "Alterações salvas com sucesso!")
-                    elif result == "erro_integridade":
-                        st.session_state.status_message = (
-                            "error",
-                            "Erro: Tentativa de criar um lançamento duplicado. Verifique os dados."
-                        )
-                    elif result == "erro_categoria":
-                        st.session_state.status_message = (
-                            "error",
-                            "ERRO CRÍTICO: Categoria 'Missões' (Entrada) não encontrada."
-                        )
-                    elif result == "erro_geral":
-                        st.session_state.status_message = (
-                            "error",
-                            "Ocorreu um erro inesperado ao salvar."
-                        )
-                except Exception as e:
-                    st.session_state.status_message = ("error", f"Erro ao salvar alterações: {e}")
-                    st.exception(e)
-                finally:
-                    st.rerun()
+                if result == "missao_ok":
+                    st.session_state.status_message = (
+                        "success",
+                        "Atenção: As ofertas do Culto de Missões são lançadas automaticamente no menu 'Relatório de Missões'."
+                    )
+                elif result == "geral_ok":
+                    st.session_state.status_message = ("success", "Alterações salvas com sucesso!")
+                elif result == "erro_integridade":
+                    st.session_state.status_message = (
+                        "error",
+                        "Erro: Tentativa de criar um lançamento duplicado. Verifique os dados."
+                    )
+                elif result == "erro_categoria":
+                    st.session_state.status_message = (
+                        "error",
+                        "ERRO CRÍTICO: Categoria 'Missões' (Entrada) não encontrada."
+                    )
+                elif result == "erro_geral":
+                    st.session_state.status_message = (
+                        "error",
+                        "Ocorreu um erro inesperado ao salvar."
+                    )
+                st.rerun()
 
             st.button(
                 "Salvar alterações na tabela",
@@ -2789,7 +2742,7 @@ def page_lancamentos(user: "User"):
             tithes_query = select(Tithe).where(
                 Tithe.congregation_id == parent_cong_obj.id,
                 Tithe.date >= start_tab, Tithe.date < end_tab,
-                Tithe.sub_congregation_id == target_sub_cong_id
+                (Tithe.sub_congregation_id.is_(None) if target_sub_cong_id is None else (Tithe.sub_congregation_id == target_sub_cong_id))
             )
             tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
             _editor_dizimos(
@@ -2802,13 +2755,14 @@ def page_lancamentos(user: "User"):
                 Transaction.congregation_id == parent_cong_obj.id,
                 Transaction.date >= start_tab, Transaction.date < end_tab,
                 Transaction.type == "SAÍDA",
-                Transaction.sub_congregation_id == target_sub_cong_id
+                (Transaction.sub_congregation_id.is_(None) if target_sub_cong_id is None else (Transaction.sub_congregation_id == target_sub_cong_id))
             )
             txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
             _editor_lancamentos(
                 txs_out, f"Saídas - {contexto_tabela}", tx_type_hint="SAÍDA",
                 force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id
             )
+
 
             # ... (demais seções permanecem iguais)
 
