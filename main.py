@@ -3223,6 +3223,12 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 
 def page_lancamentos(user: "User"):
     ensure_seed()
+    
+    # ----------------------------------------------------
+    # CORREÇÃO DE ESTADO: Garante que a chave exista antes de ser usada
+    if "rap_dizimo_lote" not in st.session_state:
+        st.session_state.rap_dizimo_lote = ""
+    # ----------------------------------------------------
 
     # Mensagens persistidas entre reruns
     if 'status_message' in st.session_state:
@@ -3233,7 +3239,8 @@ def page_lancamentos(user: "User"):
             st.error(msg_text)
         elif msg_type == "warning":
             st.warning(msg_text)
-        del st.session_state.status_message
+        del st.session_state.status_state # Erro: Corrigido para del st.session_state.status_message. Se seu código usa status_state, mantenha o nome.
+        del st.session_state.status_message # Assegura a limpeza
 
     with SessionLocal() as db:
         st.markdown(f"<h1 class='page-title'>Lançamentos</h1>", unsafe_allow_html=True)
@@ -3403,7 +3410,7 @@ def page_lancamentos(user: "User"):
             st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
             st.divider()
             
-            # --- NOVO: Data do Culto, Tipo, Dízimo e Oferta no mesmo bloco ---
+            # --- NOVO: Data do Culto Única e Tipo de Culto no mesmo retângulo ---
             st.markdown("##### 1. Lançar Ofertas e Resumo do Culto")
             with st.form("form_oferta_rapida"):
                 
@@ -3513,7 +3520,7 @@ def page_lancamentos(user: "User"):
 
                             # 3. Nome do Dizimista (Todos os tokens, exceto o token de Valor)
                             nome_tokens = [t for j, t in enumerate(tokens) if j != valor_index]
-                            # NOVO: Limpeza final para garantir que nenhum caractere indesejado seja adicionado ao nome
+                            # Limpeza final para garantir que nenhum caractere indesejado seja adicionado ao nome
                             nome_dizimista = " ".join(nome_tokens).strip()
                             
                             if not nome_dizimista:
