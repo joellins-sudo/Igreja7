@@ -3257,10 +3257,10 @@ def page_lancamentos(user: "User"):
 
         st.markdown(f"### CONGREGAÇÃO: {parent_cong_obj.name.upper()}")
 
-        # 1. NOVO: Adiciona a opção "Lançamento Rápido (Móvel)"
+        # 1. NOVO: Apenas duas opções
         modo = st.radio(
             "Modo de lançamento:",
-            ["Formulário único", "Editar direto na tabela", "Lançamento Rápido (Móvel)"],
+            ["Editar direto na tabela", "Lançamento Rápido (Móvel)"],
             horizontal=True,
             key="lan_modo_sel"
         )
@@ -3287,136 +3287,15 @@ def page_lancamentos(user: "User"):
             for sub in sub_congs:
                 opcoes[sub.name] = sub.id
             
-            # Use chaves diferentes para evitar conflito nos selectbox
-            sel_key = f"lan_sub_sel_context_{'form' if modo == 'Formulário único' else 'rapido'}"
-            if modo != "Editar direto na tabela": # A edição da tabela usa outra lógica
+            # O modo RÁPIDO usa esta seleção de unidade (fora do rádio da tabela)
+            if modo == "Lançamento Rápido (Móvel)":
                 contexto_selecionado = st.selectbox(
-                    "Lançar em:", list(opcoes.keys()), key=sel_key
+                    "Lançar em:", list(opcoes.keys()), key="lan_sub_sel_rapido"
                 )
                 target_sub_cong_id = opcoes[contexto_selecionado]
 
-        # ========================== FORMULÁRIO ÚNICO ==========================
-        if modo == "Formulário único":
-            st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
-            st.divider()
-            
-            # ---- ENTRADA (Resumo do Culto)
-            with st.expander("➕ Lançar ENTRADA (Resumo do Culto)", expanded=True):
-                st.markdown('<div class="adrf-entrada">', unsafe_allow_html=True)
-                with st.form("form_entrada_resumo"):
-                    ent_data = st.date_input("Data do Culto", value=today_bahia(), key="ent_data_form")
-                    ent_tipo = st.selectbox("Tipo de Culto", options=tipos_de_culto, key="ent_tipo_form")
-                    c1, c2 = st.columns(2)
-                    ent_dizimo = c1.number_input("Valor do Dízimo", min_value=0.0, value=0.0, format="%.2f", key="ent_dizimo_form")
-                    ent_oferta = c2.number_input("Valor da Oferta", min_value=0.0, value=0.0, format="%.2f", key="ent_oferta_form")
-
-                    if st.form_submit_button("Salvar Entrada do Culto"):
-                        if ent_dizimo <= 0 and ent_oferta <= 0:
-                            st.session_state.status_message = ("warning", "Nenhum valor foi inserido.")
-                        else:
-                            try:
-                                # Lógica de salvamento para o Formulário Único (IDÊNTICA à original)
-                                log_existente = db.scalar(
-                                    select(ServiceLog).where(
-                                        ServiceLog.date == ent_data,
-                                        ServiceLog.service_type == ent_tipo,
-                                        ServiceLog.congregation_id == target_cong_obj.id,
-                                        ServiceLog.sub_congregation_id.is_(None) if target_sub_cong_id is None else (ServiceLog.sub_congregation_id == target_sub_cong_id)
-                                    )
-                                )
-
-                                if ent_tipo == "Culto de Missões":
-                                    if ent_oferta > 0:
-                                        cat_missoes = db.scalar(select(Category).where(func.lower(Category.name) == 'missões', Category.type == TYPE_IN))
-                                        if cat_missoes:
-                                            db.add(Transaction(
-                                                date=ent_data, type=TYPE_IN, category_id=cat_missoes.id, amount=float(ent_oferta),
-                                                description="Oferta do Culto de Missões", congregation_id=target_cong_obj.id,
-                                                sub_congregation_id=target_sub_cong_id
-                                            ))
-                                        else:
-                                            st.session_state.status_message = ("error", "ERRO: Categoria 'Missões' não encontrada. A oferta não foi salva."); db.rollback(); st.rerun()
-
-                                    if log_existente: log_existente.dizimo = (log_existente.dizimo or 0.0) + float(ent_dizimo)
-                                    else: db.add(ServiceLog(date=ent_data, service_type=ent_tipo, dizimo=float(ent_dizimo), oferta=0.0, congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
-
-                                    st.session_state.status_message = ("success", "Atenção: As ofertas do Culto de Missões são lançadas automaticamente no menu 'Relatório de Missões'.")
-                                else:
-                                    if log_existente:
-                                        log_existente.dizimo = (log_existente.dizimo or 0.0) + float(ent_dizimo)
-                                        log_existente.oferta = (log_existente.oferta or 0.0) + float(ent_oferta)
-                                    else:
-                                        db.add(ServiceLog(date=ent_data, service_type=ent_tipo, dizimo=float(ent_dizimo), oferta=float(ent_oferta), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
-                                    st.session_state.status_message = ("success", "Registro de culto salvo com sucesso!")
-
-                                try:
-                                    db.commit(); st.cache_data.clear()
-                                except IntegrityError as ie:
-                                    db.rollback(); st.session_state.status_message = ("error", "Erro de integridade: possível lançamento duplicado para a mesma data/tipo/unidade."); st.exception(ie)
-                                except Exception as e:
-                                    db.rollback(); st.session_state.status_message = ("error", f"Erro inesperado ao salvar: {str(e)}"); st.exception(e)
-                            except Exception as e:
-                                try: db.rollback()
-                                except Exception: pass
-                                st.session_state.status_message = ("error", f"Erro ao processar entrada: {e}"); st.exception(e)
-
-                        st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
-
-            # ---- DÍZIMO NOMINAL (IDÊNTICO AO ORIGINAL)
-            with st.expander("👤 Lançar DÍZIMO (Nominal)"):
-                st.markdown('<div class="adrf-dizimo">', unsafe_allow_html=True)
-                with st.form("form_dizimo"):
-                    dz_data = st.date_input("Data do Dízimo", value=today_bahia(), key="dz_data")
-                    dz_nome = st.text_input("Nome do dizimista", key="dz_nome")
-                    dz_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="dz_valor")
-                    dz_payment = st.selectbox("Forma de Pagamento", ["Dinheiro", "PIX", "Cartão", "Transferência"], key="dz_pay")
-                    if st.form_submit_button("Salvar DIZIMISTA"):
-                        if dz_valor > 0 and dz_nome.strip():
-                            try:
-                                db.add(Tithe(
-                                    date=dz_data, tither_name=dz_nome.strip(), amount=float(dz_valor),
-                                    congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id,
-                                    payment_method=dz_payment
-                                ))
-                                db.commit(); st.cache_data.clear()
-                                st.session_state.status_message = ("success", "Dízimo registrado com sucesso!")
-                            except Exception as e:
-                                db.rollback(); st.session_state.status_message = ("error", f"Erro ao salvar dízimo: {e}"); st.exception(e)
-                        else: st.session_state.status_message = ("warning", "Preencha o nome e o valor do dízimo.")
-                        st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
-
-            # ---- SAÍDAS (IDÊNTICO AO ORIGINAL)
-            with st.expander("➖ Lançar SAÍDA"):
-                st.markdown('<div class="adrf-saida">', unsafe_allow_html=True)
-                with st.form("form_saida"):
-                    cats_out = categories_for_type(db, "SAÍDA")
-                    c1, c2 = st.columns(2)
-                    with c1: sai_data = st.date_input("Data da Saída", value=today_bahia(), key="sai_data")
-                    with c2: sai_cat_name = st.selectbox("Categoria", [c.name for c in cats_out] or ["—"], key="sai_cat")
-                    sai_desc = st.text_input("Descrição (opcional)", key="sai_desc")
-                    sai_valor = st.number_input("Valor (R$)", min_value=0.0, value=0.0, format="%.2f", key="sai_valor")
-
-                    if st.form_submit_button("Salvar SAÍDA"):
-                        cat_obj = next((c for c in cats_out if c.name == sai_cat_name), None)
-                        if sai_valor > 0 and cat_obj:
-                            try:
-                                db.add(Transaction(
-                                    date=sai_data, type="SAÍDA", category_id=cat_obj.id,
-                                    amount=float(sai_valor), description=(sai_desc or None),
-                                    congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id
-                                ))
-                                db.commit(); st.cache_data.clear()
-                                st.session_state.status_message = ("success", "Saída registrada com sucesso!")
-                            except Exception as e:
-                                db.rollback(); st.session_state.status_message = ("error", f"Erro ao salvar saída: {e}"); st.exception(e)
-                        else: st.session_state.status_message = ("warning", "Preencha o valor e a categoria da saída.")
-                        st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
-
         # ====================== EDITAR DIRETO NA TABELA =======================
-        elif modo == "Editar direto na tabela":
+        if modo == "Editar direto na tabela":
             # Lógica para contexto da tabela (seleciona sub-unidade)
             contexto_tabela = f"{parent_cong_obj.name} (Principal)"
             target_sub_cong_id = None
@@ -3427,7 +3306,7 @@ def page_lancamentos(user: "User"):
                 target_sub_cong_id = opcoes_tabela[contexto_tabela]
 
             st.info(f"Editando lançamentos de: **{contexto_tabela}**")
-            # ... (O restante do código do modo "Editar direto na tabela" permanece idêntico) ...
+
             ref_tab = get_month_selector("Mês de referência da tabela")
             start_tab, end_tab = month_bounds(ref_tab)
 
@@ -3523,12 +3402,16 @@ def page_lancamentos(user: "User"):
         elif modo == "Lançamento Rápido (Móvel)":
             st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
             st.divider()
-
-            # --- O modo RÁPIDO usa a data de hoje por padrão ---
-            rap_data = today_bahia()
             
+            # --- NOVO: Data do Culto Única (fora do form) ---
+            rap_data = st.date_input("Data do Culto:", value=today_bahia(), key="rap_data_unica_sel")
+            st.markdown(f"**Data selecionada:** {format_date(rap_data)}")
+            st.divider()
+
+            # 1. Lançar Ofertas e Resumo do Culto
             st.markdown("##### 1. Lançar Ofertas e Resumo do Culto")
             with st.form("form_oferta_rapida"):
+                # NOVO: Remove a Data do Culto do Form
                 ent_tipo = st.selectbox("Tipo de Culto", options=tipos_de_culto, key="rap_ent_tipo")
                 c1, c2 = st.columns(2)
                 ent_dizimo = c1.number_input("Total Dízimo (Culto)", min_value=0.0, value=0.0, format="%.2f", key="rap_ent_diz")
@@ -3579,16 +3462,16 @@ def page_lancamentos(user: "User"):
             st.divider()
             st.markdown("##### 2. Lançar Dízimos Nominais em Lote (Entrada Livre)")
             
-            # Campo Flexível de Entrada:
-            dizimos_texto = st.text_area(
-                "Insira um dízimo por linha (Ex: João Silva 150.00 PIX | Maria Oliveira 50 Dinheiro)", 
-                height=300, key="rap_dizimo_lote"
-            )
-            
-            # Seleção da Forma Padrão: 
+            # --- NOVO: Seletor de Forma de Pagamento Única ---
             default_payment = st.selectbox(
-                "Forma de Pagamento Padrão (Usada se não for especificada na linha):", 
-                ["Dinheiro", "PIX", "Cartão", "Transferência", "Outro"], key="rap_diz_default_pay"
+                "Forma de Pagamento (Padrão para Lote):", 
+                ["PIX", "Dinheiro", "Cartão", "Transferência", "Outro"], key="rap_diz_default_pay"
+            )
+
+            # --- NOVO: Campo de Entrada Simplificado ---
+            dizimos_texto = st.text_area(
+                "Insira um dízimo por linha (Ex: João Silva 150.00 | Maria Oliveira 50)", 
+                height=300, key="rap_dizimo_lote"
             )
             
             # Botão Processar (Fora do Form, para manter o Form acima limpo)
@@ -3597,22 +3480,21 @@ def page_lancamentos(user: "User"):
                     st.warning("O campo de dízimos em lote está vazio."); st.stop()
                     
                 erros, sucessos = [], 0
-                linhas = [l.strip() for l in dizimos_texto.splitlines() if l.strip()]
+                # Remove vírgulas extras para flexibilidade no parse (usando ponto como decimal)
+                linhas = [l.strip().replace(',', '.') for l in dizimos_texto.splitlines() if l.strip()]
 
                 for i, linha in enumerate(linhas):
-                    # Inicia a transação a cada linha (mais seguro)
                     with SessionLocal() as db_batch:
                         try:
                             # 1. Tenta dividir a linha em tokens (flexível)
-                            tokens = [t.strip() for t in linha.replace(';', ' ').replace(',', ' ').split() if t.strip()]
+                            tokens = [t.strip() for t in linha.split() if t.strip()]
                             if not tokens: continue
                             
-                            # 2. Encontrar o Valor (o token que pode ser um float)
+                            # 2. Encontrar o Valor (o último token que se parece com número)
                             valor_float, valor_index = 0.0, -1
-                            # Busca o valor da direita para a esquerda
                             for j, token in enumerate(reversed(tokens)):
                                 try:
-                                    valor_float = _to_float_brl(token)
+                                    valor_float = float(token)
                                     if valor_float > 0:
                                         valor_index = len(tokens) - 1 - j
                                         break
@@ -3620,44 +3502,30 @@ def page_lancamentos(user: "User"):
                             
                             if valor_index == -1:
                                 erros.append(f"Linha {i+1} ('{linha}'): Valor de dízimo não encontrado ou inválido.")
-                                db_batch.rollback()
-                                continue
+                                db_batch.rollback(); continue
 
-                            # 3. Encontrar a Forma de Pagamento
-                            forma_identificada = default_payment
-                            
-                            # Tenta pegar o token seguinte ao valor (se existir e for uma forma conhecida)
-                            if len(tokens) > valor_index + 1:
-                                forma_candidata = tokens[valor_index + 1].strip().upper()
-                                if forma_candidata in ["PIX", "DINHEIRO", "CARTÃO", "TRANSFERÊNCIA", "OUTRO"]:
-                                    forma_identificada = forma_candidata
-                                    
-                            # 4. Nome do Dizimista (Todo o resto ANTES do valor)
+                            # 3. Nome do Dizimista (Todo o resto ANTES do valor)
                             nome_dizimista = " ".join(tokens[:valor_index])
                             
                             if not nome_dizimista:
                                 erros.append(f"Linha {i+1} ('{linha}'): Nome do dizimista ausente.")
-                                db_batch.rollback()
-                                continue
+                                db_batch.rollback(); continue
 
-                            # 5. Inserir no DB
+                            # 4. Inserir no DB (Usando a data e a forma de pagamento única)
                             db_batch.add(Tithe(
                                 date=rap_data, tither_name=nome_dizimista, amount=valor_float,
                                 congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id,
-                                payment_method=forma_identificada
+                                payment_method=default_payment # Forma única do seletor
                             ))
-                            db_batch.commit()
-                            sucessos += 1
+                            db_batch.commit(); sucessos += 1
                             
                         except Exception as e:
-                            db_batch.rollback()
-                            erros.append(f"Erro inesperado na linha {i+1} ('{linha}'): {str(e)}")
+                            db_batch.rollback(); erros.append(f"Erro inesperado na linha {i+1} ('{linha}'): {str(e)}")
 
                 # Feedback após o loop (usa session state para persistir)
                 if sucessos > 0: st.session_state.status_message = ("success", f"✅ {sucessos} dízimos registrados com sucesso.")
                 if erros: st.session_state.status_message = ("error", "❌ Erros encontrados: " + " | ".join(erros))
                 
-                # Se for um sucesso (mesmo que com erros), limpa o cache e faz o rerun
                 if sucessos > 0:
                     try: st.cache_data.clear()
                     except Exception: pass
