@@ -3228,7 +3228,6 @@ def page_lancamentos(user: "User"):
     if 'status_message' in st.session_state:
         msg_type, msg_text = st.session_state.status_message
         if msg_type == "success":
-            # Mantemos o destaque da mensagem de sucesso (verde padrão do Streamlit)
             st.success(msg_text)
         elif msg_type == "error":
             st.error(msg_text)
@@ -3404,20 +3403,20 @@ def page_lancamentos(user: "User"):
             st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
             st.divider()
             
-            # --- NOVO: Data do Culto Única e Tipo de Culto no mesmo retângulo ---
-            c1, c2 = st.columns(2)
-            with c1:
-                # Formato da data DD/MM/AAAA é o padrão do st.date_input
-                rap_data = st.date_input("Data do Culto:", value=today_bahia(), key="rap_data_unica_sel", format="DD/MM/YYYY")
-            with c2:
-                ent_tipo = st.selectbox("Tipo de Culto", options=tipos_de_culto, key="rap_ent_tipo")
-
-            st.markdown(f"**Data selecionada:** {format_date(rap_data)}")
-            st.divider()
-
-            # 1. Lançar Ofertas e Resumo do Culto
+            # --- NOVO: Data do Culto, Tipo, Dízimo e Oferta no mesmo bloco ---
             st.markdown("##### 1. Lançar Ofertas e Resumo do Culto")
             with st.form("form_oferta_rapida"):
+                
+                # Primeira linha: Data e Tipo de Culto
+                col_data, col_tipo = st.columns(2)
+                with col_data:
+                    rap_data = st.date_input("Data do Culto:", value=today_bahia(), key="rap_data_unica_sel", format="DD/MM/YYYY")
+                with col_tipo:
+                    ent_tipo = st.selectbox("Tipo de Culto", options=tipos_de_culto, key="rap_ent_tipo")
+                    
+                st.markdown(f"**Data selecionada:** {format_date(rap_data)}")
+
+                # Segunda linha: Dízimo e Oferta
                 c1, c2 = st.columns(2)
                 ent_dizimo = c1.number_input("Total Dízimo (Culto)", min_value=0.0, value=0.0, format="%.2f", key="rap_ent_diz")
                 ent_oferta = c2.number_input("Total Oferta (Culto)", min_value=0.0, value=0.0, format="%.2f", key="rap_ent_ofe")
@@ -3514,7 +3513,8 @@ def page_lancamentos(user: "User"):
 
                             # 3. Nome do Dizimista (Todos os tokens, exceto o token de Valor)
                             nome_tokens = [t for j, t in enumerate(tokens) if j != valor_index]
-                            nome_dizimista = " ".join(nome_tokens)
+                            # NOVO: Limpeza final para garantir que nenhum caractere indesejado seja adicionado ao nome
+                            nome_dizimista = " ".join(nome_tokens).strip()
                             
                             if not nome_dizimista:
                                 erros.append(f"Linha {i+1} ('{linha}'): Nome do dizimista ausente.")
@@ -3532,7 +3532,10 @@ def page_lancamentos(user: "User"):
                             db_batch.rollback(); erros.append(f"Erro inesperado na linha {i+1} ('{linha}'): {str(e)}")
 
                 # Feedback após o loop (usa session state para persistir)
-                if sucessos > 0: st.session_state.status_message = ("success", f"✅ {sucessos} dízimos registrados com sucesso.")
+                if sucessos > 0: 
+                    # 🚀 CORREÇÃO PRINCIPAL: LIMPAR A CHAVE DA TEXT AREA APÓS SUCESSO
+                    st.session_state.rap_dizimo_lote = ""
+                    st.session_state.status_message = ("success", f"✅ {sucessos} dízimos registrados com sucesso.")
                 if erros: st.session_state.status_message = ("error", "❌ Erros encontrados: " + " | ".join(erros))
                 
                 if sucessos > 0:
