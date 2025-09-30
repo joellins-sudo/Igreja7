@@ -1344,7 +1344,7 @@ def now_bahia():
     """
     # se você quiser usar timezone fixa, podemos alterar aqui; por enquanto
     # retornamos a hora local do servidor.
-    return datetime.datetime.now()
+    return datetime.now()
 
 def today_bahia():
     """
