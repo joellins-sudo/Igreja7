@@ -1,0 +1,11 @@
+﻿streamlit
+sqlalchemy>=2.0
+psycopg2-binary
+pandas
+reportlab
+streamlit-aggrid
+openai
+tabulate
+numpy
+pytz
+python-dateutil
