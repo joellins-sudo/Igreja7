@@ -14,6 +14,10 @@ from __future__ import annotations
 
 import math
 
+from sqlalchemy import (
+    select, func, String, Date, Float, ForeignKey, 
+    create_engine, and_, DateTime, Boolean  # <-- NOVOS TIPOS ADICIONADOS AQUI
+)
 # ===== UI extra (menu bonito com fallback) =====
 try:
     import streamlit_antd_components as sac  # pip install streamlit-antd-components
@@ -1570,6 +1574,19 @@ class Tithe(Base):
 
     # Relação com Congregation (versão correta e única)
     congregation: Mapped["Congregation"] = relationship(back_populates="tithes")
+    
+    # Adicione esta classe junto com User, Congregation, Transaction, etc.
+class InternalMessage(Base):
+    __tablename__ = "internal_messages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sender_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    target_congregation_id: Mapped[int] = mapped_column(ForeignKey("congregations.id"))
+    date_sent: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    message_text: Mapped[str] = mapped_column(String(500))
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    target_congregation: Mapped["Congregation"] = relationship(foreign_keys=[target_congregation_id])
+    sender: Mapped["User"] = relationship(foreign_keys=[sender_user_id])
 
 # ===================== ENGINE / SESSION =====================
 @st.cache_resource
@@ -1840,6 +1857,32 @@ def order_congs_sede_first(congs: List[Congregation]) -> List[Congregation]:
     others = sorted([c for c in congs if _norm(c.name) != "sede"], key=lambda x: _norm(x.name))
     return (sede + others) if sede else others
 
+
+def check_unread_messages(user: "User", db: Session) -> Optional[InternalMessage]:
+    """Busca a mensagem não lida mais recente para a congregação do usuário."""
+    if not user.congregation_id:
+        return None
+    
+    # Exclui Sede (quem envia)
+    if user.role == "SEDE": 
+        return None
+        
+    q = select(InternalMessage).where(
+        InternalMessage.target_congregation_id == user.congregation_id,
+        InternalMessage.is_read == False
+    ).order_by(InternalMessage.date_sent.desc()).limit(1)
+    
+    return db.scalar(q)
+
+def mark_message_as_read(msg_id: int):
+    """Marca uma mensagem específica como lida."""
+    with SessionLocal() as db:
+        msg = db.get(InternalMessage, msg_id)
+        if msg:
+            msg.is_read = True
+            db.commit()
+
+
 def sidebar_common(user: "User") -> str:
     """Desenha o menu lateral e retorna a página selecionada."""
     MENU_PAGES = {
@@ -1883,6 +1926,31 @@ def sidebar_common(user: "User") -> str:
         except Exception:
             pass
         st.write(f"👤 **{getattr(user, 'username', 'Usuário')}** — *{getattr(user, 'role', '')}*")
+        
+        # ================================================================
+        # MELHORIA: ALERTA DE MENSAGEM NÃO LIDA NA SIDEBAR
+        # ================================================================
+        with SessionLocal() as db:
+            # check_unread_messages deve ser definida em outro lugar do código
+            try:
+                unread_msg = check_unread_messages(user, db)
+                if unread_msg:
+                    st.markdown(
+                        f"""
+                        <div style="
+                            background: #fee2e2; border-radius: 8px; padding: 10px; 
+                            margin-bottom: 15px; border: 1px solid #fca5a5;
+                            color: #991b1b; font-weight: 700; cursor: pointer;"
+                            data-target-page="Visão Geral">
+                            📩 NOVO AVISO: {unread_msg.target_congregation.name}!
+                        </div>
+                        """, 
+                        unsafe_allow_html=True
+                    )
+            except NameError:
+                # Ignora se check_unread_messages ainda não estiver definida
+                pass
+        # ================================================================
 
         sel_label = st.radio(
             "Menu", options=menu_labels_pretty, index=default_index,
@@ -4358,6 +4426,84 @@ def page_visao_geral(user: "User"):
     ensure_seed()
     with SessionLocal() as db:
         st.markdown("<h1 class='page-title'>Visão Geral</h1>", unsafe_allow_html=True)
+        
+        # --------------------- NOVO: SEÇÃO DE MENSAGENS INTERNAS (apenas para SEDE) ---------------------
+        if user.role == "SEDE":
+            st.markdown("### 📩 Enviar Comunicado Interno (SEDE)")
+            congs_all = order_congs_sede_first(cong_options_for(user, db))
+            congs_sem_sede = [c for c in congs_all if _norm(c.name) != "sede"]
+            
+            with st.form("form_send_message", clear_on_submit=True):
+                # Permite enviar para todas ou escolher uma
+                target_options = ["TODAS AS CONGREGAÇÕES"] + [c.name for c in congs_sem_sede]
+                target_cong_name = st.selectbox("Destinatário:", target_options, key="msg_target_cong")
+                msg_text = st.text_area("Mensagem:", height=100, max_chars=500, key="msg_text")
+                
+                if st.form_submit_button("✉️ Enviar Mensagem"):
+                    if not msg_text.strip():
+                        st.error("A mensagem não pode ser vazia.")
+                    else:
+                        congs_to_send = congs_sem_sede if target_cong_name == "TODAS AS CONGREGAÇÕES" else [next((c for c in congs_sem_sede if c.name == target_cong_name), None)]
+                        congs_to_send = [c for c in congs_to_send if c] # Remove None se houver
+
+                        if not congs_to_send:
+                            st.error("Nenhum destinatário encontrado.")
+                        else:
+                            for c in congs_to_send:
+                                db.add(InternalMessage(
+                                    sender_user_id=user.id,
+                                    target_congregation_id=c.id,
+                                    message_text=msg_text.strip(),
+                                    date_sent=now_bahia()
+                                ))
+                            db.commit()
+                            st.success(f"Mensagem enviada para {len(congs_to_send)} congregação(ões)!")
+                            st.rerun()
+
+            st.divider()
+
+        # --------------------- NOVO: VISUALIZAÇÃO DAS MENSAGENS (para Tesoureiros) ---------------------
+        if user.role != "SEDE":
+            st.markdown("### 🔔 Avisos Recebidos")
+            if user.congregation_id:
+                # 1. Checa a mensagem mais recente NÃO LIDA
+                unread_msg = check_unread_messages(user, db)
+
+                if unread_msg:
+                    with st.container(border=True):
+                        st.warning(f"📩 **MENSAGEM NÃO LIDA** — Recebida em: {unread_msg.date_sent.strftime('%d/%m/%Y %H:%M')}")
+                        st.markdown(f"**De:** SEDE")
+                        st.markdown(f"**Mensagem:** {unread_msg.message_text}")
+                        
+                        if st.button("Marcar como Lida e Arquivar", key=f"mark_read_{unread_msg.id}"):
+                            mark_message_as_read(unread_msg.id)
+                            st.toast("Mensagem arquivada.", icon="✅")
+                            st.rerun()
+                    st.divider()
+
+                # 2. Histórico de Mensagens Arquivadas (as que foram lidas ou são antigas)
+                q_history = select(InternalMessage).where(
+                    InternalMessage.target_congregation_id == user.congregation_id
+                ).order_by(InternalMessage.date_sent.desc()).limit(10)
+
+                messages = db.scalars(q_history).all()
+
+                if not messages:
+                    st.info("Nenhum aviso no seu histórico.")
+                else:
+                    st.markdown("##### Histórico Recente (Máximo 10)")
+                    
+                    df_msg = pd.DataFrame([{
+                        "Data": m.date_sent.strftime('%d/%m/%Y'),
+                        "Lida": "✅" if m.is_read else "❌",
+                        "Mensagem": m.message_text
+                    } for m in messages])
+                    st.dataframe(df_msg, use_container_width=True, hide_index=True)
+            
+            st.divider()
+        # --------------------- FIM SEÇÃO DE MENSAGENS INTERNAS ---------------------
+
+        # --------------------- CÓDIGO ORIGINAL (continua abaixo) ---------------------
         ref = get_month_selector()
         start, end = month_bounds(ref)
         
