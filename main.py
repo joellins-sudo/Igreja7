@@ -3228,6 +3228,7 @@ def page_lancamentos(user: "User"):
     if 'status_message' in st.session_state:
         msg_type, msg_text = st.session_state.status_message
         if msg_type == "success":
+            # Mantemos o destaque da mensagem de sucesso (verde padrão do Streamlit)
             st.success(msg_text)
         elif msg_type == "error":
             st.error(msg_text)
@@ -3277,7 +3278,7 @@ def page_lancamentos(user: "User"):
             "Outro"
         ]
         
-        # --- Configuração de Contexto (Usada pelos 3 modos) ---
+        # --- Configuração de Contexto (Usada pelos 2 modos) ---
         target_cong_obj = parent_cong_obj
         contexto_selecionado = f"{parent_cong_obj.name} (Principal)"
         target_sub_cong_id = None
@@ -3287,7 +3288,7 @@ def page_lancamentos(user: "User"):
             for sub in sub_congs:
                 opcoes[sub.name] = sub.id
             
-            # O modo RÁPIDO usa esta seleção de unidade (fora do rádio da tabela)
+            # Apenas para o modo RÁPIDO
             if modo == "Lançamento Rápido (Móvel)":
                 contexto_selecionado = st.selectbox(
                     "Lançar em:", list(opcoes.keys()), key="lan_sub_sel_rapido"
@@ -3403,16 +3404,20 @@ def page_lancamentos(user: "User"):
             st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
             st.divider()
             
-            # --- NOVO: Data do Culto Única (fora do form) ---
-            rap_data = st.date_input("Data do Culto:", value=today_bahia(), key="rap_data_unica_sel")
+            # --- NOVO: Data do Culto Única e Tipo de Culto no mesmo retângulo ---
+            c1, c2 = st.columns(2)
+            with c1:
+                # Formato da data DD/MM/AAAA é o padrão do st.date_input
+                rap_data = st.date_input("Data do Culto:", value=today_bahia(), key="rap_data_unica_sel", format="DD/MM/YYYY")
+            with c2:
+                ent_tipo = st.selectbox("Tipo de Culto", options=tipos_de_culto, key="rap_ent_tipo")
+
             st.markdown(f"**Data selecionada:** {format_date(rap_data)}")
             st.divider()
 
             # 1. Lançar Ofertas e Resumo do Culto
             st.markdown("##### 1. Lançar Ofertas e Resumo do Culto")
             with st.form("form_oferta_rapida"):
-                # NOVO: Remove a Data do Culto do Form
-                ent_tipo = st.selectbox("Tipo de Culto", options=tipos_de_culto, key="rap_ent_tipo")
                 c1, c2 = st.columns(2)
                 ent_dizimo = c1.number_input("Total Dízimo (Culto)", min_value=0.0, value=0.0, format="%.2f", key="rap_ent_diz")
                 ent_oferta = c2.number_input("Total Oferta (Culto)", min_value=0.0, value=0.0, format="%.2f", key="rap_ent_ofe")
@@ -3462,16 +3467,16 @@ def page_lancamentos(user: "User"):
             st.divider()
             st.markdown("##### 2. Lançar Dízimos Nominais em Lote (Entrada Livre)")
             
-            # --- NOVO: Seletor de Forma de Pagamento Única ---
-            default_payment = st.selectbox(
-                "Forma de Pagamento (Padrão para Lote):", 
-                ["PIX", "Dinheiro", "Cartão", "Transferência", "Outro"], key="rap_diz_default_pay"
-            )
-
             # --- NOVO: Campo de Entrada Simplificado ---
             dizimos_texto = st.text_area(
-                "Insira um dízimo por linha (Ex: João Silva 150.00 | Maria Oliveira 50)", 
+                "Insira um dízimo por linha (Ex: João Silva 500.00 | Mara Rúbia 50)", 
                 height=300, key="rap_dizimo_lote"
+            )
+
+            # --- NOVO: Seletor de Forma de Pagamento Padrão ---
+            default_payment = st.selectbox(
+                "Forma de Pagamento (Padrão para Lote):", 
+                ["Dinheiro", "PIX", "Cartão", "Transferência", "Outro"], key="rap_diz_default_pay", index=0 # index=0 garante que 'Dinheiro' é o padrão
             )
             
             # Botão Processar (Fora do Form, para manter o Form acima limpo)
@@ -3480,8 +3485,9 @@ def page_lancamentos(user: "User"):
                     st.warning("O campo de dízimos em lote está vazio."); st.stop()
                     
                 erros, sucessos = [], 0
-                # Remove vírgulas extras para flexibilidade no parse (usando ponto como decimal)
-                linhas = [l.strip().replace(',', '.') for l in dizimos_texto.splitlines() if l.strip()]
+                # Linha de parse mais flexível: aceita ',' ou '.' como decimal, mas o to_float_brl resolve
+                # Remove vírgulas, pontos e barras (mantendo espaços para split)
+                linhas = [l.strip().replace(',', '.').replace('/', ' ') for l in dizimos_texto.splitlines() if l.strip()]
 
                 for i, linha in enumerate(linhas):
                     with SessionLocal() as db_batch:
@@ -3490,13 +3496,15 @@ def page_lancamentos(user: "User"):
                             tokens = [t.strip() for t in linha.split() if t.strip()]
                             if not tokens: continue
                             
-                            # 2. Encontrar o Valor (o último token que se parece com número)
+                            # 2. Encontrar o Valor em QUALQUER lugar (o primeiro token que se parece com float)
                             valor_float, valor_index = 0.0, -1
-                            for j, token in enumerate(reversed(tokens)):
+                            # Itera sobre todos os tokens, da esquerda para a direita, procurando o primeiro valor válido
+                            for j, token in enumerate(tokens):
                                 try:
-                                    valor_float = float(token)
-                                    if valor_float > 0:
-                                        valor_index = len(tokens) - 1 - j
+                                    valor_float_candidato = float(token)
+                                    if valor_float_candidato > 0:
+                                        valor_float = valor_float_candidato
+                                        valor_index = j
                                         break
                                 except Exception: continue
                             
@@ -3504,8 +3512,9 @@ def page_lancamentos(user: "User"):
                                 erros.append(f"Linha {i+1} ('{linha}'): Valor de dízimo não encontrado ou inválido.")
                                 db_batch.rollback(); continue
 
-                            # 3. Nome do Dizimista (Todo o resto ANTES do valor)
-                            nome_dizimista = " ".join(tokens[:valor_index])
+                            # 3. Nome do Dizimista (Todos os tokens, exceto o token de Valor)
+                            nome_tokens = [t for j, t in enumerate(tokens) if j != valor_index]
+                            nome_dizimista = " ".join(nome_tokens)
                             
                             if not nome_dizimista:
                                 erros.append(f"Linha {i+1} ('{linha}'): Nome do dizimista ausente.")
