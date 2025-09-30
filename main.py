@@ -80,7 +80,6 @@ SUB_ALL = "__ALL__"
 
 from sqlalchemy import select, func
 from sqlalchemy.orm import joinedload
-import datetime
 
 from sqlalchemy import select
 
@@ -257,7 +256,6 @@ def summarize_financials_for_ai(db, start_date, end_date, cong_id=None, sub_cong
 
 
 from sqlalchemy import select, func, and_, or_, not_
-from datetime import datetime
 
 def format_currency_br(value):
     """
@@ -635,7 +633,7 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
     """
     import os
     import re
-    from datetime import date
+    from datetime import date, timedelta, datetime
     try:
         from openai import OpenAI
     except Exception:
@@ -1337,7 +1335,6 @@ def responder_pergunta_financeira_mes(year: int, month: int) -> str:
         
 
 
-import datetime
 
 def now_bahia():
     """
