@@ -1353,6 +1353,80 @@ def today_bahia():
     return now_bahia().date()
 
 # NOVO HELPER: Função genérica para limpar campos
+# NOVO HELPER:
+
+def _process_dizimos_lote_callback(
+    dizimos_texto: str, 
+    default_payment: str, 
+    rap_data: date, 
+    target_cong_obj: Any, 
+    target_sub_cong_id: Any
+):
+    """Callback para processar o lote de dizimos e limpar o estado."""
+    # A lógica de processamento precisa ser reescrita aqui. 
+    # Para evitar repetir o código complexo, vamos chamá-la de _run_dizimo_batch
+
+    if not dizimos_texto.strip():
+        st.session_state.status_message = ("warning", "O campo de dízimos em lote está vazio.")
+        return # Não faz rerun se não tem nada para salvar
+
+    erros, sucessos = [], 0
+    linhas = [l.strip().replace(',', '.').replace('/', ' ') for l in dizimos_texto.splitlines() if l.strip()]
+
+    for i, linha in enumerate(linhas):
+        with SessionLocal() as db_batch:
+            try:
+                # 1. Tenta dividir a linha em tokens (flexível)
+                tokens = [t.strip() for t in linha.split() if t.strip()]
+                if not tokens: continue
+                
+                # 2. Encontrar o Valor em QUALQUER lugar (o primeiro token que se parece com float)
+                valor_float, valor_index = 0.0, -1
+                for j, token in enumerate(tokens):
+                    try:
+                        valor_float_candidato = float(token)
+                        if valor_float_candidato > 0:
+                            valor_float = valor_float_candidato
+                            valor_index = j
+                            break
+                    except Exception: continue
+                
+                if valor_index == -1:
+                    erros.append(f"Linha {i+1} ('{linha}'): Valor de dízimo não encontrado ou inválido.")
+                    db_batch.rollback(); continue
+
+                # 3. Nome do Dizimista (Todos os tokens, exceto o token de Valor)
+                nome_tokens = [t for j, t in enumerate(tokens) if j != valor_index]
+                nome_dizimista = " ".join(nome_tokens).strip()
+                
+                if not nome_dizimista:
+                    erros.append(f"Linha {i+1} ('{linha}'): Nome do dizimista ausente.")
+                    db_batch.rollback(); continue
+
+                # 4. Inserir no DB
+                db_batch.add(Tithe(
+                    date=rap_data, tither_name=nome_dizimista, amount=valor_float,
+                    congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id,
+                    payment_method=default_payment 
+                ))
+                db_batch.commit(); sucessos += 1
+                
+            except Exception as e:
+                db_batch.rollback(); erros.append(f"Erro inesperado na linha {i+1} ('{linha}'): {str(e)}")
+
+    # Feedback e Limpeza
+    if sucessos > 0: 
+        # Esta linha de limpeza AGORA é segura porque será executada ANTES do rerun
+        st.session_state.rap_dizimo_lote = "" 
+        st.session_state.status_message = ("success", f"✅ {sucessos} dízimos registrados com sucesso.")
+    if erros: 
+        st.session_state.status_message = ("error", "❌ Erros encontrados: " + " | ".join(erros))
+    
+    # Executa o rerun para atualizar a tela e limpar a área de texto (se sucessos > 0)
+    if sucessos > 0 or erros:
+        st.cache_data.clear() # Limpa o cache para refletir no relatório
+        st.rerun()
+
 def _clear_launch_fields(keys_to_clear: List[str]):
     """Limpa campos específicos no session state para permitir novos lançamentos."""
     for key in keys_to_clear:
@@ -3224,6 +3298,10 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 def page_lancamentos(user: "User"):
     ensure_seed()
 
+    # Garantia de estado inicial (necessário para evitar o erro de session_state)
+    if "rap_dizimo_lote" not in st.session_state:
+        st.session_state.rap_dizimo_lote = ""
+
     # Mensagens persistidas entre reruns
     if 'status_message' in st.session_state:
         msg_type, msg_text = st.session_state.status_message
@@ -3235,7 +3313,6 @@ def page_lancamentos(user: "User"):
             st.warning(msg_text)
         # Assumindo que você tem apenas `del st.session_state.status_message` no final
         del st.session_state.status_message 
-        # ATENÇÃO: Verifique se você não tem o del st.session_state.status_state em seu código real
 
     with SessionLocal() as db:
         st.markdown(f"<h1 class='page-title'>Lançamentos</h1>", unsafe_allow_html=True)
@@ -3481,69 +3558,20 @@ def page_lancamentos(user: "User"):
             )
             
             # Botão Processar (Fora do Form, para manter o Form acima limpo)
-            if st.button("Processar e Salvar Dízimos em Lote"):
-                if not dizimos_texto.strip():
-                    st.warning("O campo de dízimos em lote está vazio."); st.stop()
-                    
-                erros, sucessos = [], 0
-                # Linha de parse mais flexível: aceita ',' ou '.' como decimal, mas o to_float_brl resolve
-                # Remove vírgulas, pontos e barras (mantendo espaços para split)
-                linhas = [l.strip().replace(',', '.').replace('/', ' ') for l in dizimos_texto.splitlines() if l.strip()]
+            st.button(
+                "Processar e Salvar Dízimos em Lote",
+                on_click=_process_dizimos_lote_callback,
+                # 🚀 Passa o valor do text_area e outras variáveis como argumentos
+                args=[
+                    st.session_state.rap_dizimo_lote, # O conteúdo do text_area
+                    default_payment, # A forma de pagamento selecionada
+                    rap_data, # A data de lançamento
+                    target_cong_obj, # O objeto da congregação
+                    target_sub_cong_id # O ID da sub-congregação (pode ser None)
+                ]
+            )
 
-                for i, linha in enumerate(linhas):
-                    with SessionLocal() as db_batch:
-                        try:
-                            # 1. Tenta dividir a linha em tokens (flexível)
-                            tokens = [t.strip() for t in linha.split() if t.strip()]
-                            if not tokens: continue
-                            
-                            # 2. Encontrar o Valor em QUALQUER lugar (o primeiro token que se parece com float)
-                            valor_float, valor_index = 0.0, -1
-                            # Itera sobre todos os tokens, da esquerda para a direita, procurando o primeiro valor válido
-                            for j, token in enumerate(tokens):
-                                try:
-                                    valor_float_candidato = float(token)
-                                    if valor_float_candidato > 0:
-                                        valor_float = valor_float_candidato
-                                        valor_index = j
-                                        break
-                                except Exception: continue
-                            
-                            if valor_index == -1:
-                                erros.append(f"Linha {i+1} ('{linha}'): Valor de dízimo não encontrado ou inválido.")
-                                db_batch.rollback(); continue
-
-                            # 3. Nome do Dizimista (Todos os tokens, exceto o token de Valor)
-                            nome_tokens = [t for j, t in enumerate(tokens) if j != valor_index]
-                            # Limpeza final para garantir que nenhum caractere indesejado seja adicionado ao nome
-                            nome_dizimista = " ".join(nome_tokens).strip()
-                            
-                            if not nome_dizimista:
-                                erros.append(f"Linha {i+1} ('{linha}'): Nome do dizimista ausente.")
-                                db_batch.rollback(); continue
-
-                            # 4. Inserir no DB (Usando a data e a forma de pagamento única)
-                            db_batch.add(Tithe(
-                                date=rap_data, tither_name=nome_dizimista, amount=valor_float,
-                                congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id,
-                                payment_method=default_payment # Forma única do seletor
-                            ))
-                            db_batch.commit(); sucessos += 1
-                            
-                        except Exception as e:
-                            db_batch.rollback(); erros.append(f"Erro inesperado na linha {i+1} ('{linha}'): {str(e)}")
-
-                # Feedback após o loop (usa session state para persistir)
-                if sucessos > 0: 
-                    # 🚀 CORREÇÃO PRINCIPAL: LIMPAR A CHAVE DA TEXT AREA APÓS SUCESSO
-                    st.session_state.rap_dizimo_lote = ""
-                    st.session_state.status_message = ("success", f"✅ {sucessos} dízimos registrados com sucesso.")
-                if erros: st.session_state.status_message = ("error", "❌ Erros encontrados: " + " | ".join(erros))
-                
-                if sucessos > 0:
-                    try: st.cache_data.clear()
-                    except Exception: pass
-                st.rerun() # Faz o rerun para mostrar a mensagem de status e limpar a área de texto
+        # Fim do modo "Lançamento Rápido (Móvel)" # Faz o rerun para mostrar a mensagem de status e limpar a área de texto
 
         # Fim do modo "Lançamento Rápido (Móvel)"
 
