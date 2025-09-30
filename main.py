@@ -3223,12 +3223,6 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 
 def page_lancamentos(user: "User"):
     ensure_seed()
-    
-    # ----------------------------------------------------
-    # CORREÇÃO DE ESTADO: Garante que a chave exista antes de ser usada
-    if "rap_dizimo_lote" not in st.session_state:
-        st.session_state.rap_dizimo_lote = ""
-    # ----------------------------------------------------
 
     # Mensagens persistidas entre reruns
     if 'status_message' in st.session_state:
@@ -3239,8 +3233,9 @@ def page_lancamentos(user: "User"):
             st.error(msg_text)
         elif msg_type == "warning":
             st.warning(msg_text)
-        del st.session_state.status_state # Erro: Corrigido para del st.session_state.status_message. Se seu código usa status_state, mantenha o nome.
-        del st.session_state.status_message # Assegura a limpeza
+        # Assumindo que você tem apenas `del st.session_state.status_message` no final
+        del st.session_state.status_message 
+        # ATENÇÃO: Verifique se você não tem o del st.session_state.status_state em seu código real
 
     with SessionLocal() as db:
         st.markdown(f"<h1 class='page-title'>Lançamentos</h1>", unsafe_allow_html=True)
