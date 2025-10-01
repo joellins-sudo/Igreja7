@@ -3575,7 +3575,7 @@ def page_lancamentos(user: "User"):
 
         # Fim do modo "Lançamento Rápido (Móvel)"
 
-
+ 
             # ... (demais seções permanecem iguais)
 
 
