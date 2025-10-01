@@ -3577,7 +3577,7 @@ def page_lancamentos(user: "User"):
 
  
             # ... (demais seções permanecem iguais)
-
+ 
 
             # (O restante da página com as tabelas de Dizimistas e Saídas permanece igual)
             # ...
