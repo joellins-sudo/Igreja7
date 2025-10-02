@@ -2849,7 +2849,26 @@ def display_finance_hierarchy_aggregated(congs_all: list, start: date, end: date
 def page_relatorios_unificados(user: "User"):
     ensure_seed()
     
-    # ... (Seu bloco de CSS deve vir aqui) ...
+    # === CSS PARA DESTAQUE DE FUNDO DO PAINEL (mantido) ===
+    st.markdown("""
+        <style>
+        .panel-destaque-fundo {
+            background-color: #f7f9fc;
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #e0e6f1;
+        }
+        .panel-destaque-fundo h3, .panel-destaque-fundo h4 {
+            color: #1d4ed8;
+        }
+        /* CSS para aumentar o tamanho dos ícones no seletor */
+        [key="report_tab_mobile"] label {
+            font-size: 1.35rem !important;
+            font-weight: 700;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+    # === FIM CSS ===
 
     with SessionLocal() as db:
         st.markdown("<h1 class='page-title'>Relatórios Financeiros</h1>", unsafe_allow_html=True)
@@ -2892,7 +2911,7 @@ def page_relatorios_unificados(user: "User"):
         # LÓGICA DE EXIBIÇÃO: VISÃO AGREGADA TOTAL (SEDE)
         # =========================================================================
         if is_aggregated_view:
-            # CHAMADA CORRETA APÓS DEFINIÇÃO DA FUNÇÃO AUXILIAR
+            # É ESSENCIAL que 'display_finance_hierarchy_aggregated' esteja definida
             display_finance_hierarchy_aggregated(congs_all, start, end, db)
             return
 
@@ -2909,197 +2928,212 @@ def page_relatorios_unificados(user: "User"):
         for sub in sub_congs:
              opcoes_unidade[sub.name] = sub.id
 
-        # ================== ABAS CORRIGIDAS NA ORDEM SOLICITADA (Lógica original) ==================
-        tab1, tab2, tab3, tab4 = st.tabs([
-            "📖 Entradas (Culto/Resumo)",
-            "🤲 Dízimos (Nominal)",
-            "💳 Saídas (Despesas)",
-            "🏆 Painel (Visão Geral)"
-        ])
-
-        # --- O CÓDIGO DE CADA ABA ORIGINAL DO SEU RELATÓRIO CONTINUA A PARTIR DAQUI ---
+        # =========================================================================
+        # OTIMIZAÇÃO MOBILE: ST.RADIO NA ORDEM SOLICITADA
+        # =========================================================================
         
-        with tab1:
-            st.subheader("📖 Resumo Diário de Entradas (Cultos)")
-            # ... (seu código da TAB 1 continua aqui) ...
-            if target_cong_id:
-                # LÓGICA DE FILTRO DE SUB-UNIDADE
-                if sub_congs:
-                    target_sub_name = st.selectbox("Filtrar Unidade (Entradas):", list(opcoes_unidade.keys()), key="unif_entradas_sub")
-                    target_sub_id_unif = opcoes_unidade[target_sub_name]
-                else:
-                    target_sub_name = f"{parent_cong_obj.name} (Principal)"
-                    target_sub_id_unif = None
-                # FIM LÓGICA
+        secao_selecionada = st.radio(
+            "Visualizar Seção:",
+            options=[
+                "📖 Entradas (Culto/Resumo)",     # 1º
+                "🤲 Dízimos (Nominal)",          # 2º
+                "💳 Saídas (Despesas)",          # 3º
+                "🏆 Painel (Visão Geral)",       # 4º
+            ],
+            key="report_tab_mobile",
+            index=0 # Inicia na primeira opção ("Entradas")
+        )
+        st.divider()
+
+        # --- Variável para controle de filtros de Sub-Unidade (reutilizado em todas as seções) ---
+        target_sub_id_unif = None
+        target_sub_name = f"{parent_cong_obj.name} (Principal)"
+        
+        if sub_congs:
+            # Se a congregação tem sub-unidades, exibe o filtro uma única vez no escopo das abas
+            target_sub_name_sel = st.selectbox("Filtrar Unidade:", list(opcoes_unidade.keys()), key="unif_sub_context")
+            target_sub_id_unif = opcoes_unidade[target_sub_name_sel]
+            if target_sub_id_unif != "ALL":
+                target_sub_name = target_sub_name_sel
+
+        # =========================================================================
+        # 1. SEÇÃO: ENTRADAS (Culto/Resumo) - Antiga TAB 1
+        # =========================================================================
+        if secao_selecionada == "📖 Entradas (Culto/Resumo)":
+            with st.container():
+                st.subheader("📖 Resumo Diário de Entradas (Cultos)")
                 
-                st.info(f"Exibindo resumos de culto para: **{target_sub_name}**")
+                if target_cong_id:
+                    st.info(f"Exibindo resumos de culto para: **{target_sub_name}**")
+                    
+                    # Usa target_sub_id_unif (ALL, None ou ID)
+                    report_df = _load_service_logs(target_cong_id, start, end, sub_cong_id=target_sub_id_unif)
+                    
+                    if not report_df.empty:
+                        st.dataframe(
+                            report_df.style.format({"Data do Culto": "{:%d/%m/%Y}", "Dízimo": format_currency, "Oferta": format_currency, "Total": format_currency}),
+                            use_container_width=True, hide_index=True, column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
+                        )
+                        st.metric("Total Geral de Entradas no Culto", format_currency(report_df["Total"].sum()))
+                    else:
+                        st.caption("Nenhum resumo de culto encontrado para este período.")
+
+
+        # =========================================================================
+        # 2. SEÇÃO: DÍZIMOS (Nominal) - Antiga TAB 2
+        # =========================================================================
+        elif secao_selecionada == "🤲 Dízimos (Nominal)":
+            with st.container():
+                st.subheader("🤲 Dízimos Nominais (Por Pessoa)")
                 
-                report_df = _load_service_logs(target_cong_id, start, end, sub_cong_id=target_sub_id_unif)
-                
-                if not report_df.empty:
-                    st.dataframe(
-                        report_df.style.format({"Data do Culto": "{:%d/%m/%Y}", "Dízimo": format_currency, "Oferta": format_currency, "Total": format_currency}),
-                        use_container_width=True, hide_index=True, column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
+                if target_cong_id:
+                    st.info(f"Exibindo dízimos nominais para: **{target_sub_name}**")
+                    
+                    tithes_q = select(Tithe).where(
+                        Tithe.congregation_id == target_cong_id,
+                        Tithe.date >= start, Tithe.date < end,
+                        Tithe.sub_congregation_id == target_sub_id_unif # Usa o filtro de unidade/None/ALL
                     )
-                    st.metric("Total Geral de Entradas no Culto", format_currency(report_df["Total"].sum()))
-                else:
-                    st.caption("Nenhum resumo de culto encontrado para este período.")
-
-
-        with tab2:
-            st.subheader("🤲 Dízimos Nominais (Por Pessoa)")
-            if target_cong_id:
-                # LÓGICA DE FILTRO DE SUB-UNIDADE
-                if sub_congs:
-                    target_sub_name = st.selectbox("Filtrar Unidade (Dízimos):", list(opcoes_unidade.keys()), key="unif_dizimo_sub")
-                    target_sub_id_unif = opcoes_unidade[target_sub_name]
-                else:
-                    target_sub_name = f"{parent_cong_obj.name} (Principal)"
-                    target_sub_id_unif = None
-
-                st.info(f"Exibindo dízimos nominais para: **{target_sub_name}**")
+                    tithes = db.scalars(tithes_q.order_by(Tithe.tither_name)).all()
+                    
+                    if tithes:
+                        rows = [{"Data": t.date, "Dizimista": t.tither_name, "Valor": float(t.amount), "Forma": t.payment_method or "—"} for t in tithes]
+                        df = pd.DataFrame(rows)
+                        st.dataframe(df.style.format({"Data": "{:%d/%m/%Y}", "Valor": format_currency}), use_container_width=True, hide_index=True)
+                        st.metric("Total Dízimos Nominais", format_currency(df["Valor"].sum()))
+                    else:
+                        st.caption("Nenhum dízimo nominal encontrado.")
+        
+        
+        # =========================================================================
+        # 3. SEÇÃO: SAÍDAS (Despesas) - Antiga TAB 3
+        # =========================================================================
+        elif secao_selecionada == "💳 Saídas (Despesas)":
+            with st.container():
+                st.subheader("💳 Saídas (Transações de Despesas)")
                 
-                tithes_q = select(Tithe).where(
-                    Tithe.congregation_id == target_cong_id,
-                    Tithe.date >= start, Tithe.date < end,
-                    Tithe.sub_congregation_id == target_sub_id_unif
-                )
-                tithes = db.scalars(tithes_q.order_by(Tithe.tither_name)).all()
-                
-                if tithes:
-                    rows = [{"Data": t.date, "Dizimista": t.tither_name, "Valor": float(t.amount), "Forma": t.payment_method or "—"} for t in tithes]
-                    df = pd.DataFrame(rows)
-                    st.dataframe(df.style.format({"Data": "{:%d/%m/%Y}", "Valor": format_currency}), use_container_width=True, hide_index=True)
-                    st.metric("Total Dízimos Nominais", format_currency(df["Valor"].sum()))
-                else:
-                    st.caption("Nenhum dízimo nominal encontrado.")
-
-
-        with tab3:
-            st.subheader("💳 Saídas (Transações de Despesas)")
-            if target_cong_id:
-                # LÓGICA DE FILTRO DE SUB-UNIDADE
-                if sub_congs:
-                    target_sub_name = st.selectbox("Filtrar Unidade (Saídas):", list(opcoes_unidade.keys()), key="unif_saidas_sub")
-                    target_sub_id_unif = opcoes_unidade[target_sub_name]
-                else:
-                    target_sub_name = f"{parent_cong_obj.name} (Principal)"
-                    target_sub_id_unif = None
-
-                st.info(f"Exibindo saídas para: **{target_sub_name}**")
-                
-                txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(
-                    Transaction.congregation_id == target_cong_id, 
-                    Transaction.date >= start, Transaction.date < end, 
-                    Transaction.type == "SAÍDA", 
-                    Transaction.sub_congregation_id == target_sub_id_unif
-                )
-                txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
-                
-                if txs_out:
-                    rows_out = [{"Data": t.date, "Categoria": t.category.name if t.category else "", "Valor": t.amount, "Descrição": t.description or ""} for t in txs_out]
-                    df_saidas = pd.DataFrame(rows_out)
-                    st.dataframe(df_saidas.style.format({"Data":"{:%d/%m/%Y}", "Valor": format_currency}), use_container_width=True, hide_index=True)
-                    st.metric("Total de Saídas no Período", format_currency(df_saidas["Valor"].sum()))
-                else:
-                    st.caption("Nenhuma saída registrada neste período.")
-
-
-        with tab4:
-            st.markdown('<div class="panel-destaque-fundo">', unsafe_allow_html=True)
-            st.subheader("🏆 Painel de Indicadores e Saldo")
-            if not parent_cong_obj:
-                st.warning("Selecione uma congregação válida no filtro acima.")
-            else:
-                
-                # --- Cálculo dos KPIS (Lógica de Missões já corrigida nas funções auxiliares) ---
-                sub_id = None 
-                
-                # Configuração dos Filtros de Exclusão (Para Outras Entradas)
-                cat_miss = db.scalar(select(Category).where(func.lower(Category.name).in_(("missões","missoes")), Category.type == TYPE_IN))
-                cat_diz = db.scalar(select(Category).where(func.lower(Category.name).in_(("dízimo","dizimo")), Category.type == TYPE_IN))
-                cat_ofe = db.scalar(select(Category).where(func.lower(Category.name) == "oferta", Category.type == TYPE_IN))
-                exclude_cat_ids = [c.id for c in [cat_miss, cat_diz, cat_ofe] if c]
-
-                # Dízimo Final (Usando as funções auxiliares corrigidas)
-                total_dizimo_resumo = _sum_dizimo_resumo(parent_cong_obj, sub_id, start, end, db)
-                total_dizimo_nominal = _sum_dizimo_nominal(parent_cong_obj, sub_id, start, end, db)
-                dizimo_final = max(total_dizimo_resumo, total_dizimo_nominal)
-
-                # Oferta Final (Usando as funções auxiliares corrigidas)
-                total_oferta_resumo = _sum_oferta_resumo(parent_cong_obj, sub_id, start, end, db)
-                total_oferta_tx = float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
-                    Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start, Transaction.date < end,
-                    Transaction.type == TYPE_IN, Transaction.category_id == cat_ofe.id if cat_ofe else Transaction.id < 0
-                )) or 0.0)
-                oferta_final = max(total_oferta_resumo, total_oferta_tx)
-                
-                # Outras Entradas
-                total_outras_entradas = float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
-                    Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start, Transaction.date < end,
-                    Transaction.type == TYPE_IN, 
-                    Transaction.category_id.notin_(exclude_cat_ids) if exclude_cat_ids else Transaction.id > 0
-                )) or 0.0)
-                
-                # Saídas
-                saidas = _sum_saidas(parent_cong_obj, sub_id, start, end, db)
-                
-                # Totais
-                entradas = dizimo_final + oferta_final + total_outras_entradas
-                saldo = entradas - saidas
-
-                # EXIBIÇÃO DOS KPIS
-                c1,c2,c3 = st.columns(3)
-                c1.metric("Entradas (Dízimo/Oferta)", format_currency(entradas))
-                c2.metric("Saídas (Despesas)", format_currency(saidas))
-                c3.metric("Saldo Final", format_currency(saldo), delta=(saldo))
-
-                st.divider()
-
-                st.markdown("##### 🖨️ Download de Relatórios")
-                
-                # Download (Consolidado + Individual)
-                if user.role == "SEDE":
-                    st.download_button(
-                        "⬇️ Baixar Relatório Geral Consolidado (PDF)",
-                        data=build_consolidated_pdf(congs_all, ref, db), 
-                        file_name=f"relatorio_geral_consolidado_{ref.strftime('%Y-%m')}.pdf",
-                        mime="application/pdf",
-                        key="dl_pdf_geral_consolidado"
+                if target_cong_id:
+                    st.info(f"Exibindo saídas para: **{target_sub_name}**")
+                    
+                    txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(
+                        Transaction.congregation_id == target_cong_id, 
+                        Transaction.date >= start, Transaction.date < end, 
+                        Transaction.type == "SAÍDA", 
+                        Transaction.sub_congregation_id == target_sub_id_unif
                     )
-                
-                st.markdown("---")
-                st.markdown("##### Relatórios Individuais por Congregação")
-                
-                congs_download_list = order_congs_sede_first(cong_options_for(user, db))
-                congs_download_names = [c.name for c in congs_download_list]
-                
-                sel_cong_pdf_name = st.selectbox(
-                    "Selecione a Congregação para download:",
-                    congs_download_names,
-                    key="sel_cong_pdf_download"
-                )
-                
-                selected_cong_obj = next((c for c in congs_download_list if c.name == sel_cong_pdf_name), None)
+                    txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
+                    
+                    if txs_out:
+                        rows_out = [{"Data": t.date, "Categoria": t.category.name if t.category else "", "Valor": t.amount, "Descrição": t.description or ""} for t in txs_out]
+                        df_saidas = pd.DataFrame(rows_out)
+                        st.dataframe(df_saidas.style.format({"Data":"{:%d/%m/%Y}", "Valor": format_currency}), use_container_width=True, hide_index=True)
+                        st.metric("Total de Saídas no Período", format_currency(df_saidas["Valor"].sum()))
+                    else:
+                        st.caption("Nenhuma saída registrada neste período.")
 
-                if selected_cong_obj:
-                    # Funções de construção de PDF (assumidas no escopo)
-                    pdf_data_unit = build_single_unit_report_pdf(
-                        selected_cong_obj.id, None, selected_cong_obj.name, ref, db
+
+        # =========================================================================
+        # 4. SEÇÃO: PAINEL (Visão Geral) - Antiga TAB 4
+        # =========================================================================
+        elif secao_selecionada == "🏆 Painel (Visão Geral)":
+            with st.container():
+                # Envolve o conteúdo em um container com a classe CSS de destaque
+                st.markdown('<div class="panel-destaque-fundo">', unsafe_allow_html=True)
+                
+                st.subheader("🏆 Painel de Indicadores e Saldo")
+                
+                if not parent_cong_obj:
+                    st.warning("Selecione uma congregação válida no filtro acima.")
+                else:
+                    
+                    # --- Cálculo dos KPIS (Lógica de Missões já corrigida nas funções auxiliares) ---
+                    sub_id = None # KPI é sempre para a Congregação Principal (target_cong_id)
+                    
+                    # Configuração dos Filtros de Exclusão (Para Outras Entradas)
+                    cat_miss = db.scalar(select(Category).where(func.lower(Category.name).in_(("missões","missoes")), Category.type == TYPE_IN))
+                    cat_diz = db.scalar(select(Category).where(func.lower(Category.name).in_(("dízimo","dizimo")), Category.type == TYPE_IN))
+                    cat_ofe = db.scalar(select(Category).where(func.lower(Category.name) == "oferta", Category.type == TYPE_IN))
+                    exclude_cat_ids = [c.id for c in [cat_miss, cat_diz, cat_ofe] if c]
+
+                    # Dízimo Final (Usando as funções auxiliares corrigidas)
+                    total_dizimo_resumo = _sum_dizimo_resumo(parent_cong_obj, sub_id, start, end, db)
+                    total_dizimo_nominal = _sum_dizimo_nominal(parent_cong_obj, sub_id, start, end, db)
+                    dizimo_final = max(total_dizimo_resumo, total_dizimo_nominal)
+
+                    # Oferta Final (Usando as funções auxiliares corrigidas)
+                    total_oferta_resumo = _sum_oferta_resumo(parent_cong_obj, sub_id, start, end, db)
+                    total_oferta_tx = float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+                        Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start, Transaction.date < end,
+                        Transaction.type == TYPE_IN, Transaction.category_id == cat_ofe.id if cat_ofe else Transaction.id < 0
+                    )) or 0.0)
+                    oferta_final = max(total_oferta_resumo, total_oferta_tx)
+                    
+                    # Outras Entradas
+                    total_outras_entradas = float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+                        Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start, Transaction.date < end,
+                        Transaction.type == TYPE_IN, 
+                        Transaction.category_id.notin_(exclude_cat_ids) if exclude_cat_ids else Transaction.id > 0
+                    )) or 0.0)
+                    
+                    # Saídas
+                    saidas = _sum_saidas(parent_cong_obj, sub_id, start, end, db)
+                    
+                    # Totais
+                    entradas = dizimo_final + oferta_final + total_outras_entradas
+                    saldo = entradas - saidas
+
+                    # EXIBIÇÃO DOS KPIS
+                    c1,c2,c3 = st.columns(3)
+                    c1.metric("Entradas (Dízimo/Oferta)", format_currency(entradas))
+                    c2.metric("Saídas (Despesas)", format_currency(saidas))
+                    c3.metric("Saldo Final", format_currency(saldo), delta=(saldo))
+
+                    st.divider()
+
+                    st.markdown("##### 🖨️ Download de Relatórios")
+                    
+                    # Download (Consolidado + Individual)
+                    if user.role == "SEDE":
+                        st.download_button(
+                            "⬇️ Baixar Relatório Geral Consolidado (PDF)",
+                            data=build_consolidated_pdf(congs_all, ref, db), 
+                            file_name=f"relatorio_geral_consolidado_{ref.strftime('%Y-%m')}.pdf",
+                            mime="application/pdf",
+                            key="dl_pdf_geral_consolidado"
+                        )
+                    
+                    st.markdown("---")
+                    st.markdown("##### Relatórios Individuais por Congregação")
+                    
+                    congs_download_list = order_congs_sede_first(cong_options_for(user, db))
+                    congs_download_names = [c.name for c in congs_download_list]
+                    
+                    sel_cong_pdf_name = st.selectbox(
+                        "Selecione a Congregação para download:",
+                        congs_download_names,
+                        key="sel_cong_pdf_download"
                     )
                     
-                    def _norm(name):
-                        return name.lower().replace(" ", "_").replace("ã", "a").replace("ç", "c")
+                    selected_cong_obj = next((c for c in congs_download_list if c.name == sel_cong_pdf_name), None)
+
+                    if selected_cong_obj:
+                        # Funções de construção de PDF (assumidas no escopo)
+                        pdf_data_unit = build_single_unit_report_pdf(
+                            selected_cong_obj.id, None, selected_cong_obj.name, ref, db
+                        )
                         
-                    st.download_button(
-                        f"⬇️ Baixar PDF de {selected_cong_obj.name}",
-                        data=pdf_data_unit,
-                        file_name=f"prestacao_{_norm(selected_cong_obj.name)}_{ref.strftime('%Y-%m')}.pdf",
-                        mime="application/pdf",
-                        key=f"dl_pdf_unit_{selected_cong_obj.id}"
-                    )
-            
-            st.markdown('</div>', unsafe_allow_html=True) # Fechamento do div de destaque # Fechamento do div de destaque
+                        def _norm(name):
+                            return name.lower().replace(" ", "_").replace("ã", "a").replace("ç", "c")
+                            
+                        st.download_button(
+                            f"⬇️ Baixar PDF de {selected_cong_obj.name}",
+                            data=pdf_data_unit,
+                            file_name=f"prestacao_{_norm(selected_cong_obj.name)}_{ref.strftime('%Y-%m')}.pdf",
+                            mime="application/pdf",
+                            key=f"dl_pdf_unit_{selected_cong_obj.id}"
+                        )
+                
+                st.markdown('</div>', unsafe_allow_html=True) # Fechamento do div de destaque # Fechamento do div de destaque
 
 
 # Helpers mínimos (esboços)
