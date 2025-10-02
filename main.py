@@ -287,252 +287,198 @@ def format_ai_response(summary: dict, question: str = ""):
     lines.append(f"Total Ofertas (Transações categoria 'Oferta'): {format_currency_br(summary.get('total_ofertas_transacoes', 0.0))}")
     return "\n".join(lines)
 
-# --- FIM DAS FUNÇÕES ---
 
-# ================== CSS do cartão de login (estilo SEI) ==================
-# ================== CSS do cartão de login (estilo ADRF) ==================
-# ================== LOGIN SEI: CSS/HTML (trabalhando com Streamlit) ==================
-# ================== LOGIN ADRF: CSS/HTML ==================
+# === CSS do Login (SEI-like) — define se ainda não existir ===
+# === CSS do Login (SEI-like) + LOGO IADRF! ===
+# === CSS do Login (SEI-like) + LOGO IADRF! ===
+# --- UI GLOBAL (botões azuis, inputs maiores) ---
+GLOBAL_UI_CSS = """
+<style>
+  .stButton>button, .stDownloadButton>button,
+  [data-testid="stFormSubmitButton"] button,
+  button[data-testid="baseButton-primary"], button[data-testid="baseButton-secondary"]{
+    background-color:#1d4ed8!important; border-color:#1d4ed8!important; color:#fff!important;
+    box-shadow:none!important; border-radius:10px!important; height:48px; font-weight:700;
+  }
+  .stButton>button:hover, .stDownloadButton>button:hover,
+  [data-testid="stFormSubmitButton"] button:hover,
+  button[data-testid="baseButton-primary"]:hover, button[data-testid="baseButton-secondary"]:hover{
+    background-color:#1e40af!important; border-color:#1e40af!important; color:#fff!important;
+  }
+  .stTextInput input, .stNumberInput input, .stDateInput input,
+  .stSelectbox div[role="combobox"], .stTextArea textarea{
+    min-height:44px; font-size:1rem;
+  }
+</style>
+"""
+def ui_global_bootstrap():
+    try: st.markdown(GLOBAL_UI_CSS, unsafe_allow_html=True)
+    except Exception: pass
+
+
+
 ADRF_LOGIN_CSS = """
 <style>
-  :root{
-    --azul-1:#1f6feb; --azul-2:#185fcd; --azul-esc:#0b4b9a;
-    --cinza-bg:#f0f0f0; --cinza-borda:#dfe3ea; --cinza-ico:#e9ecef; --texto:#344054;
-  }
-  body{ background:var(--cinza-bg); }
-
-  .adrf-wrap{ min-height:calc(100vh - 0px); display:grid; place-items:center; padding:24px 12px; }
-  .adrf-card{ width:100%; max-width:540px; background:#fff; border:1px solid rgba(0,0,0,.07);
-              border-radius:.5rem; box-shadow:0 10px 26px rgba(16,24,40,.08); }
-  .adrf-card .body{ padding:26px 24px 18px; }
-
-  .adrf-logo{ display:flex; align-items:center; justify-content:center; margin:14px 0 18px; }
-  .adrf-logo img{ height:58px; }
-
-  .adrf-form .group{ display:flex; align-items:stretch; margin-bottom:12px; }
-  .adrf-form .ico{
-    flex:0 0 46px; display:flex; align-items:center; justify-content:center;
-    background:var(--cinza-ico); border:1px solid var(--cinza-borda);
-    border-right:none; border-radius:.25rem 0 0 .25rem; color:#6b7280; font-size:18px;
-  }
-  .adrf-form .field [data-testid="stTextInput"]>div>div>input,
-  .adrf-form .field [data-testid="stPassword"]>div>div>input,
-  .adrf-form .field [data-testid="stSelectbox"]>div>div>div>div{
-    height:44px; border:1px solid var(--cinza-borda); border-left:none; border-radius:0 .25rem .25rem 0 !important;
-    font-size:1rem;
-  }
-  .adrf-form .field [data-testid="stWidgetLabel"]{ display:none; }
-
-  .adrf-btn .stButton>button{
-    width:100%; height:44px; border:none; color:#fff; font-weight:700; letter-spacing:.3px; border-radius:.25rem;
-    background:linear-gradient(180deg, var(--azul-1) 0%, var(--azul-2) 100%);
-    box-shadow:0 6px 16px rgba(24,95,205,.25);
-  }
-  .adrf-btn .stButton>button:hover{
-    background:linear-gradient(180deg, var(--azul-2) 0%, var(--azul-esc) 100%);
-  }
-
-  .adrf-2fa{ text-align:right; margin-top:6px; }
-  .adrf-2fa a{ color:#0d6efd; font-size:.92rem; text-decoration:none; }
-  .adrf-2fa a:hover{ text-decoration:underline; }
-</style>
-"""
-
-CSS = """
-<style>
-/* ==================== BASE / TIPOGRAFIA ==================== */
 :root{
-  --base-font: 17px;         /* aumente para 18/19/20px se quiser */
-  --table-font-size: 1.90rem;   /* fonte das células */
-  --table-header-size: 1.08rem;   /* fonte dos cabeçalhos */
+  --adrf-card:#ffffff; --adrf-border:#e5e7eb; --adrf-text:#0f172a; --adrf-muted:#64748b;
+  --adrf-blue:#1d4ed8; --adrf-blue-dark:#1e40af; --adrf-bg:#f6f7fb; --adrf-green:#16a34a;
+}
+html, body { background: var(--adrf-bg) !important; }
+.block-container { padding-top: 1.25rem; }
+
+/* ---------- LOGO IADRF! ---------- */
+.adrf-logo{
+  width:100%;
+  display:flex; justify-content:center; align-items:flex-end; gap:.1rem;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
+  text-transform: uppercase;
+  font-weight: 1000;
+  letter-spacing:.02em;
+  color: var(--adrf-blue);
+  font-size: clamp(34px, 6vw, 56px);
+  line-height: 0.95;
+  margin: 6vh 0 10px;              /* antes estava 14vh; reduzimos para aparecer logo */
+  text-shadow: 0 1px 0 rgba(0,0,0,.02);
+}
+.adrf-logo .bang{
+  color: var(--adrf-green);
+  transform: translateY(-2px);
+}
+.adrf-logo-sep{
+  height:1px; width:100%; background:#e8ecf3; margin: 8px 0 18px;
 }
 
-html, body, [data-testid="stAppViewContainer"]{
-  font-size: var(--base-font);
-  line-height: 1.45;
+/* ---------- Cartão do login ---------- */
+.adrf-login-card{
+  max-width: 1080px;              /* largura confortável como no seu print */
+  margin: 0 auto 6vh auto;
+  padding: 16px 18px; border-radius: 14px;
+  border: 1px solid var(--adrf-border); background: var(--adrf-card);
+  box-shadow: 0 8px 28px rgba(0,0,0,.06);
 }
+.adrf-login-title{ font-size:1.05rem; font-weight:800; color:var(--adrf-text); margin-bottom:.35rem; }
+.adrf-login-sub{ color:var(--adrf-muted); margin-bottom:.6rem; }
 
-/* Títulos mais fortes e maiores */
-.page-title, h1{ font-size: 2.0rem; font-weight: 800 !important; }
-h2{ font-size: 1.45rem; font-weight: 750; }
-h3{ font-size: 1.25rem; font-weight: 700; }
-
-/* ==================== WIDGETS / TEXTOS ==================== */
-[data-testid="stSidebar"] *{ font-size: 1.02rem; }
-label, [data-testid="stWidgetLabel"]{ font-size: 1.02rem; }
-
-/* Inputs (texto, número, data, selects) um pouco maiores */
-.stTextInput input,
-.stNumberInput input,
-.stDateInput input,
-.stSelectbox div,
-.stMultiSelect div{
-  font-size: 1.02rem !important;
+/* Inputs ocupando largura e altura agradáveis */
+.adrf-login-card [data-baseweb="input"] input,
+.adrf-login-card [data-baseweb="select"] div[role="combobox"]{
+  min-height:40px; font-size:.95rem;
 }
+.adrf-login-card .stTextInput,
+.adrf-login-card .stSelectbox,
+.adrf-login-card .stPassword{ margin-bottom:.65rem; }
 
-/* ==================== TABELAS / EDITOR ==================== */
-/* Regras gerais (ok manter) */
-[data-testid="stDataFrame"] *{ font-size: 1.0rem; }
-[data-testid="stDataEditor"] *{ font-size: 1.02rem; }
-
-/* Regras específicas – aumentam o tamanho real das células/cabeçalhos */
-[data-testid="stDataFrame"] [role="gridcell"],
-[data-testid="stDataEditor"] [role="gridcell"]{
-  font-size: var(--table-font-size) !important;
+/* Botão de entrar azul (coerente com o tema) */
+.adrf-login-card [data-testid="stFormSubmitButton"] button{
+  background-color: var(--adrf-blue) !important;
+  border-color: var(--adrf-blue) !important;
+  color:#fff !important; box-shadow:none !important; border-radius:10px !important;
+  padding:.55rem .9rem !important; font-weight:700 !important;
 }
-
-[data-testid="stDataFrame"] [role="columnheader"],
-[data-testid="stDataEditor"] [role="columnheader"]{
-  font-size: var(--table-header-size) !important;
-  font-weight: 700 !important;
+.adrf-login-card [data-testid="stFormSubmitButton"] button:hover,
+.adrf-login-card [data-testid="stFormSubmitButton"] button:focus{
+  background-color: var(--adrf-blue-dark) !important;
+  border-color: var(--adrf-blue-dark) !important;
+  color:#fff !important;
 }
-
-/* Altura das linhas (opcional) */
-[data-testid="stDataFrame"] [role="row"],
-[data-testid="stDataEditor"] [role="row"]{
-  min-height: 38px;
-}
-
-/* Espaço interno das células (opcional) */
-[data-testid="stDataFrame"] [role="gridcell"] > div,
-[data-testid="stDataEditor"] [role="gridcell"] > div{
-  padding: 8px 10px;
-}
-
-/* ==================== MÉTRICAS ==================== */
-[data-testid="stMetricValue"]{
-  font-size: 1.9rem !important;
-  font-weight: 780 !important;
-}
-[data-testid="stMetricLabel"]{ font-size: 1.0rem; opacity: .8; }
-
-/* ==================== BOTÕES ==================== */
-.stButton > button, .stDownloadButton > button{
-  font-size: 1.02rem;
-  border-radius: 14px;
-  font-weight: 650;
-}
-
-/* ==================== CARTÕES ESTATÍSTICOS ==================== */
-.stat-card{
-  background: #fff;
-  border: 1px solid #e9e9ee;
-  border-radius: 16px;
-  padding: 14px 16px;
-}
-.stat-label{ font-size: .92rem; opacity: .75; }
-.stat-value{ font-size: 1.12rem; font-weight: 700; margin-top: .2rem; }
-
-/* ==================== SIDEBAR ==================== */
-[data-testid="stSidebar"]{
-  background: linear-gradient(180deg, #f7f7fb 0%, #f2f3f9 100%);
-}
-[data-testid="stSidebar"] .block-container{ padding-top: 1rem; }
-
-/* ==================== AJUSTES LEVES ==================== */
-hr{ opacity: .6; }
-
-/* ===== NOVO: AVISO DE DIVERGÊNCIA VERMELHO ===== */
-.alert-danger {
-    padding: 0.75rem 1rem;
-    margin-bottom: 1rem;
-    border: 1px solid transparent;
-    border-radius: .375rem;
-    background-color: #fee2e2; /* Vermelho claro */
-    border-color: #fca5a5;   /* Borda vermelha */
-    color: #991b1b;         /* Texto vermelho escuro */
-    font-size: 0.9rem;      /* Letras pequenas */
-}
-.alert-danger strong {
-    font-weight: 700;
-}
-
 </style>
 """
 
-# === Cores dos botões por formulário (compat com chamada antiga BUTTONS_CSS) ===
+
 # SUBSTITUA SEU CSS DE BOTÕES ANTIGO POR ESTE
-FORM_BUTTONS_CSS = """
+# ==== TODOS OS BOTÕES AZUIS (global) ====
+BLUE_BUTTONS_CSS = """
 <style>
-/* --- ENTRADAS (VERDE) --- */
-.adrf-entrada [data-testid="stFormSubmitButton"] button {
-    background-color: #16a34a !important;
-    border-color: #16a34a !important;
-    color: white !important;
+/* Botões gerais (st.button / st.download_button) */
+.stButton > button,
+.stDownloadButton > button,
+/* Botões de formulário (st.form_submit_button) */
+[data-testid="stFormSubmitButton"] button,
+/* Variantes internas do Streamlit */
+button[data-testid="baseButton-primary"],
+button[data-testid="baseButton-secondary"] {
+  background-color: #1d4ed8 !important;  /* azul */
+  border-color: #1d4ed8 !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
 }
-.adrf-entrada [data-testid="stFormSubmitButton"] button:hover {
-    background-color: #15803d !important;
-    border-color: #15803d !important;
+.stButton > button:hover,
+.stDownloadButton > button:hover,
+[data-testid="stFormSubmitButton"] button:hover,
+button[data-testid="baseButton-primary"]:hover,
+button[data-testid="baseButton-secondary"]:hover {
+  background-color: #1e40af !important;  /* azul (hover) */
+  border-color: #1e40af !important;
+  color: #ffffff !important;
 }
-
-/* --- DIZIMISTAS (AZUL) --- */
-.adrf-dizimo [data-testid="stFormSubmitButton"] button {
-    background-color: #1d4ed8 !important;
-    border-color: #1d4ed8 !important;
-    color: white !important;
+/* Remove heranças de cores antigas por classes específicas */
+.adrf-entrada [data-testid="stFormSubmitButton"] button,
+.adrf-dizimo  [data-testid="stFormSubmitButton"] button,
+.adrf-saida   [data-testid="stFormSubmitButton"] button {
+  background-color: #1d4ed8 !important;
+  border-color: #1d4ed8 !important;
+  color: #ffffff !important;
 }
-.adrf-dizimo [data-testid="stFormSubmitButton"] button:hover {
-    background-color: #1e40af !important;
-    border-color: #1e40af !important;
-}
-
-/* --- SAÍDAS (VERMELHO) --- */
-.adrf-saida [data-testid="stFormSubmitButton"] button {
-    background-color: #dc2626 !important;
-    border-color: #dc2626 !important;
-    color: white !important;
-}
-.adrf-saida [data-testid="stFormSubmitButton"] button:hover {
-    background-color: #b91c1c !important;
-    border-color: #b91c1c !important;
+.adrf-entrada [data-testid="stFormSubmitButton"] button:hover,
+.adrf-dizimo  [data-testid="stFormSubmitButton"] button:hover,
+.adrf-saida   [data-testid="stFormSubmitButton"] button:hover {
+  background-color: #1e40af !important;
+  border-color: #1e40af !important;
 }
 </style>
 """
+st.markdown(BLUE_BUTTONS_CSS, unsafe_allow_html=True)
 
-# Garanta que a linha abaixo esteja no seu código, após a definição acima
-st.markdown(FORM_BUTTONS_CSS, unsafe_allow_html=True)
-
-# Alias para manter compatibilidade com a linha 256
-BUTTONS_CSS = FORM_BUTTONS_CSS
-
-
-st.markdown(BUTTONS_CSS, unsafe_allow_html=True)
-
-CSS_TABLE_BOOST = """
+FONT_TUNING_CSS = """
 <style>
-/* Aumenta o tamanho da fonte APENAS do conteúdo das células */
-[data-testid="stDataFrame"] [role="gridcell"] *,
-[data-testid="stDataEditor"] [role="gridcell"] *{
-  font-size: 1.18rem !important;   /* ajuste aqui: 1.10–1.30rem */
-  line-height: 1.55 !important;
+/* ===== Escala base ===== */
+html, body { font-size: 18px !important; }               /* aumenta a fonte padrão do app inteiro */
+[data-testid="stSidebar"] { font-size: 16.5px !important; } /* aumenta a fonte apenas da Sidebar */
+
+/* ===== Títulos ===== */
+h1 { font-size: 2.1rem !important; font-weight: 800; }   /* tamanho do TÍTULO principal (st.title/markdown #) */
+h2 { font-size: 1.6rem !important; font-weight: 700; }   /* tamanho de subtítulo (##) */
+h3 { font-size: 1.25rem !important; font-weight: 700; }  /* tamanho de cabeçalho menor (###) */
+
+/* ===== Parágrafos / texto de markdown ===== */
+[data-testid="stMarkdownContainer"] p { font-size: 1.05rem !important; } /* texto comum em st.markdown */
+
+/* ===== Rótulos (labels) dos campos ===== */
+label p,                                                   /* rótulos genéricos */
+.stTextInput label, .stSelectbox label,                    /* rótulos de texto e select */
+.stDateInput label, .stNumberInput label {                 /* rótulos de data e número */
+  font-size: 1rem !important;                              /* tamanho do texto dos rótulos */
 }
 
-/* Cabeçalhos das colunas um pouco maiores e mais fortes */
-[data-testid="stDataFrame"] [role="columnheader"] *,
-[data-testid="stDataEditor"] [role="columnheader"] *{
-  font-size: 1.08rem !important;
-  font-weight: 700 !important;
+/* ===== Conteúdo dentro dos inputs/selects ===== */
+[data-baseweb="input"] input,                              /* texto digitado nos inputs */
+[data-baseweb="select"] div[role="combobox"] {             /* texto exibido no select */
+  font-size: 1rem !important;                              /* aumenta o texto interno dos campos */
+}
+
+/* ===== Placeholder (dicas dentro de inputs) ===== */
+input::placeholder { font-size: 0.98rem !important; }      /* aumenta o placeholder “Usuário”, “Senha”, etc. */
+
+/* ===== Botões ===== */
+.stButton > button,                                        /* botões criados com st.button */
+[data-testid="stFormSubmitButton"] button,                  /* botões de enviar formulário */
+.stDownloadButton > button {                               /* botões de download */
+  font-size: 0.98rem !important;                           /* aumenta o texto dos botões (mantém cor do seu tema) */
+}
+
+/* ===== Tabelas (dataframe/AgGrid envolvidas por .adrf-table-wrap) ===== */
+.adrf-table-wrap td, .adrf-table-wrap th {                  /* células e cabeçalhos da tabela */
+  font-size: 0.98rem !important;                            /* aumenta o texto dentro das tabelas */
+}
+
+/* ===== Logo do login (IADRF!) ===== */
+.adrf-logo {                                               /* título grande do login */
+  font-size: clamp(38px, 7vw, 64px) !important;            /* aumenta os limites mínimo/máximo do logo */
 }
 </style>
 """
+st.markdown(FONT_TUNING_CSS, unsafe_allow_html=True)
 
-st.markdown(CSS_TABLE_BOOST, unsafe_allow_html=True)
-
-st.markdown(CSS, unsafe_allow_html=True)
-
-ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
-LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
-
-st.markdown("""
-<style>
-.inline-missoes-alert{
-  background: transparent !important;
-  border: none !important;
-  color: #b45309 !important;   /* âmbar escuro */
-  font-weight: 700 !important; /* negrito */
-}
-</style>
-""", unsafe_allow_html=True)
 
 
 # ===================== LOCALE (fallback) =====================
@@ -546,74 +492,6 @@ _set_locale_ptbr()
 
 # ===================== UTILS =====================
 # ===================== COMPONENTE DE ENTRADA DE VOZ =====================
-def voice_input_ui():
-    """
-    Cria um componente HTML/JS para capturar a fala do usuário e retornar o texto.
-    """
-    import streamlit.components.v1 as components
-
-    html_code = """
-    <style>
-        #talk-btn {
-            padding: 10px 15px;
-            border-radius: 8px;
-            background-color: #28a745; /* Verde */
-            color: white;
-            border: none;
-            cursor: pointer;
-            font-size: 16px;
-            width: 100%;
-            height: 48px;
-            transition: background-color 0.2s;
-        }
-        #talk-btn:hover { background-color: #218838; }
-        #talk-btn.listening { background-color: #dc3545; } /* Vermelho */
-    </style>
-
-    <button id="talk-btn">🎤 Falar</button>
-
-    <script>
-        const btn = document.getElementById('talk-btn');
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        
-        if (!SpeechRecognition) {
-            btn.innerHTML = "Voz não suportada";
-            btn.disabled = true;
-        } else {
-            const recognition = new SpeechRecognition();
-            recognition.lang = 'pt-BR';
-            recognition.continuous = false;
-            recognition.interimResults = false;
-
-            recognition.onstart = function() {
-                btn.innerHTML = "Ouvindo...";
-                btn.classList.add("listening");
-            };
-
-            recognition.onresult = function(event) {
-                const transcript = event.results[0][0].transcript;
-                // Envia o texto transcrito de volta para o Python/Streamlit
-                window.parent.Streamlit.setComponentValue(transcript);
-            };
-
-            recognition.onerror = function(event) {
-                console.error("Erro no reconhecimento de voz:", event.error);
-                btn.innerHTML = "Erro";
-            };
-
-            recognition.onend = function() {
-                btn.innerHTML = "🎤 Falar";
-                btn.classList.remove("listening");
-            };
-
-            btn.addEventListener('click', () => {
-                recognition.start();
-            });
-        }
-    </script>
-    """
-    transcribed_text = components.html(html_code, height=60)
-    return transcribed_text
 
 MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
 MONTHS_SHORT = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"]
@@ -640,6 +518,8 @@ def responder_pergunta_financeira(pergunta_usuario: str, dados_df: pd.DataFrame,
         OpenAI = None
 
     # helpers (assumem disponíveis globalmente: MONTHS, today_bahia, month_bounds, format_currency, _to_float_brl)
+    
+    
     def _get_colname(df, names):
         if df is None:
             return None
@@ -1174,6 +1054,127 @@ TX_TYPE_IN = "ENTRADA"
 TX_TYPE_OUT = "SAÍDA"
 
 # Helper: formata moeda em pt-BR (R$ 1.234,56)
+
+from sqlalchemy import select, func
+
+# Soma Dízimo/Oferta do resumo (ServiceLog) para UMA unidade (principal ou sub)
+# Observação IMPORTANTE: ofertas de 'Culto de Missões' FICAM FORA do fluxo operacional.
+def _sum_servicelog_for_unit_operacional(db, cong_id: int, start, end, sub_cong_id: int | None):
+    # Dízimo: conta normal
+    q_diz = (
+        select(func.coalesce(func.sum(ServiceLog.dizimo), 0.0))
+        .where(
+            ServiceLog.congregation_id == cong_id,
+            ServiceLog.date >= start,
+            ServiceLog.date < end,
+            (ServiceLog.sub_congregation_id.is_(None)
+             if sub_cong_id is None else ServiceLog.sub_congregation_id == sub_cong_id)
+        )
+    )
+    diz = float(db.execute(q_diz).scalar_one() or 0.0)
+
+    # Oferta: EXCLUI 'Culto de Missões'
+    q_ofe = (
+        select(func.coalesce(func.sum(ServiceLog.oferta), 0.0))
+        .where(
+            ServiceLog.congregation_id == cong_id,
+            ServiceLog.date >= start,
+            ServiceLog.date < end,
+            ServiceLog.service_type != "Culto de Missões",   # <=== filtro crítico
+            (ServiceLog.sub_congregation_id.is_(None)
+             if sub_cong_id is None else ServiceLog.sub_congregation_id == sub_cong_id)
+        )
+    )
+    ofe = float(db.execute(q_ofe).scalar_one() or 0.0)
+
+    return diz, ofe
+
+
+# Soma Dízimo/Oferta do resumo para TODO o ESCOPO (principal / sub específica / ALL)
+def _sum_servicelog_scope_operacional(db, cong_id: int, start, end, sub_id_or_all):
+    total_diz, total_ofe = 0.0, 0.0
+
+    if sub_id_or_all == "ALL":
+        # principal
+        d, o = _sum_servicelog_for_unit_operacional(db, cong_id, start, end, None)
+        total_diz += d; total_ofe += o
+        # todas as subs
+        subs = db.scalars(
+            select(SubCongregation.id).where(SubCongregation.congregation_id == cong_id)
+        ).all()
+        for sid in subs:
+            d, o = _sum_servicelog_for_unit_operacional(db, cong_id, start, end, sid)
+            total_diz += d; total_ofe += o
+    else:
+        d, o = _sum_servicelog_for_unit_operacional(db, cong_id, start, end, sub_id_or_all)
+        total_diz += d; total_ofe += o
+
+    return total_diz, total_ofe
+
+
+# ===== KPI OPERACIONAL (para cards do topo: Entradas / Saídas / Saldo) =====
+@st.cache_data(ttl=600)
+def get_kpi_operacional(cong_id: int, start, end, scope):
+    with SessionLocal() as db:
+        # 1) SAÍDAS (fluxo operacional)
+        q_out = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+            Transaction.congregation_id == cong_id,
+            Transaction.date >= start, Transaction.date < end,
+            Transaction.type == TYPE_OUT
+        )
+        total_saida = float(db.execute(q_out).scalar_one() or 0.0)
+
+        # 2) ENTRADAS OPERACIONAIS = Dízimo + Oferta (Oferta SEM Missões)
+        #
+        # Para evitar duplicidade de fontes, continue usando a sua regra de "maior fonte":
+        # - Dízimo: max( Transações[Categoria=Dízimo], Nominal[Tithe] )
+        # - Oferta: max( Transações[Categoria=Oferta], ServiceLog.oferta (exceto Missões) )
+        #
+        # 2a) Dízimos
+        q_diz_tx = select(func.coalesce(func.sum(Transaction.amount), 0.0)).join(Category).where(
+            Transaction.congregation_id == cong_id,
+            Transaction.date >= start, Transaction.date < end,
+            func.lower(func.replace(Category.name, " ", "")) == "dizimo"
+        )
+        diz_tx = float(db.execute(q_diz_tx).scalar_one() or 0.0)
+
+        q_diz_nom = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
+            Tithe.congregation_id == cong_id,
+            Tithe.date >= start, Tithe.date < end
+        )
+        diz_nom = float(db.execute(q_diz_nom).scalar_one() or 0.0)
+
+        total_diz = max(diz_tx, diz_nom)
+
+        # 2b) Ofertas
+        q_ofe_tx = select(func.coalesce(func.sum(Transaction.amount), 0.0)).join(Category).where(
+            Transaction.congregation_id == cong_id,
+            Transaction.date >= start, Transaction.date < end,
+            Transaction.type.in_((TYPE_IN, "RECEITA")),
+            func.lower(func.replace(Category.name, " ", "")) == "oferta"
+        )
+        ofe_tx = float(db.execute(q_ofe_tx).scalar_one() or 0.0)
+
+        # ServiceLog.oferta OPERACIONAL (exclui Missões) no ESCOPO selecionado
+        ofe_sl_diz, ofe_sl_ofe = _sum_servicelog_scope_operacional(db, cong_id, start, end, scope)
+        # (a função já retorna separadinho: dizimo/oferta do ServiceLog)
+        ofe_sl = ofe_sl_ofe
+
+        total_ofe = max(ofe_tx, ofe_sl)
+
+        entradas_total = total_diz + total_ofe
+        saldo = entradas_total - total_saida
+
+        return {
+            "total_saida": total_saida,
+            "total_oferta": total_ofe,
+            "total_dizimo": total_diz,
+            "total_entradas": entradas_total,
+            "saldo": saldo,
+        }
+
+
+
 def format_currency(amount):
     """
     Recebe float/Decimal e retorna string no formato 'R$ 1.234,56'.
@@ -1362,48 +1363,27 @@ def _process_dizimos_lote_callback(
     target_cong_obj: Any, 
     target_sub_cong_id: Any
 ):
-    """Callback para processar o lote de dizimos e limpar o estado."""
-    # A lógica de processamento precisa ser reescrita aqui. 
-    # Para evitar repetir o código complexo, vamos chamá-la de _run_dizimo_batch
+    """
+    Callback para processar o lote de dizimos.
+    A lógica é a mesma de antes, mas agora é chamada APENAS no final.
+    """
+    
+    # A lógica de parsing é a mesma, mas agora usa _parse_lote_dizimos para garantir consistência
+    registros, erros_parse = _parse_lote_dizimos(dizimos_texto)
 
-    if not dizimos_texto.strip():
-        st.session_state.status_message = ("warning", "O campo de dízimos em lote está vazio.")
-        return # Não faz rerun se não tem nada para salvar
+    erros_db, sucessos = list(erros_parse), 0
+    
+    # Se houver erros de parsing, pare aqui
+    if erros_parse:
+        st.session_state.status_message = ("error", "❌ Erros de formato: " + " | ".join(erros_parse))
+        return
 
-    erros, sucessos = [], 0
-    linhas = [l.strip().replace(',', '.').replace('/', ' ') for l in dizimos_texto.splitlines() if l.strip()]
-
-    for i, linha in enumerate(linhas):
+    for i, reg in enumerate(registros):
+        valor_float = reg["Valor"]
+        nome_dizimista = reg["Nome"]
+        
         with SessionLocal() as db_batch:
             try:
-                # 1. Tenta dividir a linha em tokens (flexível)
-                tokens = [t.strip() for t in linha.split() if t.strip()]
-                if not tokens: continue
-                
-                # 2. Encontrar o Valor em QUALQUER lugar (o primeiro token que se parece com float)
-                valor_float, valor_index = 0.0, -1
-                for j, token in enumerate(tokens):
-                    try:
-                        valor_float_candidato = float(token)
-                        if valor_float_candidato > 0:
-                            valor_float = valor_float_candidato
-                            valor_index = j
-                            break
-                    except Exception: continue
-                
-                if valor_index == -1:
-                    erros.append(f"Linha {i+1} ('{linha}'): Valor de dízimo não encontrado ou inválido.")
-                    db_batch.rollback(); continue
-
-                # 3. Nome do Dizimista (Todos os tokens, exceto o token de Valor)
-                nome_tokens = [t for j, t in enumerate(tokens) if j != valor_index]
-                nome_dizimista = " ".join(nome_tokens).strip()
-                
-                if not nome_dizimista:
-                    erros.append(f"Linha {i+1} ('{linha}'): Nome do dizimista ausente.")
-                    db_batch.rollback(); continue
-
-                # 4. Inserir no DB
                 db_batch.add(Tithe(
                     date=rap_data, tither_name=nome_dizimista, amount=valor_float,
                     congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id,
@@ -1412,20 +1392,15 @@ def _process_dizimos_lote_callback(
                 db_batch.commit(); sucessos += 1
                 
             except Exception as e:
-                db_batch.rollback(); erros.append(f"Erro inesperado na linha {i+1} ('{linha}'): {str(e)}")
+                db_batch.rollback(); erros_db.append(f"Erro inesperado no registro '{nome_dizimista}': {str(e)}")
 
-    # Feedback e Limpeza
+    # Feedback
     if sucessos > 0: 
-        # Esta linha de limpeza AGORA é segura porque será executada ANTES do rerun
-        st.session_state.rap_dizimo_lote = "" 
         st.session_state.status_message = ("success", f"✅ {sucessos} dízimos registrados com sucesso.")
-    if erros: 
-        st.session_state.status_message = ("error", "❌ Erros encontrados: " + " | ".join(erros))
-    
-    # Executa o rerun para atualizar a tela e limpar a área de texto (se sucessos > 0)
-    if sucessos > 0 or erros:
-        st.cache_data.clear() # Limpa o cache para refletir no relatório
-        st.rerun()
+    if erros_db: 
+        st.session_state.status_message = ("error", "❌ Erros encontrados: " + " | ".join(erros_db))
+
+    # Importante: NÃO chame st.rerun() ou st.cache_data.clear() aqui, pois o chamador já o fará.
 
 def _clear_launch_fields(keys_to_clear: List[str]):
     """Limpa campos específicos no session state para permitir novos lançamentos."""
@@ -1664,6 +1639,22 @@ class InternalMessage(Base):
 def get_engine():
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
+        # ALTERE ESTA LINHA:
+        db_url = "sqlite:///database.db"
+        
+        # PARA ESTA LINHA: (usando um caminho absoluto simples)
+        # Note: 'sqlite:///' + caminho absoluto/database.db
+        
+        # Você não precisa mudar nada, pois "sqlite:///database.db" já se refere ao diretório
+        # de trabalho se o caminho não for absoluto.
+
+        # Se o problema persistir, TENTE FORÇAR um caminho no diretório de trabalho:
+        # Substitua a linha 1 pela linha 2, garantindo que o arquivo será criado.
+        # Linha 1: db_url = "sqlite:///database.db"
+        
+        # db_url = f"sqlite:///{os.path.abspath('database.db')}" # Com essa linha, ele força
+                                                                # o caminho absoluto
+
         db_url = "sqlite:///database.db"
     return create_engine(db_url, pool_pre_ping=True)
 
@@ -1821,83 +1812,447 @@ def current_user():
     with SessionLocal() as db:
         return db.get(User, uid)
 
-def login_ui():
-    # CSS base (o seu ADRF_LOGIN_CSS pode continuar)
-    st.markdown(ADRF_LOGIN_CSS, unsafe_allow_html=True)
-
-    # === Centraliza a viewport e transforma o st.form em um "card" ===
-    LOGIN_CARD_CSS = """
-    <style>
-      /* centraliza tudo vertical/horizontal */
-      [data-testid="stAppViewContainer"] > .main{
-        display:flex; align-items:center; justify-content:center;
-        min-height:100vh; padding:0 !important;
-      }
-      header[data-testid="stHeader"]{ display:none; }
-      footer{ visibility:hidden; }
-
-      /* deixa o formulário com cara de cartão e largura fixa */
-      form[data-testid="stForm"]{
-        width:520px; max-width:92vw; margin:0 auto;
-        background:#fff; border:1px solid #E6E8F0; border-radius:14px;
-        box-shadow:0 10px 30px rgba(16,24,40,.08);
-        padding:28px 22px;
-      }
-      /* inputs e botão mais bonitos dentro do card */
-      form[data-testid="stForm"] .stTextInput>div>div>input,
-      form[data-testid="stForm"] .stPassword>div>div>input{
-        height:44px; font-size:1rem;
-      }
-      form[data-testid="stForm"] .stButton>button{
-        width:100%; height:44px; font-weight:700; border-radius:10px;
-      }
-    </style>
+# === Função COMPLETA do login com o logo IADRF! ===
+# --- HELPER de verificação de senha (hash bcrypt ou texto puro para ambiente de dev) ---
+# --- helper para verificar a senha (bcrypt se houver hash, senão comparação simples) ---
+# --- substituir sua verify_password por esta versão tolerante ---
+def verify_password(password: str, stored_hash: str) -> bool:
     """
-    st.markdown(LOGIN_CARD_CSS, unsafe_allow_html=True)
+    Aceita:
+      - PBKDF2 no formato 'salt_hex:hash_hex'
+      - bcrypt ($2a$/$2b$/$2y$) se a lib passlib estiver instalada
+      - texto puro (fallback; útil em bases antigas de dev)
+    """
+    import hashlib, hmac
 
-    # === (REMOVA) Qualquer wrapper HTML aberto antes tipo:
-    # st.markdown("<div class='adrf-wrap'><div class='adrf-card'><div class='body'>", unsafe_allow_html=True)
-    # ... e o fechamento correspondente. Eles não "abraçam" widgets do Streamlit e viram um card vazio no topo.
+    if not stored_hash:
+        return False
 
-    # LOGO (opcional)
+    s = str(stored_hash)
+
+    # 1) bcrypt
+    if s.startswith("$2a$") or s.startswith("$2b$") or s.startswith("$2y$"):
+        try:
+            from passlib.hash import bcrypt
+            return bcrypt.verify(password, s)
+        except Exception:
+            # se passlib não estiver instalada, não trava o login;
+            # cai para os demais métodos (vai falhar de propósito aqui).
+            pass
+
+    # 2) PBKDF2: "salt_hex:hash_hex"
+    if ":" in s:
+        try:
+            salt_hex, pwdhash_hex = s.split(":", 1)
+            salt = bytes.fromhex(salt_hex)
+            expected = bytes.fromhex(pwdhash_hex)
+            calc = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 100_000)
+            return hmac.compare_digest(calc, expected)
+        except Exception:
+            return False
+
+    # 3) Fallback: texto puro (para dados legados de dev)
+    return password == s
+
+
+
+# =============== LOGIN UI (compatível com seu main que usa st.session_state.uid) ===============
+def login_ui():
+    import streamlit as st
+    from sqlalchemy import or_
+
+    # injeta CSS/Logo se existirem
     try:
-        if os.path.exists(LOGO_PATH):
-            st.image(LOGO_PATH, caption=None, use_container_width=False, width=120)
-        else:
-            st.markdown(
-                "<div style='text-align:center; font:800 48px/1 Inter,system-ui; color:#1f66eb'>ADRF<span style='color:#74b816'>!</span></div>",
-                unsafe_allow_html=True
-            )
-    except Exception:
+        st.markdown(ADRF_LOGIN_CSS, unsafe_allow_html=True)
+    except NameError:
         pass
+    st.markdown('<div class="adrf-logo">IADRF<span class="bang">!</span></div>', unsafe_allow_html=True)
+    st.markdown('<div class="adrf-logo-sep"></div>', unsafe_allow_html=True)
 
-    # === FORMULÁRIO DE LOGIN (dentro do card) ===
-    with st.form("adrf_login_form", clear_on_submit=False):
-        u = st.text_input("Usuário", placeholder="Usuário", key="adrf_user")
-        p = st.text_input("Senha", type="password", placeholder="Senha", key="adrf_pass")
+    # Evita colisão de chaves com outros inputs da página
+    USER_KEY = "login_user_main_fix"
+    PWD_KEY  = "login_pwd_main_fix"
 
-        # Se você tiver combo de órgão/perfil, coloque aqui também:
-        # org = st.selectbox("Órgão", ["PCPE", "PMPE", "SDS", ...])
+    # Mensagem persistente
+    st.session_state.setdefault("auth_msg", "")
 
-        ok = st.form_submit_button("ACESSAR")
+    # ---------- Cartão ----------
+    st.markdown('<div class="adrf-login-card">', unsafe_allow_html=True)
 
-    if ok:
-        with SessionLocal() as db:
-            user = db.scalar(select(User).where(User.username == u))
-            if user and verify_password(p, user.password_hash):
-                st.session_state.uid = user.id
-                try:
-                    cm = get_cookie_manager()
-                    token = _make_token({"uid": int(user.id)})
-                    cm.set(COOKIE_NAME, token, expires_at=datetime.utcnow()+timedelta(days=30), key="auth_set")
-                    _update_last_active(cm)
-                except Exception:
-                    st.warning("Login salvo só na sessão atual. Instale 'extra-streamlit-components' para lembrar o login.")
-                st.rerun()
+    with st.form("form_login"):
+        user_in = st.text_input("Usuário", key=USER_KEY)
+        pwd_in  = st.text_input("Senha", type="password", key=PWD_KEY)
+        ok      = st.form_submit_button("Acessar")
+
+        if ok:
+            u = (st.session_state.get(USER_KEY) or "").strip()
+            p = (st.session_state.get(PWD_KEY)  or "").strip()
+
+            if not u or not p:
+                st.session_state.auth_msg = "Informe usuário e senha."
             else:
-                st.error("Usuário ou senha inválidos.")
+                try:
+                    # ===== Busca do usuário sem usar 'email' =====
+                    with SessionLocal() as db:
+                        # Aceita 'username' e/ou 'login', conforme existir no modelo
+                        filters = []
+                        if hasattr(User, "username"): filters.append(User.username == u)
+                        if hasattr(User, "login"):    filters.append(User.login    == u)
+
+                        if not filters:
+                            st.session_state.auth_msg = (
+                                "Modelo User sem campos de login reconhecidos (esperado: 'username' ou 'login')."
+                            )
+                        else:
+                            q = db.query(User)
+                            q = q.filter(filters[0] if len(filters) == 1 else or_(*filters))
+                            user = q.first()
+
+                            if not user:
+                                st.session_state.auth_msg = "Usuário não encontrado."
+                            else:
+                                # ===== Descobre o campo de senha disponível =====
+                                pwd_fields_try = ("password_hash", "senha_hash", "password", "senha")
+                                stored = None
+                                for f in pwd_fields_try:
+                                    if hasattr(user, f):
+                                        stored = getattr(user, f)
+                                        if stored is not None:
+                                            break
+
+                                if stored is None:
+                                    st.session_state.auth_msg = "Campo de senha não encontrado no modelo User."
+                                elif not verify_password(p, stored):
+                                    st.session_state.auth_msg = "Senha inválida."
+                                else:
+                                    # ===== SUCESSO: seta UID (é isso que teu main() verifica) =====
+                                    st.session_state.uid = user.id
+
+                                    # Nome exibido (opcional)
+                                    name_try = ("name", "full_name", "username", "login")
+                                    shown = None
+                                    for f in name_try:
+                                        if hasattr(user, f):
+                                            shown = getattr(user, f) or shown
+                                    st.session_state.current_user = shown or u
+
+                                    st.session_state.auth_msg = ""
+                                    st.rerun()
+
+                except Exception as e:
+                    st.session_state.auth_msg = f"Erro ao autenticar: {e}"
+
+    if st.session_state.auth_msg:
+        st.warning(st.session_state.auth_msg)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+
+
 
 # ===================== HELPERS =====================
+
+# --------- Parser BR para valores e nomes (tolerante a "R$ 1.234,56") ----------
+import re
+_CURRENCY_RE = re.compile(r"(?<!\d)(?:R\$\s*)?([0-9]{1,3}(?:[.\s][0-9]{3})*|[0-9]+)(?:,([0-9]{1,2}))?(?!\d)")
+
+import pandas as pd
+import re
+
+# ====== helpers (mantêm os seus; incluo aqui para ficar autocontido) ======
+_CURRENCY_RE = re.compile(r"(?<!\d)(?:R\$\s*)?([0-9]{1,3}(?:[.\s][0-9]{3})*|[0-9]+)(?:,([0-9]{1,2}))?(?!\d)")
+
+import pandas as pd
+import re
+
+_CURRENCY_RE = re.compile(r"(?<!\d)(?:R\$\s*)?([0-9]{1,3}(?:[.\s][0-9]{3})*|[0-9]+)(?:,([0-9]{1,2}))?(?!\d)")
+
+import re
+import pandas as pd
+
+# ----------------- helpers de parsing/format -----------------
+_CURRENCY_RE = re.compile(r"(?<!\d)(?:R\$\s*)?([0-9]{1,3}(?:[.\s][0-9]{3})*|[0-9]+)(?:,([0-9]{1,2}))?(?!\d)")
+
+import re
+import pandas as pd
+
+# -------- helpers de parsing/format (podem estar em outro lugar; deixei aqui autocontido) --------
+_CURRENCY_RE = re.compile(r"(?<!\d)(?:R\$\s*)?([0-9]{1,3}(?:[.\s][0-9]{3})*|[0-9]+)(?:,([0-9]{1,2}))?(?!\d)")
+
+
+
+# ----------------- seção com confirmação em 2 etapas + TABELA EDITÁVEL -----------------
+# ----------------- seção com confirmação em 2 etapas + TABELA EDITÁVEL -----------------
+
+# ===================== HELPERS: LOTE DE DÍZIMOS =====================
+# Estes helpers são essenciais para o parsing e conversão do lote
+# e devem estar definidos antes de serem usados.
+
+def _fmt_brl(v: float) -> str:
+    """
+    Formata float para string com separador de decimal (,) e milhar (.)
+    (apenas números, sem o "R$") para remontar o texto de lote.
+    """
+    s = f"{v:,.2f}"
+    s = s.replace(",", "X").replace(".", ",").replace("X", ".")
+    return s
+
+def _rows_to_text_br(rows: List[Dict[str, Any]]) -> str:
+    """
+    Transforma uma lista de dicionários [{"Nome":..., "Valor": 12.34}]
+    em uma string formatada como lote: "Nome 12,34" por linha.
+    """
+    linhas = []
+    for r in rows:
+        nome = str(r.get("Nome", "")).strip()
+        valor = float(r.get("Valor", 0.0) or 0.0)
+        # Usa _fmt_brl para garantir o separador de milhar/decimal correto.
+        linhas.append(f"{nome} {_fmt_brl(valor)}")
+    return "\n".join(linhas)
+
+def _br_to_float(s: str) -> float:
+    """
+    Converte string de moeda BR (1.234,56) ou simples (500) para float.
+    Usa a regex _CURRENCY_RE.
+    """
+    s = (s or "").strip()
+    if not s:
+        return 0.0
+    # Presume que _CURRENCY_RE está definido em outro lugar, se não estiver, esta função
+    # pode quebrar, mas é a versão que você estava usando para análise.
+    m = _CURRENCY_RE.search(s.replace("\u00A0", " "))
+    if not m:
+        return 0.0
+    inteiro = (m.group(1) or "").replace(".", "").replace(" ", "")
+    frac = (m.group(2) or "0")
+    try:
+        # Tenta a conversão limpa da regex
+        return float(f"{int(inteiro)}.{int(frac):02d}")
+    except Exception:
+        # Fallback para tentar uma conversão mais suja se a regex falhar
+        try:
+            return float(s.replace("R$", "").replace(".", "").replace(",", ".").strip() or 0.0)
+        except Exception:
+            return 0.0
+
+def _parse_lote_dizimos(texto: str):
+    """
+    Converte o texto bruto do lote em lista de dicionários [{Nome: str, Valor: float}].
+    """
+    registros, erros = [], []
+    if not (texto and texto.strip()):
+        return registros, erros
+    linhas = [ln.strip() for ln in texto.splitlines() if ln.strip()]
+    for i, ln in enumerate(linhas, start=1):
+        try:
+            valor = _br_to_float(ln)
+            if valor <= 0:
+                erros.append(f"Linha {i}: valor não encontrado (> 0).")
+                continue
+            # Note: _CURRENCY_RE deve estar definido fora dessa função.
+            m = _CURRENCY_RE.search(ln.replace("\u00A0", " "))
+            
+            # Tenta isolar o nome removendo a parte do valor
+            if m:
+                nome = (ln[:m.start()] + " " + ln[m.end():]) 
+            else: 
+                nome = ln
+                
+            nome = re.sub(r"[,\|;]+", " ", nome).strip()
+            nome = re.sub(r"\s{2,}", " ", nome) or "Dizimista"
+            
+            registros.append({"Nome": nome, "Valor": float(valor)})
+        except Exception:
+            erros.append(f"Linha {i}: formato inválido.")
+    return registros, erros
+# ============================================================
+
+
+# ----------------- seção com confirmação em 2 etapas + TABELA EDITÁVEL -----------------
+# ----------------- seção com confirmação em 2 etapas + TABELA EDITÁVEL -----------------
+def render_dizimos_lote_section(default_payment: str, rap_data, target_cong_obj, target_sub_cong_id):
+    """
+    Etapa 1: Digita -> 'Avançar para confirmação' (limpa texto e cria _lote_pending).
+    Etapa 2: Mostra st.data_editor editável; 'Confirmar Lote' salva com dados EDITADOS; 'Cancelar' descarta.
+    """
+
+    st.markdown("##### 2. Lançar Dízimos Nominais em Lote (Entrada Livre)")
+
+    # Estado controlado do textarea (evita conflito de key)
+    if "lote_text" not in st.session_state:
+        st.session_state["lote_text"] = ""
+
+    def _sync_lote_text():
+        # AQUI GARANTIMOS QUE O ESTADO REAL RECEBE O VALOR DO WIDGET
+        st.session_state["lote_text"] = st.session_state.get("rap_dizimo_lote_input", "")
+
+    # Se já existe um pendente, mostramos a TABELA EDITÁVEL (Etapa 2)
+    pending = st.session_state.get("_lote_pending")
+    if pending:
+        st.info("Confira e edite os lançamentos antes de confirmar.")
+        df_pending = pd.DataFrame(pending["rows"])
+        if df_pending.empty:
+            st.warning("Nenhum item no lote.")
+            st.session_state.pop("_lote_pending", None)
+            st.rerun()
+
+        # Data editor EDITÁVEL (adicionar/remover/alterar)
+        edited_df = st.data_editor(
+            df_pending,
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            key="lote_pending_editor",
+            column_config={
+                "Nome": st.column_config.TextColumn("Nome", required=True),
+                # CORREÇÃO FINAL: Configura a coluna para aceitar vírgula (padrão BRL)
+                "Valor": st.column_config.NumberColumn(
+                    "Valor (R$)", 
+                    format="R$ %.2f",           # Formato BRL para exibição
+                    required=True, 
+                    step=0.01,                  # Permite editar centavos
+                    min_value=0.0
+                )
+            },
+            column_order=["Nome", "Valor"]
+        )
+
+        # Métricas após edição
+        try:
+            # st.data_editor retorna o valor como float (já convertido do input com vírgula)
+            total = float(edited_df["Valor"].sum())
+            qtd = int(len(edited_df))
+        except Exception:
+            total, qtd = 0.0, 0
+        c1, c2 = st.columns(2)
+        c1.metric("Registros", str(qtd))
+        # CORREÇÃO: Usa format_currency (função global)
+        c2.metric("Total (editado)", format_currency(total))
+
+        colC, colD = st.columns(2)
+        if colC.button("✅ Confirmar Lote", type="primary", use_container_width=True, key="btn_confirmar_lote"):
+            try:
+                # 1) Converte linhas EDITADAS para texto BR e chama o callback
+                rows = edited_df.to_dict(orient="records")
+                # CORREÇÃO: _rows_to_text_br deve ser usado para formatar o lote
+                texto_confirmado = _rows_to_text_br(rows) 
+                
+                # --- AQUI VAI O CALL BACK FINAL (SALVAR) ---
+                _process_dizimos_lote_callback(
+                    texto_confirmado,
+                    default_payment,
+                    rap_data,
+                    target_cong_obj,
+                    target_sub_cong_id
+                )
+                # --- FIM DO CALL BACK FINAL ---
+
+                # 2) Guarda o último lote salvo (já editado)
+                st.session_state["_ultimo_lote_salvo"] = rows
+                # 3) Limpa o pendente e reroda
+                st.session_state.pop("_lote_pending", None)
+                st.cache_data.clear() 
+                st.success("Lote salvo com sucesso!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erro ao salvar o lote: {e}")
+
+        if colD.button("❌ Cancelar", use_container_width=True, key="btn_cancelar_lote"):
+            st.session_state.pop("_lote_pending", None)
+            st.info("Lote cancelado.")
+            st.rerun()
+
+        st.divider()
+        return  # não mostra a etapa 1 quando há pendente
+
+    # --- ETAPA 1: Entrada de texto ---
+    st.text_area(
+        "Insira um dízimo por linha (Ex: João Silva 500,00 | Adriana Pereira 50 | Pedro Souza 25,30)",
+        height=200,
+        key="rap_dizimo_lote_input",
+        value=st.session_state["lote_text"],
+        on_change=_sync_lote_text
+    )
+
+    # ------- ETAPA 1: ações quando NÃO há pendente -------
+    col1, col2 = st.columns(2)
+    avancar = col1.button("Avançar para confirmação", type="primary", use_container_width=True, key="btn_avancar_lote")
+    limpar  = col2.button("Limpar texto", use_container_width=True, key="btn_limpar_lote")
+
+    if limpar:
+        # Altera apenas a chave 'lote_text' (que é usada como value)
+        st.session_state["lote_text"] = ""
+        st.rerun()
+
+    if avancar:
+        texto = st.session_state["lote_text"]
+        regs, erros = _parse_lote_dizimos(texto)
+        if not regs:
+            st.error("Nenhum dízimo válido encontrado. Verifique o texto e tente novamente.")
+        else:
+            # Guarda lote pendente
+            st.session_state["_lote_pending"] = {"rows": regs}
+            # Limpa o estado 'lote_text' para que a área de texto fique vazia após o rerun
+            st.session_state["lote_text"] = ""
+            st.rerun()
+
+    # Exibe o último lote efetivamente salvo (apenas referência)
+    if st.session_state.get("_ultimo_lote_salvo"):
+        st.caption("Último lote salvo:")
+        df_conf = pd.DataFrame(st.session_state["_ultimo_lote_salvo"])
+        if not df_conf.empty:
+            df_show = df_conf.copy()
+            df_show["Valor (R$)"] = df_show["Valor"].map(lambda v: format_currency(float(v or 0.0)))
+            df_show = df_show[["Nome", "Valor (R$)"]]
+            st.dataframe(df_show, use_container_width=True, hide_index=True)
+            
+            
+            
+# =============== GUARDA PARA EVITAR SALVAR DIRETO (Lote de Dízimos) ===============
+def install_lote_guard():
+    """
+    Re-encapa _process_dizimos_lote_callback para só salvar quando
+    st.session_state['_allow_save_lote'] == True.
+    Bloqueia qualquer chamada direta (ex.: botões antigos).
+    """
+    import streamlit as st
+    g = globals()
+    if g.get("_LoteGuardInstalled"):
+        return  # já instalado
+
+    orig = g.get("_process_dizimos_lote_callback")
+    if not callable(orig):
+        # não existe o callback ainda; apenas marca que tentou
+        g["_LoteGuardInstalled"] = True
+        return
+
+    g["_orig_process_dizimos_cb"] = orig
+
+    def _guarded_process_dizimos_lote_callback(*args, **kwargs):
+        # Só permite quando a confirmação explícita habilitou
+        if not st.session_state.get("_allow_save_lote", False):
+            # Opcional: aviso suave para rastrear chamadas indevidas
+            # st.info("Aguardando confirmação do lote.")
+            return
+        return g["_orig_process_dizimos_cb"](*args, **kwargs)
+
+    g["_process_dizimos_lote_callback"] = _guarded_process_dizimos_lote_callback
+    g["_LoteGuardInstalled"] = True
+
+
+
+
+
+
+
+import re
+import pandas as pd
+import streamlit as st
+
+_CURRENCY_RE = re.compile(r"(?<!\d)(?:R\$\s*)?([0-9]{1,3}(?:[.\s][0-9]{3})*|[0-9]+)(?:,([0-9]{1,2}))?(?!\d)")
+
+
 def is_admin_general(user: "User") -> bool:
     return (user.username or "").strip().lower() == "admin"
 
@@ -1953,152 +2308,955 @@ def mark_message_as_read(msg_id: int):
             msg.is_read = True
             db.commit()
 
+SIDEBAR_PILLS_CSS = """
+<style>
+/* ====== Vars (edite pra ajustar a paleta) ====== */
+:root {
+  --pill-bg: #f8fafc;           /* fundo padrão */
+  --pill-text: #0f172a;         /* texto padrão */
+  --pill-border: #e2e8f0;       /* borda padrão */
+  --pill-hover-bg: #eff6ff;     /* hover fundo */
+  --pill-hover-border: #bfdbfe; /* hover borda */
+  --pill-active-bg: #1e40af;    /* ativo fundo (azul) */
+  --pill-active-text: #ffffff;  /* ativo texto */
+  --pill-active-border: #1e3a8a;/* ativo borda */
+  --pill-shadow: 0 1px 2px rgba(0,0,0,.04);
+  --pill-shadow-active: 0 2px 6px rgba(30,64,175,.25);
+}
+
+/* Espaçamento entre itens do grupo */
+div[data-testid="stSidebar"] [role="radiogroup"]{
+  display: grid !important;
+  gap: 10px !important;
+}
+
+/*** VERSÃO A — cada item é <div role="radio"> ***/
+div[data-testid="stSidebar"] [role="radiogroup"] > div[role="radio"]{
+  display: flex; align-items:center; width:100%;
+  border:1px solid var(--pill-border);
+  background:var(--pill-bg); color:var(--pill-text);
+  padding:12px 14px; border-radius:12px;
+  box-shadow:var(--pill-shadow);
+  transition:background .12s, border-color .12s, color .12s, box-shadow .12s, transform .02s;
+  cursor:pointer;
+}
+/* Esconde a bolinha/ícone do rádio */
+div[data-testid="stSidebar"] [role="radiogroup"] > div[role="radio"] svg,
+div[data-testid="stSidebar"] [role="radiogroup"] > div[role="radio"] > div:first-child{
+  display:none !important;
+}
+/* Texto dentro (garante largura total) */
+div[data-testid="stSidebar"] [role="radiogroup"] > div[role="radio"] > div{
+  width:100%;
+}
+/* Hover */
+div[data-testid="stSidebar"] [role="radiogroup"] > div[role="radio"]:hover{
+  background:var(--pill-hover-bg);
+  border-color:var(--pill-hover-border);
+}
+/* Ativo */
+div[data-testid="stSidebar"] [role="radiogroup"] > div[role="radio"][aria-checked="true"]{
+  background:var(--pill-active-bg)!important;
+  border-color:var(--pill-active-border)!important;
+  color:var(--pill-active-text)!important;
+  box-shadow:var(--pill-shadow-active);
+  transform: translateY(-0.5px);
+}
+
+/*** VERSÃO B — cada item é <label><input type=radio></label> ***/
+div[data-testid="stSidebar"] [role="radiogroup"] > label{
+  display:flex; align-items:center; width:100%;
+  border:1px solid var(--pill-border);
+  background:var(--pill-bg); color:var(--pill-text);
+  padding:12px 14px; border-radius:12px;
+  box-shadow:var(--pill-shadow);
+  transition:background .12s, border-color .12s, color .12s, box-shadow .12s, transform .02s;
+  cursor:pointer; user-select:none; -webkit-user-select:none;
+  gap:10px;
+}
+/* Esconde input bolinha */
+div[data-testid="stSidebar"] [role="radiogroup"] > label input[type="radio"],
+div[data-testid="stSidebar"] [role="radiogroup"] > label > div:first-child{
+  display:none !important;
+}
+/* Hover */
+div[data-testid="stSidebar"] [role="radiogroup"] > label:hover{
+  background:var(--pill-hover-bg);
+  border-color:var(--pill-hover-border);
+}
+/* Ativo (usa :has para capturar o checked) */
+div[data-testid="stSidebar"] [role="radiogroup"] > label:has(input[type="radio"]:checked){
+  background:var(--pill-active-bg)!important;
+  border-color:var(--pill-active-border)!important;
+  color:var(--pill-active-text)!important;
+  box-shadow:var(--pill-shadow-active);
+  transform: translateY(-0.5px);
+}
+
+/* Tipografia consistente e sem “bolinhas” de lista */
+div[data-testid="stSidebar"] [role="radiogroup"] > *{
+  font-size: 1rem;
+  font-weight: 600;
+  list-style: none !important;
+}
+
+/* Remove marcadores/sangrias acidentais */
+div[data-testid="stSidebar"] li{
+  list-style: none !important;
+  margin: 0 !important; padding: 0 !important;
+}
+</style>
+"""
+SIDEBAR_MODERN_MENU_CSS = """
+<style>
+:root{
+  --pill-bg:#f8fafc; --pill-text:#0f172a; --pill-border:#e2e8f0;
+  --pill-hover-bg:#eff6ff; --pill-hover-border:#bfdbfe;
+  --pill-active-bg:#1d4ed8; --pill-active-text:#ffffff; --pill-active-border:#1e40af;
+  --pill-shadow:0 1px 2px rgba(0,0,0,.05);
+  --pill-shadow-active:0 4px 12px rgba(29,78,216,.25);
+  --focus-ring:0 0 0 3px rgba(59,130,246,.25);
+}
+div[data-testid="stSidebar"] [role="radiogroup"]{ display:grid!important; gap:10px!important; margin-top:6px; }
+
+/* Estrutura A: <div role="radio"> */
+div[data-testid="stSidebar"] [role="radiogroup"] > div[role="radio"]{
+  display:flex; align-items:center; width:100%;
+  border:1px solid var(--pill-border); background:var(--pill-bg); color:var(--pill-text);
+  padding:12px 14px; border-radius:14px; box-shadow:var(--pill-shadow);
+  transition:background .15s, border-color .15s, color .15s, transform .02s, box-shadow .15s; cursor:pointer;
+}
+div[data-testid="stSidebar"] [role="radiogroup"] > div[role="radio"] svg,
+div[data-testid="stSidebar"] [role="radiogroup"] > div[role="radio"] > div:first-child{ display:none!important; }
+div[data-testid="stSidebar"] [role="radiogroup"] > div[role="radio"] > div{ width:100%; }
+div[data-testid="stSidebar"] [role="radiogroup"] > div[role="radio"]:hover{ background:var(--pill-hover-bg); border-color:var(--pill-hover-border); }
+div[data-testid="stSidebar"] [role="radiogroup"] > div[role="radio"][aria-checked="true"]{
+  background:var(--pill-active-bg)!important; color:var(--pill-active-text)!important;
+  border-color:var(--pill-active-border)!important; box-shadow:var(--pill-shadow-active); transform:translateY(-1px);
+}
+div[data-testid="stSidebar"] [role="radiogroup"] > div[role="radio"]:focus-visible{ outline:none; box-shadow:var(--focus-ring); }
+
+/* Estrutura B: <label><input type=radio> */
+div[data-testid="stSidebar"] [role="radiogroup"] > label{
+  display:flex; align-items:center; width:100%;
+  border:1px solid var(--pill-border); background:var(--pill-bg); color:var(--pill-text);
+  padding:12px 14px; border-radius:14px; box-shadow:var(--pill-shadow);
+  transition:background .15s, border-color .15s, color .15s, transform .02s, box-shadow .15s;
+  cursor:pointer; user-select:none; -webkit-user-select:none; gap:10px;
+}
+div[data-testid="stSidebar"] [role="radiogroup"] > label input[type="radio"],
+div[data-testid="stSidebar"] [role="radiogroup"] > label > div:first-child{ display:none!important; }
+div[data-testid="stSidebar"] [role="radiogroup"] > label:hover{ background:var(--pill-hover-bg); border-color:var(--pill-hover-border); }
+div[data-testid="stSidebar"] [role="radiogroup"] > label:has(input[type="radio"]:checked){
+  background:var(--pill-active-bg)!important; color:var(--pill-active-text)!important;
+  border-color:var(--pill-active-border)!important; box-shadow:var(--pill-shadow-active); transform:translateY(-1px);
+}
+div[data-testid="stSidebar"] [role="radiogroup"] > label:focus-within{ box-shadow:var(--focus-ring); }
+
+/* Estrutura C: BaseWeb wrapper */
+div[data-testid="stSidebar"] [role="radiogroup"] > div[data-baseweb="radio"]{
+  display:flex; align-items:center; width:100%;
+  border:1px solid var(--pill-border); background:var(--pill-bg); color:var(--pill-text);
+  padding:12px 14px; border-radius:14px; box-shadow:var(--pill-shadow);
+  transition:background .15s, border-color .15s, color .15s, transform .02s, box-shadow .15s; cursor:pointer;
+}
+div[data-testid="stSidebar"] [role="radiogroup"] > div[data-baseweb="radio"] input[type="radio"],
+div[data-testid="stSidebar"] [role="radiogroup"] > div[data-baseweb="radio"] svg{ display:none!important; }
+div[data-testid="stSidebar"] [role="radiogroup"] > div[data-baseweb="radio"]:hover{ background:var(--pill-hover-bg); border-color:var(--pill-hover-border); }
+div[data-testid="stSidebar"] [role="radiogroup"] > div[data-baseweb="radio"]:has(input[type="radio"]:checked){
+  background:var(--pill-active-bg)!important; color:var(--pill-active-text)!important;
+  border-color:var(--pill-active-border)!important; box-shadow:var(--pill-shadow-active); transform:translateY(-1px);
+}
+
+/* Tipografia */
+div[data-testid="stSidebar"] [role="radiogroup"] > *{ font-size:1rem; font-weight:600; letter-spacing:.1px; }
+
+/* Dark-mode */
+@media (prefers-color-scheme: dark){
+  :root{
+    --pill-bg:#0b1220; --pill-text:#e5e7eb; --pill-border:#253045;
+    --pill-hover-bg:#111a2b; --pill-hover-border:#334155;
+    --pill-active-bg:#1d4ed8; --pill-active-text:#ffffff; --pill-active-border:#1e40af;
+    --pill-shadow:0 1px 2px rgba(0,0,0,.4); --pill-shadow-active:0 4px 12px rgba(0,0,0,.55);
+    --focus-ring:0 0 0 3px rgba(59,130,246,.35);
+  }
+}
+</style>
+"""
+
+
+
+
 
 def sidebar_common(user: "User") -> str:
-    """Desenha o menu lateral e retorna a página selecionada."""
-    MENU_PAGES = {
-        "Lançamentos": "📥", "Relatório de Entrada": "📊", "Relatório de Saída": "📉",
-        "Relatório de Missões": "🌍", "Relatório de Dizimistas": "🧾", "Visão Geral": "🏁",
-        "Assistente IA": "🤖", "Cadastro": "🛠️",
-    }
+    """Sidebar com botões 'pill' modernos.
+       Simplifica rotas para 5 opções principais para usuários leigos.
+    """
+    import streamlit as st  # <=== CORREÇÃO DO UnboundLocalError
     
     role = getattr(user, "role", "")
+    
+    # 🚨 Lista de menus ATUALIZADA (COM Assistente IA para SEDE)
     if role == "SEDE":
         menu_options_plain = [
-            "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
-            "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral",
-            "Assistente IA", "Cadastro"
+            "Painel Principal",
+            "Lançamentos",
+            "Relatórios Financeiros",  # <--- A IA será integrada AQUI
+            "Gestão Missões",
+            "Assistente IA",         # <=== ADICIONADO AQUI
+            "Configurações",
         ]
     elif role == "TESOUREIRO":
         menu_options_plain = [
-            "Lançamentos", "Relatório de Entrada", "Relatório de Saída",
-            "Relatório de Missões", "Relatório de Dizimistas", "Visão Geral"
+            "Painel Principal",
+            "Lançamentos",
+            "Relatórios Financeiros",
+            "Gestão Missões",
         ]
     elif role == "TESOUREIRO MISSIONÁRIO":
-        menu_options_plain = ["Relatório de Missões", "Assistente IA"]
+        menu_options_plain = [
+            "Gestão Missões",
+            # IA removida daqui
+        ]
     else:
-        menu_options_plain = ["Visão Geral"]
+        menu_options_plain = ["Painel Principal"]
 
-    menu_labels_pretty = [f"{MENU_PAGES.get(opt, '•')} {opt}" for opt in menu_options_plain]
-    label_to_page = {label: page for label, page in zip(menu_labels_pretty, menu_options_plain)}
-
-    session_key = "main_menu_page"
-    current_page_name = st.session_state.get(session_key, menu_options_plain[0])
-
+    session_key = "nav"
+    current = st.session_state.get(session_key, menu_options_plain[0])
     try:
-        default_index = menu_options_plain.index(current_page_name)
+        default_index = menu_options_plain.index(current)
     except ValueError:
         default_index = 0
 
     with st.sidebar:
-        try:
-            if os.path.exists(LOGO_PATH):
-                st.image(LOGO_PATH, use_column_width=True)
-        except Exception:
-            pass
-        st.write(f"👤 **{getattr(user, 'username', 'Usuário')}** — *{getattr(user, 'role', '')}*")
-        
-        # ================================================================
-        # MELHORIA: ALERTA DE MENSAGEM NÃO LIDA NA SIDEBAR
-        # ================================================================
-        with SessionLocal() as db:
-            # check_unread_messages deve ser definida em outro lugar do código
-            try:
-                unread_msg = check_unread_messages(user, db)
-                if unread_msg:
-                    st.markdown(
-                        f"""
-                        <div style="
-                            background: #fee2e2; border-radius: 8px; padding: 10px; 
-                            margin-bottom: 15px; border: 1px solid #fca5a5;
-                            color: #991b1b; font-weight: 700; cursor: pointer;"
-                            data-target-page="Visão Geral">
-                            📩 NOVO AVISO: {unread_msg.target_congregation.name}!
-                        </div>
-                        """, 
-                        unsafe_allow_html=True
-                    )
-            except NameError:
-                # Ignora se check_unread_messages ainda não estiver definida
-                pass
-        # ================================================================
+        # injeta o CSS moderno (mantido)
+        st.markdown(SIDEBAR_MODERN_MENU_CSS, unsafe_allow_html=True)
 
-        sel_label = st.radio(
-            "Menu", options=menu_labels_pretty, index=default_index,
-            key=session_key, label_visibility="collapsed"
+        st.markdown("### Menu")
+
+        page = st.radio(
+            label="",
+            options=menu_options_plain,
+            index=default_index,
+            key=session_key,
         )
-        page = label_to_page.get(sel_label, menu_options_plain[0])
 
-        st.divider()
-        if st.button("Sair"):
-            logout()
+        # Bloco de ambiente (mantido)
+        if not os.environ.get("DATABASE_URL"):
+            st.markdown(
+                """
+                <div style="
+                    background:#eef2ff;
+                    border:1px solid #c7d2ff;
+                    color:#1f2937;
+                    padding:14px 16px;
+                    border-radius:10px;
+                    margin-top:12px;">
+                  <strong>Ambiente: DESENVOLVIMENTO</strong><br/>
+                  <span style="opacity:.85;">(SQLite Local)</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        # Botão Sair (mantido)
+        if st.button("Sair", use_container_width=False):
+            try:
+                logout()
+                st.rerun()
+            except Exception:
+                pass
 
     return page
 
+
+def page_inicio(user: "User"):
+    ensure_seed()
+    with SessionLocal() as db:
+        
+        # === DESTAQUE DO LOGO NO CORPO DA PÁGINA ===
+        LOGO_PATH = "images/logo_igreja.png" 
+        try:
+            st.image(LOGO_PATH, width=150)
+        except Exception:
+            pass
+        # === FIM DESTAQUE ===
+        
+        st.markdown("<h1 class='page-title'>Painel Principal</h1>", unsafe_allow_html=True)
+
+        # 1. BLOCO DE FILTROS E ESCOPO
+        
+        congs_all = order_congs_sede_first(cong_options_for(user, db))
+        parent_cong_obj = None
+        
+        col_cong, col_sub, col_data = st.columns([1.5, 1.5, 1])
+
+        with col_cong:
+            if user.role == "SEDE":
+                cong_names = [c.name for c in congs_all] or ["—"]
+                cong_sel = st.selectbox("Congregação (Escopo)", cong_names + ["Toda a Rede"])
+                is_all_network = (cong_sel == "Toda a Rede")
+                if not is_all_network:
+                    parent_cong_obj = next((c for c in congs_all if c.name == cong_sel), None)
+            else:
+                parent_cong_obj = db.get(Congregation, user.congregation_id)
+                st.text_input("Congregação (Escopo)", parent_cong_obj.name, disabled=True)
+                is_all_network = False
+                
+        # 1.2. Seleção de Sub-unidade
+        sub_id = None
+        if parent_cong_obj:
+            subs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
+            if subs:
+                sub_opts = [f"{parent_cong_obj.name} (Principal)"] + [s.name for s in subs] + ["Todas as Unidades"]
+                with col_sub:
+                    opt = st.selectbox("Unidade (Filtro)", sub_opts, key="inicio_sub_filtro")
+                    if opt == "Todas as Unidades":
+                        sub_id = "ALL"
+                    elif opt.endswith("(Principal)"):
+                        sub_id = None
+                    else:
+                        sub_id = next(s.id for s in subs if s.name == opt)
+            else:
+                 with col_sub:
+                     st.text_input("Unidade (Filtro)", f"{parent_cong_obj.name} (Principal)", disabled=True)
+
+
+        # 1.3. Seleção de Data
+        with col_data:
+            ref = get_month_selector(label="Mês", key_prefix="inicio_ref")
+        start, end = month_bounds(ref)
+
+        st.divider()
+
+        # --- FIM BLOCO DE FILTROS ---
+
+        # 2) KPIs (entradas/saídas/saldo)
+        if is_all_network:
+            st.info("KPIs desabilitados para 'Toda a Rede'. Use a tabela abaixo.")
+            entradas = saidas = saldo = 0.0
+        else:
+            # === LÓGICA CORRIGIDA: FILTRANDO MISSÕES PARA FLUXO DE CAIXA OPERACIONAL ===
+            
+            # --- Configuração dos Filtros de Exclusão ---
+            # Assume que sub_id 'None' ou 'int' significa a unidade selecionada.
+            sub_filter = [ServiceLog.sub_congregation_id == sub_id] if isinstance(sub_id, int) else [ServiceLog.sub_congregation_id.is_(None)]
+            tx_sub_filter = [Transaction.sub_congregation_id == sub_id] if isinstance(sub_id, int) else [Transaction.sub_congregation_id.is_(None)]
+            tithe_sub_filter = [Tithe.sub_congregation_id == sub_id] if isinstance(sub_id, int) else [Tithe.sub_congregation_id.is_(None)]
+            
+            # Condição para ignorar Missões no ServiceLog (Culto)
+            missao_sl_filter = ServiceLog.service_type != "Culto de Missões"
+            
+            # Condição para ignorar Missões/Dízimos/Ofertas em Transações para o cálculo de 'Outras Entradas'
+            cat_miss = db.scalar(select(Category).where(func.lower(Category.name).in_(("missões","missoes")), Category.type == TYPE_IN))
+            cat_diz = db.scalar(select(Category).where(func.lower(Category.name).in_(("dízimo","dizimo")), Category.type == TYPE_IN))
+            cat_ofe = db.scalar(select(Category).where(func.lower(Category.name) == "oferta", Category.type == TYPE_IN))
+            exclude_cat_ids = [c.id for c in [cat_miss, cat_diz, cat_ofe] if c]
+            
+            # --- CÁLCULO DAS FONTES (Dízimo e Oferta) SEM MISSÕES ---
+            
+            # Dízimo do Resumo (ServiceLog) - APENAS não-Missões (CORREÇÃO APLICADA)
+            # ESTE VALOR VEM DA FUNÇÃO AUXILIAR CORRIGIDA (_sum_dizimo_resumo)
+            total_dizimo_resumo = _sum_dizimo_resumo(parent_cong_obj, sub_id, start, end, db)
+
+            # Dízimo Nominal (Tithe) - Assume que a função _sum_dizimo_nominal está corrigida para filtrar
+            total_dizimo_nominal = _sum_dizimo_nominal(parent_cong_obj, sub_id, start, end, db)
+            
+            # Dízimo FINAL (para o KPI): Regra de equivalência (max)
+            dizimo_final = max(total_dizimo_resumo, total_dizimo_nominal)
+            
+            # Oferta do Resumo (ServiceLog) - APENAS não-Missões (CORREÇÃO APLICADA)
+            # ESTE VALOR VEM DA FUNÇÃO AUXILIAR CORRIGIDA (_sum_oferta_resumo)
+            total_oferta_resumo = _sum_oferta_resumo(parent_cong_obj, sub_id, start, end, db)
+            
+            # Oferta de Transações (Categoria 'Oferta')
+            total_oferta_tx = float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+                Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start, Transaction.date < end,
+                *tx_sub_filter, Transaction.type == TYPE_IN, Transaction.category_id == cat_ofe.id if cat_ofe else Transaction.id < 0
+            )) or 0.0)
+            
+            # Oferta FINAL (para o KPI): Regra de equivalência (max)
+            oferta_final = max(total_oferta_resumo, total_oferta_tx)
+            
+            # Outras Entradas (Transactions que não são Dizimo, Oferta ou Missões)
+            total_outras_entradas = float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+                Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start, Transaction.date < end,
+                *tx_sub_filter, Transaction.type == TYPE_IN, 
+                Transaction.category_id.notin_(exclude_cat_ids) if exclude_cat_ids else Transaction.id > 0
+            )) or 0.0)
+            
+            # Total de Saídas (KPI)
+            saidas = _sum_saidas(parent_cong_obj, sub_id, start, end, db) 
+            
+            # Entrada Total do KPI
+            entradas = dizimo_final + oferta_final + total_outras_entradas
+            saldo    = entradas - saidas
+
+            # --- EXIBIÇÃO DOS KPIS CORRIGIDOS ---
+            c1,c2,c3 = st.columns(3)
+            c1.metric("Entradas (Dízimo/Oferta)", format_currency(entradas))
+            c2.metric("Saídas (Despesas)", format_currency(saidas))
+            c3.metric("Saldo Final", format_currency(saldo), delta=(saldo))
+
+            # 3) Avisos (mantidos)
+            _render_missoes_notice()
+            
+            # Chamada das funções originais (agora corrigidas no back-end)
+            total_resumo_for_banner = total_dizimo_resumo
+            total_nominal_for_banner = _sum_dizimo_nominal(parent_cong_obj, sub_id, start, end, db)
+            
+            _render_divergence_banner(total_resumo_for_banner, total_nominal_for_banner)
+
+
+        # 4) ATALHOS RÁPIDOS (Garantindo estética uniforme)
+        st.markdown("#### Ações Rápidas")
+        a1, a2, a3 = st.columns(3)
+
+        # Botões de Lançamento (usando use_container_width=True)
+        a1.button("Lançar Ofertas/Culto ➕", 
+                  on_click=lambda: _goto("Lançamentos"), 
+                  use_container_width=True, 
+                  key="btn_atalho_oferta")
+                  
+        a2.button("Lançar Dízimo Rápido 🤲", 
+                  on_click=lambda: _goto("Lançamentos"), 
+                  use_container_width=True, 
+                  key="btn_atalho_dizimo")
+                  
+        a3.button("Lançar Despesa Rápida 💳",
+                  on_click=lambda: _goto("Lançamentos"), 
+                  use_container_width=True, 
+                  key="btn_atalho_despesa")
+        
+        # Botão de Configurações (Se for SEDE, fica em uma linha separada para melhor layout)
+        if user.role == "SEDE":
+            st.markdown("---")
+            st.button("Configurações", 
+                      on_click=lambda: _goto("Configurações"),
+                      use_container_width=True,
+                      key="btn_atalho_config")
+        
+        st.markdown("---")
+
+
+        # 5) TABELAS DE RESUMO
+        st.markdown("#### Resumo Mensal")
+        
+        # df é calculado com os valores arredondados (round(..., 2)) na função _build_resumo_por_unidade
+        df = _build_resumo_por_unidade(parent_cong_obj, sub_id, start, end, db)
+        
+        # --- TABELA DE RESUMO CORRIGIDA ---
+        st.markdown("##### Resumo de Entradas por Unidade")
+        
+        # Aplicação da formatação BRL (format_currency)
+        st.dataframe(df.style.format({
+            "Dízimos": format_currency, 
+            "Ofertas": format_currency,
+            "Total Entradas": format_currency
+        }), use_container_width=True, hide_index=True)
+        
+        # --- MOVIMENTO RECENTE (Antiga aba 2) ---
+        st.markdown("---")
+        st.markdown("##### Últimas Ações (Movimento Recente)")
+        df_recent = _ultimos_movimentos(parent_cong_obj, sub_id, start, end, db)
+        st.dataframe(df_recent.style.format({"Valor": format_currency}), use_container_width=True, hide_index=True)
+
+
+        # --- EXPORTAÇÃO (Antiga aba 3) ---
+        st.markdown("---")
+        st.markdown("##### ⬇️ Downloads")
+        b1, b2, b3 = st.columns(3)
+        
+        # Lógica de download
+        b1.caption("Exportar Mês (CSV) [Em Breve]")
+        b2.caption("Exportar Mês (Excel) [Em Breve]")
+        
+        # Rodapé
+        ambiente_status = "Ambiente: DESENVOLVIMENTO" if not os.environ.get("DATABASE_URL") else "Ambiente: Produção"
+        
+        b3.caption(f"Período: {ref.strftime('%B de %Y')}")
+        b3.caption(f"Versão do sistema: 1.0 • {ambiente_status}")
+def display_finance_hierarchy_aggregated(congs_all: list, start: date, end: date, db: Session):
+    """
+    Gera as duas tabelas (Entrada Total e Saída Total) de toda a rede
+    agregadas por Congregação (Visão Nível 1 Agregada).
+    """
+    import pandas as pd
+    from sqlalchemy import select, func
+    
+    st.markdown("## Visão Agregada Total da Rede")
+    st.caption(f"Dados agregados de todas as congregações no período: {start.strftime('%d/%m/%Y')} a {end.strftime('%d/%m/%Y')}.")
+
+    # --- 1. TABELA DE ENTRADAS (Entrada Total) ---
+    st.markdown("### 📈 Entradas (Total por Congregação)")
+    
+    rows_entrada = []
+    for c in congs_all:
+        totals = _collect_month_data(c.id, start, end, sub_cong_id="ALL")["totals"] 
+        rows_entrada.append({
+            "Congregação": c.name,
+            "Total_Entrada": totals["entradas_total_sem_missoes"]
+        })
+    
+    df_entrada = pd.DataFrame(rows_entrada)
+    
+    if not df_entrada.empty:
+        total_geral_entrada = df_entrada["Total_Entrada"].sum()
+        df_entrada["Entrada (R$)"] = df_entrada["Total_Entrada"].apply(format_currency)
+        
+        # === CORREÇÃO: Ordena o DF completo ANTES de projetar a visualização ===
+        df_sorted_entrada = df_entrada.sort_values("Total_Entrada", ascending=False)
+        
+        st.dataframe(
+            df_sorted_entrada[["Congregação", "Entrada (R$)"]],
+            use_container_width=True,
+            hide_index=True
+        )
+        st.metric("Total Geral de Entradas da Rede", format_currency(total_geral_entrada))
+    else:
+        st.info("Nenhuma entrada encontrada para o período em toda a rede.")
+
+
+    # --- 2. TABELA DE SAÍDAS (Saída Total) ---
+    st.markdown("### 📉 Saídas (Total por Congregação)")
+    
+    rows_saida = []
+    for c in congs_all:
+        totals = _collect_month_data(c.id, start, end, sub_cong_id="ALL")["totals"] 
+        rows_saida.append({
+            "Congregação": c.name,
+            "Total_Saida": totals["saidas_total"]
+        })
+        
+    df_saida = pd.DataFrame(rows_saida)
+    
+    if not df_saida.empty:
+        total_geral_saida = df_saida["Total_Saida"].sum()
+        df_saida["Saída (R$)"] = df_saida["Total_Saida"].apply(format_currency)
+        
+        # === CORREÇÃO: Ordena o DF completo ANTES de projetar a visualização ===
+        df_sorted_saida = df_saida.sort_values("Total_Saida", ascending=False)
+
+        st.dataframe(
+            df_sorted_saida[["Congregação", "Saída (R$)"]],
+            use_container_width=True,
+            hide_index=True
+        )
+        st.metric("Total Geral de Saídas da Rede", format_currency(total_geral_saida))
+    else:
+        st.info("Nenhuma saída encontrada para o período em toda a rede.")
+
+def page_relatorios_unificados(user: "User"):
+    ensure_seed()
+    
+    # ... (Seu bloco de CSS deve vir aqui) ...
+
+    with SessionLocal() as db:
+        st.markdown("<h1 class='page-title'>Relatórios Financeiros</h1>", unsafe_allow_html=True)
+        
+        # OBTENÇÃO DO ESCOPO DE DADOS E FILTROS GLOBAIS
+        congs_all = order_congs_sede_first(cong_options_for(user, db))
+        
+        col_cong, col_data = st.columns([2, 1])
+        
+        # --- FILTROS DE ESCOPO ---
+        parent_cong_obj = None
+        is_aggregated_view = False
+        
+        with col_cong:
+            if user.role == "SEDE":
+                # === LÓGICA DE ESCOPO SEDE COM VISÃO HIERÁRQUICA ===
+                HIERARCHY_OPTION = "-- RELATÓRIO HIERÁRQUICO (TODAS AS CONGREGAÇÕES) --"
+                cong_names = [c.name for c in congs_all]
+                escopo_opts = [HIERARCHY_OPTION] + cong_names
+                
+                escopo_selecionado = st.selectbox("Congregação (Escopo)", escopo_opts, key="rel_cong_filtro_sede")
+                
+                if escopo_selecionado == HIERARCHY_OPTION:
+                    is_aggregated_view = True
+                    st.caption("Exibindo Entradas e Saídas de TODA a rede.")
+                else:
+                    parent_cong_obj = next((c for c in congs_all if c.name == escopo_selecionado), None)
+            else:
+                # Perfil não-SEDE: Trava na congregação do usuário (lógica original)
+                parent_cong_obj = db.get(Congregation, user.congregation_id)
+                st.text_input("Congregação (Escopo)", parent_cong_obj.name if parent_cong_obj else "N/A", disabled=True)
+                
+        with col_data:
+            ref = get_month_selector(label="Mês de Referência", key_prefix="rel_ref")
+        start, end = month_bounds(ref)
+        
+        st.divider()
+
+        # =========================================================================
+        # LÓGICA DE EXIBIÇÃO: VISÃO AGREGADA TOTAL (SEDE)
+        # =========================================================================
+        if is_aggregated_view:
+            # CHAMADA CORRETA APÓS DEFINIÇÃO DA FUNÇÃO AUXILIAR
+            display_finance_hierarchy_aggregated(congs_all, start, end, db)
+            return
+
+        # Verifica se há congregação selecionada para continuar com as ABAS
+        if not parent_cong_obj:
+            st.warning("Selecione uma congregação válida no filtro acima.")
+            return
+
+        # --- Variáveis de suporte para as abas (lógica original) ---
+        target_cong_id = parent_cong_obj.id
+        
+        sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == target_cong_id)).all()
+        opcoes_unidade = {"-- Todas (Principal + Subs) --": "ALL", f"{parent_cong_obj.name} (Principal)": None}
+        for sub in sub_congs:
+             opcoes_unidade[sub.name] = sub.id
+
+        # ================== ABAS CORRIGIDAS NA ORDEM SOLICITADA (Lógica original) ==================
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "📖 Entradas (Culto/Resumo)",
+            "🤲 Dízimos (Nominal)",
+            "💳 Saídas (Despesas)",
+            "🏆 Painel (Visão Geral)"
+        ])
+
+        # --- O CÓDIGO DE CADA ABA ORIGINAL DO SEU RELATÓRIO CONTINUA A PARTIR DAQUI ---
+        
+        with tab1:
+            st.subheader("📖 Resumo Diário de Entradas (Cultos)")
+            # ... (seu código da TAB 1 continua aqui) ...
+            if target_cong_id:
+                # LÓGICA DE FILTRO DE SUB-UNIDADE
+                if sub_congs:
+                    target_sub_name = st.selectbox("Filtrar Unidade (Entradas):", list(opcoes_unidade.keys()), key="unif_entradas_sub")
+                    target_sub_id_unif = opcoes_unidade[target_sub_name]
+                else:
+                    target_sub_name = f"{parent_cong_obj.name} (Principal)"
+                    target_sub_id_unif = None
+                # FIM LÓGICA
+                
+                st.info(f"Exibindo resumos de culto para: **{target_sub_name}**")
+                
+                report_df = _load_service_logs(target_cong_id, start, end, sub_cong_id=target_sub_id_unif)
+                
+                if not report_df.empty:
+                    st.dataframe(
+                        report_df.style.format({"Data do Culto": "{:%d/%m/%Y}", "Dízimo": format_currency, "Oferta": format_currency, "Total": format_currency}),
+                        use_container_width=True, hide_index=True, column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
+                    )
+                    st.metric("Total Geral de Entradas no Culto", format_currency(report_df["Total"].sum()))
+                else:
+                    st.caption("Nenhum resumo de culto encontrado para este período.")
+
+
+        with tab2:
+            st.subheader("🤲 Dízimos Nominais (Por Pessoa)")
+            if target_cong_id:
+                # LÓGICA DE FILTRO DE SUB-UNIDADE
+                if sub_congs:
+                    target_sub_name = st.selectbox("Filtrar Unidade (Dízimos):", list(opcoes_unidade.keys()), key="unif_dizimo_sub")
+                    target_sub_id_unif = opcoes_unidade[target_sub_name]
+                else:
+                    target_sub_name = f"{parent_cong_obj.name} (Principal)"
+                    target_sub_id_unif = None
+
+                st.info(f"Exibindo dízimos nominais para: **{target_sub_name}**")
+                
+                tithes_q = select(Tithe).where(
+                    Tithe.congregation_id == target_cong_id,
+                    Tithe.date >= start, Tithe.date < end,
+                    Tithe.sub_congregation_id == target_sub_id_unif
+                )
+                tithes = db.scalars(tithes_q.order_by(Tithe.tither_name)).all()
+                
+                if tithes:
+                    rows = [{"Data": t.date, "Dizimista": t.tither_name, "Valor": float(t.amount), "Forma": t.payment_method or "—"} for t in tithes]
+                    df = pd.DataFrame(rows)
+                    st.dataframe(df.style.format({"Data": "{:%d/%m/%Y}", "Valor": format_currency}), use_container_width=True, hide_index=True)
+                    st.metric("Total Dízimos Nominais", format_currency(df["Valor"].sum()))
+                else:
+                    st.caption("Nenhum dízimo nominal encontrado.")
+
+
+        with tab3:
+            st.subheader("💳 Saídas (Transações de Despesas)")
+            if target_cong_id:
+                # LÓGICA DE FILTRO DE SUB-UNIDADE
+                if sub_congs:
+                    target_sub_name = st.selectbox("Filtrar Unidade (Saídas):", list(opcoes_unidade.keys()), key="unif_saidas_sub")
+                    target_sub_id_unif = opcoes_unidade[target_sub_name]
+                else:
+                    target_sub_name = f"{parent_cong_obj.name} (Principal)"
+                    target_sub_id_unif = None
+
+                st.info(f"Exibindo saídas para: **{target_sub_name}**")
+                
+                txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(
+                    Transaction.congregation_id == target_cong_id, 
+                    Transaction.date >= start, Transaction.date < end, 
+                    Transaction.type == "SAÍDA", 
+                    Transaction.sub_congregation_id == target_sub_id_unif
+                )
+                txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
+                
+                if txs_out:
+                    rows_out = [{"Data": t.date, "Categoria": t.category.name if t.category else "", "Valor": t.amount, "Descrição": t.description or ""} for t in txs_out]
+                    df_saidas = pd.DataFrame(rows_out)
+                    st.dataframe(df_saidas.style.format({"Data":"{:%d/%m/%Y}", "Valor": format_currency}), use_container_width=True, hide_index=True)
+                    st.metric("Total de Saídas no Período", format_currency(df_saidas["Valor"].sum()))
+                else:
+                    st.caption("Nenhuma saída registrada neste período.")
+
+
+        with tab4:
+            st.markdown('<div class="panel-destaque-fundo">', unsafe_allow_html=True)
+            st.subheader("🏆 Painel de Indicadores e Saldo")
+            if not parent_cong_obj:
+                st.warning("Selecione uma congregação válida no filtro acima.")
+            else:
+                
+                # --- Cálculo dos KPIS (Lógica de Missões já corrigida nas funções auxiliares) ---
+                sub_id = None 
+                
+                # Configuração dos Filtros de Exclusão (Para Outras Entradas)
+                cat_miss = db.scalar(select(Category).where(func.lower(Category.name).in_(("missões","missoes")), Category.type == TYPE_IN))
+                cat_diz = db.scalar(select(Category).where(func.lower(Category.name).in_(("dízimo","dizimo")), Category.type == TYPE_IN))
+                cat_ofe = db.scalar(select(Category).where(func.lower(Category.name) == "oferta", Category.type == TYPE_IN))
+                exclude_cat_ids = [c.id for c in [cat_miss, cat_diz, cat_ofe] if c]
+
+                # Dízimo Final (Usando as funções auxiliares corrigidas)
+                total_dizimo_resumo = _sum_dizimo_resumo(parent_cong_obj, sub_id, start, end, db)
+                total_dizimo_nominal = _sum_dizimo_nominal(parent_cong_obj, sub_id, start, end, db)
+                dizimo_final = max(total_dizimo_resumo, total_dizimo_nominal)
+
+                # Oferta Final (Usando as funções auxiliares corrigidas)
+                total_oferta_resumo = _sum_oferta_resumo(parent_cong_obj, sub_id, start, end, db)
+                total_oferta_tx = float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+                    Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start, Transaction.date < end,
+                    Transaction.type == TYPE_IN, Transaction.category_id == cat_ofe.id if cat_ofe else Transaction.id < 0
+                )) or 0.0)
+                oferta_final = max(total_oferta_resumo, total_oferta_tx)
+                
+                # Outras Entradas
+                total_outras_entradas = float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+                    Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start, Transaction.date < end,
+                    Transaction.type == TYPE_IN, 
+                    Transaction.category_id.notin_(exclude_cat_ids) if exclude_cat_ids else Transaction.id > 0
+                )) or 0.0)
+                
+                # Saídas
+                saidas = _sum_saidas(parent_cong_obj, sub_id, start, end, db)
+                
+                # Totais
+                entradas = dizimo_final + oferta_final + total_outras_entradas
+                saldo = entradas - saidas
+
+                # EXIBIÇÃO DOS KPIS
+                c1,c2,c3 = st.columns(3)
+                c1.metric("Entradas (Dízimo/Oferta)", format_currency(entradas))
+                c2.metric("Saídas (Despesas)", format_currency(saidas))
+                c3.metric("Saldo Final", format_currency(saldo), delta=(saldo))
+
+                st.divider()
+
+                st.markdown("##### 🖨️ Download de Relatórios")
+                
+                # Download (Consolidado + Individual)
+                if user.role == "SEDE":
+                    st.download_button(
+                        "⬇️ Baixar Relatório Geral Consolidado (PDF)",
+                        data=build_consolidated_pdf(congs_all, ref, db), 
+                        file_name=f"relatorio_geral_consolidado_{ref.strftime('%Y-%m')}.pdf",
+                        mime="application/pdf",
+                        key="dl_pdf_geral_consolidado"
+                    )
+                
+                st.markdown("---")
+                st.markdown("##### Relatórios Individuais por Congregação")
+                
+                congs_download_list = order_congs_sede_first(cong_options_for(user, db))
+                congs_download_names = [c.name for c in congs_download_list]
+                
+                sel_cong_pdf_name = st.selectbox(
+                    "Selecione a Congregação para download:",
+                    congs_download_names,
+                    key="sel_cong_pdf_download"
+                )
+                
+                selected_cong_obj = next((c for c in congs_download_list if c.name == sel_cong_pdf_name), None)
+
+                if selected_cong_obj:
+                    # Funções de construção de PDF (assumidas no escopo)
+                    pdf_data_unit = build_single_unit_report_pdf(
+                        selected_cong_obj.id, None, selected_cong_obj.name, ref, db
+                    )
+                    
+                    def _norm(name):
+                        return name.lower().replace(" ", "_").replace("ã", "a").replace("ç", "c")
+                        
+                    st.download_button(
+                        f"⬇️ Baixar PDF de {selected_cong_obj.name}",
+                        data=pdf_data_unit,
+                        file_name=f"prestacao_{_norm(selected_cong_obj.name)}_{ref.strftime('%Y-%m')}.pdf",
+                        mime="application/pdf",
+                        key=f"dl_pdf_unit_{selected_cong_obj.id}"
+                    )
+            
+            st.markdown('</div>', unsafe_allow_html=True) # Fechamento do div de destaque # Fechamento do div de destaque
+
+
+# Helpers mínimos (esboços)
+def _sum_entradas(parent, sub_id, start, end, db):
+    cond = [Transaction.type == TYPE_IN, Transaction.date >= start, Transaction.date < end]
+    if parent: cond.append(Transaction.congregation_id == parent.id)
+    if sub_id == "ALL": pass
+    elif sub_id is None: cond.append(Transaction.sub_congregation_id.is_(None))
+    else: cond.append(Transaction.sub_congregation_id == sub_id)
+    return float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(*cond)) or 0.0)
+
+def _sum_saidas(parent, sub_id, start, end, db):
+    """
+    Soma o total de saídas (Transaction type=SAÍDA), excluindo a categoria 'Missões (Saída)'.
+    """
+    cat_miss_saida = db.scalar(select(Category).where(func.lower(Category.name).in_(("missões (saída)", "missoes (saida)")), Category.type == TYPE_OUT))
+    
+    cond = [Transaction.type == TYPE_OUT, Transaction.date >= start, Transaction.date < end]
+    if parent: cond.append(Transaction.congregation_id == parent.id)
+    if sub_id == "ALL": pass
+    elif sub_id is None: cond.append(Transaction.sub_congregation_id.is_(None))
+    else: cond.append(Transaction.sub_congregation_id == sub_id)
+        
+    # FILTRO CRÍTICO: Excluir Saídas de Missões
+    if cat_miss_saida:
+        cond.append(Transaction.category_id != cat_miss_saida.id)
+        
+    return float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(*cond)) or 0.0)
+
+def _sum_dizimo_resumo(parent, sub_id, start, end, db):
+    """
+    Soma o total de dízimos declarados no resumo de culto (ServiceLog),
+    excluindo o tipo 'Culto de Missões' (caixa segregado).
+    """
+    cond = [ServiceLog.date >= start, ServiceLog.date < end]
+    if parent: cond.append(ServiceLog.congregation_id == parent.id)
+    if sub_id == "ALL": pass
+    elif sub_id is None: cond.append(ServiceLog.sub_congregation_id.is_(None))
+    else: cond.append(ServiceLog.sub_congregation_id == sub_id)
+    
+    # FILTRO CRÍTICO: Excluir logs de 'Culto de Missões'
+    cond.append(ServiceLog.service_type != "Culto de Missões") 
+    
+    return float(db.scalar(select(func.coalesce(func.sum(ServiceLog.dizimo), 0.0)).where(*cond)) or 0.0)
+
+def _sum_dizimo_nominal(parent, sub_id, start, end, db):
+    """
+    Soma os dízimos nominais (Tithe), excluindo registros de Missões.
+    """
+    cond = [Tithe.date >= start, Tithe.date < end]
+    if parent: cond.append(Tithe.congregation_id == parent.id)
+    if sub_id == "ALL": pass
+    elif sub_id is None: cond.append(Tithe.sub_congregation_id.is_(None))
+    else: cond.append(Tithe.sub_congregation_id == sub_id)
+        
+    # FILTRO CRÍTICO: Excluir dízimos lançados para Missões ou com nome de Missão
+    cond.append(func.lower(Tithe.tither_name).notin_(["missoes", "missões", "oferta de missoes", "oferta de missões"]))
+    
+    return float(db.scalar(select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(*cond)) or 0.0)
+
+def _sum_oferta_resumo(parent, sub_id, start, end, db):
+    """
+    Soma o total de ofertas declaradas no resumo de culto (ServiceLog),
+    excluindo o tipo 'Culto de Missões' (caixa segregado).
+    """
+    cond = [ServiceLog.date >= start, ServiceLog.date < end]
+    if parent: cond.append(ServiceLog.congregation_id == parent.id)
+    if sub_id == "ALL": pass
+    elif sub_id is None: cond.append(ServiceLog.sub_congregation_id.is_(None))
+    else: cond.append(ServiceLog.sub_congregation_id == sub_id)
+    
+    # FILTRO CRÍTICO: Excluir Cultos de Missões
+    cond.append(ServiceLog.service_type != "Culto de Missões") 
+    
+    return float(db.scalar(select(func.coalesce(func.sum(ServiceLog.oferta), 0.0)).where(*cond)) or 0.0)
+
+
+
+
+
 # ======= NOVO: helper padrão para botões 'Salvar alterações' =======
 # ====== CORES P/ BOTÕES ======
+# ====== CORES P/ BOTÕES — MUDAR TUDO PARA AZUL (HEX #2563eb) ======
 BTN_COLORS = {
-    "entrada":  "#16a34a",  # verde
-    "dizimista":"#2563eb",  # azul
-    "saida":    "#dc2626",  # vermelha
-    "neutral":  "#1f6feb",  # fallback (azul padrão)
+    "entrada":  "#2563eb",  # AZUL (era verde)
+    "dizimista":"#2563eb",  # AZUL (manter)
+    "saida":    "#2563eb",  # AZUL (era vermelho)
+    "neutral":  "#2563eb",  # AZUL (era neutro)
 }
+
+# ====== NOVO: helper padrão para botões 'Salvar alterações' =======
+# Altera a lógica de _save_btn e _submit_btn para simplificar o CSS
+# O novo CSS de cor virá do seu bloco BTN_COLORS.
 
 def _save_btn(on_click, key_suffix: str, theme: str = "neutral", label: str = "Salvar alterações"):
     """
-    Botão 'Salvar alterações' com cor personalizada por tema:
-      - 'entrada'  -> verde
-      - 'dizimista'-> azul
-      - 'saida'    -> vermelho
-      - 'neutral'  -> cor padrão
+    Botão 'Salvar alterações' com cor personalizada por tema.
     """
+    # Esta função agora confia que o BTN_COLORS vai dar a cor certa
     color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
-    with st.container():
-        # marcador p/ escopar o CSS desse botão apenas
-        st.markdown(f'<div id="mark-{key_suffix}"></div>', unsafe_allow_html=True)
-        st.button(label, key=f"btn_save_{key_suffix}", type="primary", on_click=on_click)
-        st.markdown(
-            f"""
-            <style>
-              /* pinta SOMENTE o botão dentro deste bloco */
-              #mark-{key_suffix} ~ div[data-testid="stButton"] > button {{
-                background: {color} !important;
-                border-color: {color} !important;
-              }}
-              #mark-{key_suffix} ~ div[data-testid="stButton"] > button:hover {{
-                filter: brightness(0.93);
-              }}
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
+    
+    # Marcador de ID que o CSS usará
+    st.markdown(f'<div id="mark-{key_suffix}"></div>', unsafe_allow_html=True)
+    
+    # Criamos o botão como st.button (tipo secondary para não brigar com primary)
+    st.button(label, key=f"btn_save_{key_suffix}", type="secondary", on_click=on_click)
+    
+    # Injetamos o CSS direcionado para o ID, forçando a cor
+    st.markdown(
+        f"""
+        <style>
+          /* Força a cor definida por BTN_COLORS para este botão específico */
+          #mark-{key_suffix} ~ div[data-testid="stButton"] > button {{
+            background-color: {color} !important;
+            border-color: {color} !important;
+            color: white !important; /* Garante texto branco em fundos escuros */
+          }}
+          #mark-{key_suffix} ~ div[data-testid="stButton"] > button:hover {{
+            filter: brightness(0.93);
+          }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
 
 def _submit_btn(label: str, key_suffix: str, theme: str = "neutral") -> bool:
     """
-    Versão colorida para st.form_submit_button (forms de ENTRADA, DIZIMISTA, SAÍDA).
-    Retorna True quando o usuário clica.
+    Versão colorida para st.form_submit_button (forms). Retorna True quando o usuário clica.
     """
     color = BTN_COLORS.get(theme, BTN_COLORS["neutral"])
-    with st.container():
-        st.markdown(f'<div id="mark-{key_suffix}"></div>', unsafe_allow_html=True)
-        clicked = st.form_submit_button(label, type="primary")
-        st.markdown(
-            f"""
-            <style>
-              /* cobre tanto submit de form quanto um fallback de stButton */
-              #mark-{key_suffix} ~ div[data-testid="stFormSubmitButton"] > button,
-              #mark-{key_suffix} ~ div[data-testid="stButton"] > button {{
-                background: {color} !important;
-                border-color: {color} !important
-              }}
-              #mark-{key_suffix} ~ div[data-testid="stFormSubmitButton"] > button:hover,
-              #mark-{key_suffix} ~ div[data-testid="stButton"] > button:hover {{
-                filter: brightness(0.93);
-              }}
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
+    
+    # Marcador de ID que o CSS usará
+    st.markdown(f'<div id="mark-{key_suffix}"></div>', unsafe_allow_html=True)
+    
+    # Criamos o botão de formulário (tipo secondary para não brigar com primary)
+    clicked = st.form_submit_button(label, type="secondary")
+    
+    # Injetamos o CSS direcionado para o ID, forçando a cor
+    st.markdown(
+        f"""
+        <style>
+          /* Força a cor definida por BTN_COLORS para este botão de formulário específico */
+          #mark-{key_suffix} ~ div[data-testid="stFormSubmitButton"] > button,
+          #mark-{key_suffix} ~ div[data-testid="stButton"] > button {{ /* fallback */
+            background-color: {color} !important;
+            border-color: {color} !important;
+            color: white !important; 
+          }}
+          #mark-{key_suffix} ~ div[data-testid="stFormSubmitButton"] > button:hover,
+          #mark-{key_suffix} ~ div[data-testid="stButton"] > button:hover {{
+            filter: brightness(0.93);
+          }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
     return clicked
 
 def _apply_tx_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, tx_type: str, default_cong_id: Optional[int], default_sub_cong_id: Optional[int] = None):
@@ -2936,22 +4094,23 @@ def get_all_aggregated_data_for_ia():
 
 # ===================== FUNÇÃO DE RESUMO RÁPIDO PARA DASHBOARD =====================
 # ===================== FUNÇÃO DE RESUMO RÁPIDO PARA DASHBOARD =====================
-@st.cache_data(ttl=600) # Cache de 10 minutos para dados atualizados
+@st.cache_data(ttl=600)
 def get_dashboard_summary(cong_id: int, start: date, end: date):
     """
     Busca e calcula os 5 totais financeiros essenciais para uma congregação e período.
-    Agora considera ServiceLog.oferta como fonte alternativa para Ofertas (usa MAIOR entre fontes).
+    Corrigida para *excluir* ofertas do 'Culto de Missões' do fluxo operacional.
     """
     with SessionLocal() as db:
-        # 1. Total de Saídas
+        # 1) Total de Saídas (fluxo operacional)
         q_saidas = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
             Transaction.congregation_id == cong_id,
             Transaction.date >= start, Transaction.date < end,
-            Transaction.type == 'SAÍDA'
+            Transaction.type == TYPE_OUT  # 'SAÍDA'
         )
         total_saida = float(db.scalar(q_saidas) or 0.0)
 
-        # 2. Total de Ofertas: calcular separadamente (transações) e (ServiceLog), depois usar max()
+        # 2) Total de Ofertas (usa MAIOR entre Transações[Oferta] e ServiceLog.oferta)
+        # 2a. Transações categorizadas como "Oferta"
         q_ofertas_tx = select(func.coalesce(func.sum(Transaction.amount), 0.0)).join(Category).where(
             Transaction.congregation_id == cong_id,
             Transaction.date >= start, Transaction.date < end,
@@ -2960,16 +4119,18 @@ def get_dashboard_summary(cong_id: int, start: date, end: date):
         )
         total_oferta_tx = float(db.scalar(q_ofertas_tx) or 0.0)
 
+        # 2b. Ofertas no ServiceLog (EXCLUINDO Culto de Missões)
         q_ofertas_sl = select(func.coalesce(func.sum(ServiceLog.oferta), 0.0)).where(
             ServiceLog.congregation_id == cong_id,
-            ServiceLog.date >= start, ServiceLog.date < end
+            ServiceLog.date >= start, ServiceLog.date < end,
+            ServiceLog.service_type != "Culto de Missões"  # <<< filtro CRÍTICO
         )
         total_oferta_sl = float(db.scalar(q_ofertas_sl) or 0.0)
 
-        # Aplica regra: use a maior soma entre as fontes
+        # Usa a fonte mais representativa (equivalência de fontes)
         total_oferta = max(total_oferta_tx, total_oferta_sl)
 
-        # 3. Total de Dízimos (de Transações) — case-insensitive
+        # 3) Total de Dízimos: usa MAIOR entre Transações[Dízimo] e Dízimos Nominais (Tithe)
         q_dizimos_trans = select(func.coalesce(func.sum(Transaction.amount), 0.0)).join(Category).where(
             Transaction.congregation_id == cong_id,
             Transaction.date >= start, Transaction.date < end,
@@ -2977,27 +4138,26 @@ def get_dashboard_summary(cong_id: int, start: date, end: date):
         )
         total_dizimo_transacao = float(db.scalar(q_dizimos_trans) or 0.0)
 
-        # 4. Total de Dízimos (Nominais)
         q_dizimos_nominal = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
             Tithe.congregation_id == cong_id,
             Tithe.date >= start, Tithe.date < end
         )
         total_dizimo_nominal = float(db.scalar(q_dizimos_nominal) or 0.0)
 
-        # Aplicando a regra de negócio para o total de dízimo
         total_dizimo = max(total_dizimo_transacao, total_dizimo_nominal)
-        
-        # Cálculos finais
+
+        # 4) Agregados para o painel
         total_dizimo_mais_oferta = total_dizimo + total_oferta
         saldo = total_dizimo_mais_oferta - total_saida
 
         return {
-            "total_dizimo": total_dizimo,
-            "total_oferta": total_oferta,
-            "total_dizimo_mais_oferta": total_dizimo_mais_oferta,
             "total_saida": total_saida,
+            "total_oferta": total_oferta,
+            "total_dizimo": total_dizimo,
+            "total_dizimo_mais_oferta": total_dizimo_mais_oferta,
             "saldo": saldo,
         }
+
  
 
 @st.cache_data
@@ -3295,12 +4455,25 @@ def _apply_service_log_changes(orig_df: pd.DataFrame, edited_df: pd.DataFrame, c
 # APAGUE SUA FUNÇÃO page_lancamentos ANTIGA E SUBSTITUA POR ESTA VERSÃO FINAL
 
 
+# ===================== PAGE: LANÇAMENTOS (com modo Tabela fora do form) =====================
+# APAGUE SUA FUNÇÃO page_lancamentos ANTIGA E SUBSTITUA POR ESTA VERSÃO FINAL
+
 def page_lancamentos(user: "User"):
     ensure_seed()
 
-    # Garantia de estado inicial (necessário para evitar o erro de session_state)
+    # Variáveis de Estado
     if "rap_dizimo_lote" not in st.session_state:
         st.session_state.rap_dizimo_lote = ""
+    # Variável para controlar se o modo avançado está aberto/ativo
+    if "is_advanced_mode_active" not in st.session_state:
+        st.session_state.is_advanced_mode_active = False
+
+    # === CORREÇÃO DO ATTRIBUTE ERROR: Inicializa a chave do toggle ===
+    if "advanced_mode_toggle" not in st.session_state:
+        st.session_state.advanced_mode_toggle = False
+    
+    # Reset do modo avançado no carregamento da página
+    st.session_state.is_advanced_mode_active = False
 
     # Mensagens persistidas entre reruns
     if 'status_message' in st.session_state:
@@ -3311,24 +4484,51 @@ def page_lancamentos(user: "User"):
             st.error(msg_text)
         elif msg_type == "warning":
             st.warning(msg_text)
-        # Assumindo que você tem apenas `del st.session_state.status_message` no final
-        del st.session_state.status_message 
+        del st.session_state.status_message
+        
+    # === CALLBACK PARA FORÇAR O RERUN EM 1 CLIQUE ===
+    def set_advanced_mode_and_rerun_direct():
+        # A chave 'advanced_mode_toggle' já foi atualizada pelo st.toggle no clique.
+        # Define nossa variável de controle com o valor atual do widget e força o rerun.
+        st.session_state.is_advanced_mode_active = st.session_state.advanced_mode_toggle
+        st.rerun()
 
     with SessionLocal() as db:
+        # === CONFIRMAÇÃO DE AMBIENTE (PARA TESTE LOCAL) ===
+        if not os.environ.get("DATABASE_URL"):
+            st.sidebar.info("Ambiente: DESENVOLVIMENTO (SQLite Local)")
+        # =================================================
+
         st.markdown(f"<h1 class='page-title'>Lançamentos</h1>", unsafe_allow_html=True)
 
-        # Seleção da congregação principal por perfil
+        # ================== SELEÇÃO DA CONGREGAÇÃO (SEDE pode operar todas) ==================
         parent_cong_obj = None
-        if user.role == "SEDE":
+
+        if getattr(user, "role", "") == "SEDE":
+            # Lista completa das congregações que o usuário SEDE pode operar (mantendo sua ordenação especial)
             congs_all = order_congs_sede_first(cong_options_for(user, db))
+            cong_names = [c.name for c in congs_all] or ["—"]
+
+            # Index default reaproveitando seleção anterior, se existir
+            default_index = 0
+            prev_name = st.session_state.get("lan_cong_sel_sede_name")
+            if prev_name and prev_name in cong_names:
+                default_index = cong_names.index(prev_name)
+
             cong_sel_name = st.selectbox(
-                "Selecione a Congregação Principal:",
-                [c.name for c in congs_all],
-                key="lan_cong_sel_sede"
+                "Selecione a Congregação para lançar/editar:",
+                cong_names,
+                index=default_index,
+                key="lan_cong_sel_sede",
+                help="Conta SEDE: escolha a congregação que deseja operar."
             )
+            # Persiste a escolha para os próximos reruns
+            st.session_state.lan_cong_sel_sede_name = cong_sel_name
+
             parent_cong_obj = next((c for c in congs_all if c.name == cong_sel_name), None)
         else:
-            parent_cong_obj = db.get(Congregation, user.congregation_id)
+            # Perfil não-SEDE: trava na congregação do usuário
+            parent_cong_obj = db.get(Congregation, getattr(user, "congregation_id", None))
 
         if not parent_cong_obj:
             st.error("Nenhuma congregação selecionada ou encontrada.")
@@ -3336,175 +4536,259 @@ def page_lancamentos(user: "User"):
 
         st.markdown(f"### CONGREGAÇÃO: {parent_cong_obj.name.upper()}")
 
-        # 1. CORREÇÃO DA ORDEM: Lançamento Rápido (Móvel) é o padrão
-        MODES = ["Lançamento Rápido (Móvel)", "Editar direto na tabela"]
-        modo = st.radio(
-            "Modo de lançamento:",
-            ["Editar direto na tabela", "Lançamento Rápido (Móvel)"],
-            horizontal=True,
-            index=0, # AGORA, 'Lançamento Rápido (Móvel)' é o padrão
-            key="lan_modo_sel"
-        )
-        st.divider()
-
+        # --- Configuração de Contexto ---
         sub_congs = db.scalars(
             select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)
         ).all()
+        
+        # LISTA DE TIPOS DE CULTO ATUALIZADA
         tipos_de_culto = [
-            "Culto da Noite (Padrão)",
+            "Culto de Oração (Ensino)",
+            "Culto Público",
             "Trabalhos pela Manhã (EBD, CO, FESTIVIDADES)",
             "Culto de Missões",
             "Evento Especial",
             "Outro"
         ]
         
-        # --- Configuração de Contexto (Usada pelos 2 modos) ---
+        # Variáveis de contexto padrão
         target_cong_obj = parent_cong_obj
-        contexto_selecionado = f"{parent_cong_obj.name} (Principal)"
         target_sub_cong_id = None
-        
+        contexto_selecionado = f"{parent_cong_obj.name} (Principal)"
+        contexto_tabela = f"{parent_cong_obj.name} (Principal)"
+
         if sub_congs:
             opcoes = {f"{parent_cong_obj.name} (Principal)": None}
             for sub in sub_congs:
                 opcoes[sub.name] = sub.id
-            
-            # Apenas para o modo RÁPIDO
-            if modo == "Lançamento Rápido (Móvel)":
+
+            # Seletor da unidade (só para o modo rápido)
+            if not st.session_state.advanced_mode_toggle:
                 contexto_selecionado = st.selectbox(
-                    "Lançar em:", list(opcoes.keys()), key="lan_sub_sel_rapido"
+                    "Lançar em:", list(opcoes.keys()), key="lan_sub_sel_rapido_contexto"
                 )
                 target_sub_cong_id = opcoes[contexto_selecionado]
-            elif modo == "Editar direto na tabela":
-                # Lógica para contexto da tabela (seleciona sub-unidade)
-                contexto_tabela = f"{parent_cong_obj.name} (Principal)"
-                target_sub_cong_id = None
-                if sub_congs:
-                    opcoes_tabela = {f"{parent_cong_obj.name} (Principal)": None}
-                    for sub in sub_congs: opcoes_tabela[sub.name] = sub.id
-                    contexto_tabela = st.selectbox("Selecione a unidade para editar:", list(opcoes_tabela.keys()), key="lan_tabela_contexto")
-                    target_sub_cong_id = opcoes_tabela[contexto_tabela]
+        
+        st.divider()
 
-        # ====================== LANÇAMENTO RÁPIDO (MÓVEL) =======================
-        if modo == "Lançamento Rápido (Móvel)":
-            st.markdown(f"#### Unidade selecionada: *{contexto_selecionado}*")
-            st.divider()
+        # ====================== SELETORES DE CONTEXTO (MOVIDOS PARA O TOPO) ======================
+        # Estes seletores definem o contexto para as Seções 1, 2 e 3
+        col_data, col_tipo = st.columns(2)
+        with col_data:
+            rap_data = st.date_input(
+                "Data do Culto:",
+                value=today_bahia(),
+                key="rap_data_unica_sel",
+                format="DD/MM/YYYY"
+            )
+        with col_tipo:
+            ent_tipo = st.selectbox(
+                "Tipo de Culto", options=tipos_de_culto, key="rap_ent_tipo"
+            )
+        st.caption(f"Contexto de Lançamento: **{contexto_selecionado}** | Data: **{format_date(rap_data)}**")
+        st.divider()
+        # =========================================================================================
+
+        # ====================== 1. LANÇAMENTO RÁPIDO (MÓVEL) - FLUXO PADRÃO =======================
+        
+        # SÓ MOSTRA O BLOCO RÁPIDO SE O MODO AVANÇADO NÃO ESTIVER ATIVO
+        if not st.session_state.advanced_mode_toggle:
             
-            # --- NOVO: Data do Culto Única e Tipo de Culto no mesmo retângulo ---
+            # --- 1. Lançar Ofertas e Resumo do Culto ---
             st.markdown("##### 1. Lançar Ofertas e Resumo do Culto")
             with st.form("form_oferta_rapida"):
-                
-                # Primeira linha: Data e Tipo de Culto
-                col_data, col_tipo = st.columns(2)
-                with col_data:
-                    rap_data = st.date_input("Data do Culto:", value=today_bahia(), key="rap_data_unica_sel", format="DD/MM/YYYY")
-                with col_tipo:
-                    ent_tipo = st.selectbox("Tipo de Culto", options=tipos_de_culto, key="rap_ent_tipo")
-                    
-                st.markdown(f"**Data selecionada:** {format_date(rap_data)}")
 
                 # Segunda linha: Dízimo e Oferta
                 c1, c2 = st.columns(2)
-                ent_dizimo = c1.number_input("Total Dízimo (Culto)", min_value=0.0, value=0.0, format="%.2f", key="rap_ent_diz")
-                ent_oferta = c2.number_input("Total Oferta (Culto)", min_value=0.0, value=0.0, format="%.2f", key="rap_ent_ofe")
+                ent_dizimo = c1.number_input(
+                    "Total Dízimo (Culto)", min_value=0.0, value=0.0, format="%.2f",
+                    key="rap_ent_diz"
+                )
+                ent_oferta = c2.number_input(
+                    "Total Oferta (Culto)", min_value=0.0, value=0.0, format="%.2f",
+                    key="rap_ent_ofe"
+                )
 
-                if st.form_submit_button("Salvar Ofertas e Resumo do Culto"):
+                # Botão Salvar (AZUL)
+                if _submit_btn("Salvar Ofertas e Resumo do Culto",
+                               key_suffix="salvar_ofe_rapida", theme="entrada"):
                     if ent_dizimo <= 0 and ent_oferta <= 0:
                         st.session_state.status_message = ("warning", "Nenhum valor foi inserido.")
                     else:
                         try:
                             # Lógica reaproveitada do Formulário Único para o ServiceLog
                             log_existente = db.scalar(
-                                select(ServiceLog).where(ServiceLog.date == rap_data, ServiceLog.service_type == ent_tipo,
+                                select(ServiceLog).where(
+                                    ServiceLog.date == rap_data,
+                                    ServiceLog.service_type == ent_tipo,
                                     ServiceLog.congregation_id == target_cong_obj.id,
-                                    ServiceLog.sub_congregation_id.is_(None) if target_sub_cong_id is None else (ServiceLog.sub_congregation_id == target_sub_cong_id))
+                                    ServiceLog.sub_congregation_id.is_(None)
+                                    if target_sub_cong_id is None
+                                    else (ServiceLog.sub_congregation_id == target_sub_cong_id)
+                                )
                             )
 
                             if ent_tipo == "Culto de Missões":
                                 if ent_oferta > 0:
-                                    cat_missoes = db.scalar(select(Category).where(func.lower(Category.name) == 'missões', Category.type == TYPE_IN))
+                                    cat_missoes = db.scalar(
+                                        select(Category).where(
+                                            func.lower(Category.name) == 'missões',
+                                            Category.type == TYPE_IN
+                                        )
+                                    )
                                     if cat_missoes:
                                         db.add(Transaction(
-                                            date=rap_data, type=TYPE_IN, category_id=cat_missoes.id, amount=float(ent_oferta),
-                                            description="Oferta do Culto de Missões", congregation_id=target_cong_obj.id,
-                                            sub_congregation_id=target_sub_cong_id))
-                                    else: st.session_state.status_message = ("error", "ERRO: Categoria 'Missões' não encontrada."); db.rollback(); st.rerun()
+                                            date=rap_data, type=TYPE_IN,
+                                            category_id=cat_missoes.id,
+                                            amount=float(ent_oferta),
+                                            description="Oferta do Culto de Missões",
+                                            congregation_id=target_cong_obj.id,
+                                            sub_congregation_id=target_sub_cong_id
+                                        ))
+                                    else:
+                                        st.session_state.status_message = (
+                                            "error",
+                                            "ERRO: Categoria 'Missões' não encontrada."
+                                        )
+                                        db.rollback()
+                                        st.rerun()
 
-                                if log_existente: log_existente.dizimo = (log_existente.dizimo or 0.0) + float(ent_dizimo)
-                                else: db.add(ServiceLog(date=rap_data, service_type=ent_tipo, dizimo=float(ent_dizimo), oferta=0.0, congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
-                                st.session_state.status_message = ("success", "Atenção: Ofertas de Missões lançadas em transação.")
+                                if log_existente:
+                                    log_existente.dizimo = (log_existente.dizimo or 0.0) + float(ent_dizimo)
+                                else:
+                                    db.add(ServiceLog(
+                                        date=rap_data, service_type=ent_tipo,
+                                        dizimo=float(ent_dizimo), oferta=0.0,
+                                        congregation_id=target_cong_obj.id,
+                                        sub_congregation_id=target_sub_cong_id
+                                    ))
+                                st.session_state.status_message = (
+                                    "success",
+                                    "Atenção: Ofertas de Missões lançadas em transação."
+                                )
                             else:
                                 if log_existente:
                                     log_existente.dizimo = (log_existente.dizimo or 0.0) + float(ent_dizimo)
                                     log_existente.oferta = (log_existente.oferta or 0.0) + float(ent_oferta)
-                                else: db.add(ServiceLog(date=rap_data, service_type=ent_tipo, dizimo=float(ent_dizimo), oferta=float(ent_oferta), congregation_id=target_cong_obj.id, sub_congregation_id=target_sub_cong_id))
+                                else:
+                                    db.add(ServiceLog(
+                                        date=rap_data, service_type=ent_tipo,
+                                        dizimo=float(ent_dizimo), oferta=float(ent_oferta),
+                                        congregation_id=target_cong_obj.id,
+                                        sub_congregation_id=target_sub_cong_id
+                                    ))
                                 st.session_state.status_message = ("success", "Registro de culto salvo com sucesso!")
 
-                            try: db.commit(); st.cache_data.clear()
-                            except IntegrityError as ie: db.rollback(); st.session_state.status_message = ("error", "Erro de integridade: lançamento duplicado.")
-                            except Exception as e: db.rollback(); st.session_state.status_message = ("error", f"Erro inesperado: {str(e)}")
+                            try:
+                                db.commit()
+                                st.cache_data.clear()
+                            except IntegrityError as ie:
+                                db.rollback()
+                                st.session_state.status_message = ("error", "Erro de integridade: lançamento duplicado.")
+                            except Exception as e:
+                                db.rollback()
+                                st.session_state.status_message = ("error", f"Erro inesperado: {str(e)}")
                         except Exception as e:
-                            try: db.rollback()
-                            except Exception: pass
+                            try:
+                                db.rollback()
+                            except Exception:
+                                pass
                             st.session_state.status_message = ("error", f"Erro ao processar entrada: {e}")
-                            
+
                     st.rerun()
-            
+
             st.divider()
-            st.markdown("##### 2. Lançar Dízimos Nominais em Lote (Entrada Livre)")
             
-            # --- NOVO: Campo de Entrada Simplificado ---
-            dizimos_texto = st.text_area(
-                "Insira um dízimo por linha (Ex: João Silva 500.00 | Mara Rúbia 50)", 
-                height=300, key="rap_dizimo_lote"
+            # --- 2. Lançamento Rápido de Dízimos ---
+            
+            # Chama a função que gerencia as 2 etapas (Entrada de Texto -> Tabela Editável -> Salvar)
+            render_dizimos_lote_section(
+                default_payment=st.session_state.get("rap_diz_default_pay", "Dinheiro"), # Passa o valor atual
+                rap_data=rap_data,
+                target_cong_obj=target_cong_obj,
+                target_sub_cong_id=target_sub_cong_id
             )
 
-            # --- NOVO: Seletor de Forma de Pagamento Padrão ---
+            # O SELETOR DE PAGAMENTO VEM ABAIXO DA CAIXA DE TEXTO LIVRE
             default_payment = st.selectbox(
-                "Forma de Pagamento (Padrão para Lote):", 
-                ["Dinheiro", "PIX", "Cartão", "Transferência", "Outro"], key="rap_diz_default_pay", index=0 # index=0 garante que 'Dinheiro' é o padrão
+                "Forma de Pagamento (Padrão para Lote):",
+                ["PIX", "Dinheiro"], 
+                key="rap_diz_default_pay", 
+                index=1, # Default para Dinheiro (index 1)
+                help="Selecione se os dízimos do lote foram pagos primariamente via PIX ou Dinheiro."
             )
             
-            # Botão Processar (Fora do Form, para manter o Form acima limpo)
-            st.button(
-                "Processar e Salvar Dízimos em Lote",
-                on_click=_process_dizimos_lote_callback,
-                # 🚀 Passa o valor do text_area e outras variáveis como argumentos
-                args=[
-                    st.session_state.rap_dizimo_lote, # O conteúdo do text_area
-                    default_payment, # A forma de pagamento selecionada
-                    rap_data, # A data de lançamento
-                    target_cong_obj, # O objeto da congregação
-                    target_sub_cong_id # O ID da sub-congregação (pode ser None)
-                ]
-            )
-
             st.divider()
-            st.markdown("##### 3. Lançar SAÍDA Rápida (Despesas Comuns)")
+            
+            # --- 3. Lançar Pagamento / Despesa (Saída Rápida) ---
+            st.markdown("##### 3. Lançar Pagamento / Despesa")
             with st.form("form_saida_rapida", clear_on_submit=True):
-                
+
                 with SessionLocal() as db_form:
-                    # Busca as categorias de SAÍDA mais comuns
+                    # Busca TODAS as categorias de SAÍDA e as mais comuns
                     cats_out_all = categories_for_type(db_form, "SAÍDA")
-                    # Filtra para mostrar apenas categorias mais comuns no topo (ex: as 5 primeiras)
+                    # Filtra para mostrar apenas categorias mais comuns no topo (TOP 5)
                     cats_frequentes_nomes = [c.name for c in cats_out_all][:5] or ["—"]
                     cats_map = {c.name: c.id for c in cats_out_all}
+                    
+                    # Cria a lista completa (incluindo o "Outra categoria...")
+                    cats_out_others = [c.name for c in cats_out_all if c.name not in cats_frequentes_nomes]
+                    select_options = ["Selecione outra categoria..."] + cats_out_others
+
+                
+                st.markdown("**1. Selecione a Categoria (Despesa)**")
+                
+                col_radio, col_select = st.columns([1.5, 1.5])
+
+                # 1. Opções Rápidas (Radio) - MODO MAIS FÁCIL PARA CELULAR
+                with col_radio:
+                    selected_radio = st.radio(
+                        "Categoria Comum:", 
+                        options=cats_frequentes_nomes, 
+                        key="sai_rap_cat_radio"
+                    )
+
+                # 2. Opção Lenta (Selectbox)
+                with col_select:
+                    selected_select = st.selectbox(
+                        "Ou, selecione Outra:", 
+                        options=select_options, 
+                        key="sai_rap_cat_select"
+                    )
+
+                # Define a categoria final
+                if selected_radio and selected_radio != "Selecione...":
+                    sai_cat_name = selected_radio
+                elif selected_select and selected_select != "Selecione outra categoria...":
+                    sai_cat_name = selected_select
+                else:
+                    sai_cat_name = None
+                    
+                st.markdown("---")
+                st.markdown("**2. Insira Valor e Descrição**")
 
                 c1, c2 = st.columns(2)
                 with c1:
-                    sai_cat_name = st.selectbox("Categoria", cats_frequentes_nomes, key="sai_rap_cat")
+                    # CORRIGIDO: Usando st.text_input para permitir vírgula (,)
+                    sai_valor_str = st.text_input(
+                        "Valor (R$)", 
+                        value="0,00",
+                        key="sai_rap_valor_str",
+                        help="Use a vírgula (,) para separar os centavos. Ex: 100,50"
+                    )
                 with c2:
-                    # Valor padrão da Saída 0.00
-                    sai_valor = st.number_input("Valor (R$)", min_value=0.00, value=0.00, format="%.2f", key="sai_rap_valor")
+                    sai_desc = st.text_input("Descrição (Opcional, mas recomendado)", key="sai_rap_desc")
 
-                sai_desc = st.text_input("Descrição (opcional, mas recomendado)", key="sai_rap_desc")
-
-                if st.form_submit_button("Salvar SAÍDA"):
+                # Botão Salvar (AZUL)
+                if _submit_btn("Salvar Pagamento", key_suffix="salvar_saida_rapida", theme="saida"):
                     cat_id = cats_map.get(sai_cat_name)
-                    valor_valido = float(sai_valor or 0.0)
-                    
-                    if valor_valido <= 0.0 or cat_id is None:
-                        # Corrigido para verificar valor > 0
-                        st.error("Valor inválido (deve ser maior que zero) ou categoria não selecionada.")
+                    # CONVERSÃO: Converte a string (com vírgula) para float
+                    valor_valido = _to_float_brl(sai_valor_str)
+
+                    if valor_valido <= 0.0:
+                        st.error("O valor deve ser maior que zero.")
+                    elif cat_id is None:
+                        st.error("Selecione uma categoria válida para a despesa.")
                     else:
                         try:
                             with SessionLocal() as db_tx:
@@ -3515,74 +4799,93 @@ def page_lancamentos(user: "User"):
                                     sub_congregation_id=target_sub_cong_id
                                 ))
                                 db_tx.commit()
-                                st.session_state.status_message = ("success", f"Saída '{sai_cat_name}' de {format_currency(valor_valido)} registrada com sucesso!")
+                                st.session_state.status_message = (
+                                    "success",
+                                    f"Pagamento '{sai_cat_name}' de {format_currency(valor_valido)} registrado com sucesso!"
+                                )
                                 st.cache_data.clear()
                                 st.rerun()
                         except Exception as e:
-                            st.error(f"Erro ao salvar saída: {e}")
+                            st.error(f"Erro ao salvar pagamento: {e}")
 
-        # ====================== EDITAR DIRETO NA TABELA (Bloco Secundário) =======================
-        elif modo == "Editar direto na tabela":
-            # (O restante do modo "Editar direto na tabela" permanece IDÊNTICO)
+        
+        # ====================== 4. EDIÇÃO AVANÇADA / TABELA (No final da página) =======================
+        
+        st.markdown("---")
+        st.subheader("🛠️ Tabela de Edição Avançada")
+        st.caption("Use esta seção apenas para corrigir ou ajustar dados diretamente nas tabelas.")
+        
+        # 1. Toggle/Opção de escolha
+        col_toggle, col_empty = st.columns([1, 3])
+        with col_toggle:
+            # st.toggle para ativar/desativar o modo avançado
+            st.toggle(
+                "Ativar Edição Avançada",
+                value=st.session_state.advanced_mode_toggle,
+                key="advanced_mode_toggle",
+            )
             
-            contexto_tabela = f"{parent_cong_obj.name} (Principal)"
-            target_sub_cong_id = None
+        
+        if st.session_state.advanced_mode_toggle: # Usa o valor da key do toggle para controle
+            
+            st.markdown("---")
+            
+            # --- Configura o contexto da tabela ---
             if sub_congs:
                 opcoes_tabela = {f"{parent_cong_obj.name} (Principal)": None}
-                for sub in sub_congs: opcoes_tabela[sub.name] = sub.id
-                contexto_tabela = st.selectbox("Selecione a unidade para editar:", list(opcoes_tabela.keys()), key="lan_tabela_contexto")
-                target_sub_cong_id = opcoes_tabela[contexto_tabela]
-
+                for sub in sub_congs:
+                    opcoes_tabela[sub.name] = sub.id
+                contexto_tabela = st.selectbox(
+                    "Selecione a unidade para editar:",
+                    list(opcoes_tabela.keys()),
+                    key="lan_tabela_contexto_avancado"
+                )
+                target_sub_cong_id_expander = opcoes_tabela[contexto_tabela]
+            else:
+                # No modo avançado, se não houver sub, usa a congregação principal
+                target_sub_cong_id_expander = None
+            
             st.info(f"Editando lançamentos de: **{contexto_tabela}**")
 
             ref_tab = get_month_selector("Mês de referência da tabela")
             start_tab, end_tab = month_bounds(ref_tab)
 
-            st.markdown("##### Resumo de Entradas por Culto")
+            # --- SEPARADOR CLARO ---
+            st.markdown("---")
+            st.subheader("1. Edição de Entradas por Culto (Resumo)")
 
-            df_logs = _load_service_logs(parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id)
-
-            # Divergência Dízimos (resumo x nominal)
-            declarado_total = 0.0
-            if isinstance(df_logs, pd.DataFrame) and not df_logs.empty and ("Dízimo" in df_logs.columns):
-                try: declarado_total = float(df_logs["Dízimo"].sum() or 0.0)
-                except Exception: declarado_total = 0.0
-            with SessionLocal() as _db_chk:
-                tithe_sub_filter = (Tithe.sub_congregation_id.is_(None) if target_sub_cong_id is None else (Tithe.sub_congregation_id == target_sub_cong_id))
-                real_total = float(_db_chk.scalar(
-                    select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
-                        Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab,
-                        tithe_sub_filter)
-                ) or 0.0)
-            diff_total = round(declarado_total - real_total, 2)
-            if abs(diff_total) >= 0.01:
-                st.markdown(f"""
-<div class="alert-danger">
-  <strong>Divergência de Dízimos no período</strong> — Declarado no resumo: <strong>{format_currency(declarado_total)}</strong> • Nominal (dizimistas): <strong>{format_currency(real_total)}</strong> • Diferença: <strong>{format_currency(diff_total)}</strong>
-</div>
-""", unsafe_allow_html=True)
-
-            if df_logs.empty:
-                df_logs = pd.DataFrame([{"Data do Culto": today_bahia(), "Tipo de Culto": tipos_de_culto[0], "Dízimo": 0.0, "Oferta": 0.0, "Total": 0.0, "ID": None}])
+            # _load_service_logs deve usar o target_sub_cong_id correto, que já foi definido
+            df_logs = _load_service_logs(
+                parent_cong_obj.id, start_tab, end_tab, sub_cong_id=target_sub_cong_id_expander
+            )
 
             # --- Placeholder do aviso (fica ACIMA visualmente da tabela) ---
             _aviso_top = st.empty()
 
             edited_df = st.data_editor(
                 df_logs, use_container_width=True, hide_index=True, num_rows="dynamic",
-                key=f"editor_service_logs_{parent_cong_obj.id}_{target_sub_cong_id}",
-                column_config={"ID": None, "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
+                key=f"editor_service_logs_adv_{parent_cong_obj.id}_{target_sub_cong_id_expander}",
+                column_config={
+                    "ID": None,
+                    "Data do Culto": st.column_config.DateColumn("Data do Culto", required=True, format="DD/MM/YYYY"),
                     "Tipo de Culto": st.column_config.SelectboxColumn("Tipo de Culto", options=tipos_de_culto, required=True),
                     "Dízimo": st.column_config.NumberColumn("Dízimo", format="R$ %.2f", required=True),
                     "Oferta": st.column_config.NumberColumn("Oferta", format="R$ %.2f", required=True),
-                    "Total": st.column_config.NumberColumn("Total", help="Soma do Dízimo e Oferta. Atualiza após salvar.", format="R$ %.2f", disabled=True)
-                }, column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"])
+                    "Total": st.column_config.NumberColumn(
+                        "Total", help="Soma do Dízimo e Oferta. Atualiza após salvar.",
+                        format="R$ %.2f", disabled=True
+                    )
+                },
+                column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
+            )
 
             # AVISO AMARELO: aparece se existir "Culto de Missões" na tabela
             try:
                 if _has_culto_missoes_in_df(edited_df):
-                    with _aviso_top: _render_aviso_missoes_inline()
-            except Exception: pass
+                    with _aviso_top:
+                        _render_aviso_missoes_inline()
+            except Exception:
+                pass
 
             st.divider()
             # Totais rápidos da tabela
@@ -3594,49 +4897,74 @@ def page_lancamentos(user: "User"):
                 col1.metric("Total Dízimos (na tabela)", format_currency(total_dizimo))
                 col2.metric("Total Ofertas (na tabela)", format_currency(total_oferta))
                 col3.metric("Total Geral (na tabela)", format_currency(total_geral))
-            except Exception: st.caption("Calculando totais...")
+            except Exception:
+                st.caption("Calculando totais...")
 
-            # Botão salvar mudanças do resumo (ServiceLog + Missões automática)
+            # Botão salvar mudanças do resumo (AZUL)
             def on_save_click():
-                result = _apply_service_log_changes(df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id)
-                try: st.cache_data.clear()
-                except Exception: pass
-                if result == "missao_ok": st.session_state.status_message = ("success", "Atenção: As ofertas do Culto de Missões são lançadas automaticamente no menu 'Relatório de Missões'.")
-                elif result == "geral_ok": st.session_state.status_message = ("success", "Alterações salvas com sucesso!")
-                elif result == "erro_integridade": st.session_state.status_message = ("error", "Erro: Tentativa de criar um lançamento duplicado. Verifique os dados.")
-                elif result == "erro_categoria": st.session_state.status_message = ("error", "ERRO CRÍTICO: Categoria 'Missões' (Entrada) não encontrada.")
-                elif result == "erro_geral": st.session_state.status_message = ("error", "Ocorreu um erro inesperado ao salvar.")
+                result = _apply_service_log_changes(
+                    df_logs, edited_df, parent_cong_obj.id, sub_cong_id=target_sub_cong_id_expander
+                )
+                try:
+                    st.cache_data.clear()
+                except Exception:
+                        pass
+                if result == "missao_ok":
+                    st.session_state.status_message = (
+                        "success",
+                        "Atenção: As ofertas do Culto de Missões são lançadas automaticamente no menu 'Relatório de Missões'."
+                    )
+                elif result == "geral_ok":
+                    st.session_state.status_message = ("success", "Alterações salvas com sucesso!")
+                elif result == "erro_integridade":
+                    st.session_state.status_message = ("error", "Erro: Tentativa de criar um lançamento duplicado. Verifique os dados.")
+                elif result == "erro_categoria":
+                    st.session_state.status_message = ("error", "ERRO CRÍTICO: Categoria 'Missões' (Entrada) não encontrada.")
+                elif result == "erro_geral":
+                    st.session_state.status_message = ("error", "Ocorreu um erro inesperado ao salvar.")
                 st.rerun()
 
-            st.button("Salvar alterações na tabela", on_click=on_save_click, key=f"save_table_{parent_cong_obj.id}", type="primary")
+            # Utiliza _save_btn para aplicar a cor AZUL (tema "neutral")
+            _save_btn(on_save_click, f"save_table_adv_resumo_{parent_cong_obj.id}", theme="neutral",
+                         label="Salvar alterações no Resumo de Entradas")
 
-            # Seções auxiliares (dizimistas e saídas) abaixo
+            # --- SEPARADOR CLARO ---
             st.markdown("---")
+            st.subheader("2. Edição de Dízimos Nominais")
+            
             tithes_query = select(Tithe).where(
-                Tithe.congregation_id == parent_cong_obj.id, Tithe.date >= start_tab, Tithe.date < end_tab,
-                (Tithe.sub_congregation_id.is_(None) if target_sub_cong_id is None else (Tithe.sub_congregation_id == target_sub_cong_id)))
+                Tithe.congregation_id == parent_cong_obj.id,
+                Tithe.date >= start_tab, Tithe.date < end_tab,
+                (Tithe.sub_congregation_id.is_(None)
+                     if target_sub_cong_id_expander is None
+                     else (Tithe.sub_congregation_id == target_sub_cong_id_expander))
+            )
             tithes = db.scalars(tithes_query.order_by(Tithe.date)).all()
-            _editor_dizimos(tithes, f"Dizimistas - {contexto_tabela}", force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
+            _editor_dizimos(
+                tithes, f"Dizimistas - {contexto_tabela}",
+                force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id_expander
+            )
 
+            # --- SEPARADOR CLARO ---
             st.markdown("---")
+            st.subheader("3. Edição de Saídas")
+            
             txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(
-                Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start_tab, Transaction.date < end_tab,
-                Transaction.type == "SAÍDA", (Transaction.sub_congregation_id.is_(None) if target_sub_cong_id is None else (Transaction.sub_congregation_id == target_sub_cong_id)))
+                Transaction.congregation_id == parent_cong_obj.id,
+                Transaction.date >= start_tab, Transaction.date < end_tab,
+                Transaction.type == "SAÍDA",
+                (Transaction.sub_congregation_id.is_(None)
+                     if target_sub_cong_id_expander is None
+                     else (Transaction.sub_congregation_id == target_sub_cong_id_expander))
+            )
             txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
-            _editor_lancamentos(txs_out, f"Saídas - {contexto_tabela}", tx_type_hint="SAÍDA",
-                force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id)
-
-        # Fim do modo "Lançamento Rápido (Móvel)" # Faz o rerun para mostrar a mensagem de status e limpar a área de texto
-
-        # Fim do modo "Lançamento Rápido (Móvel)"
+            _editor_lancamentos(
+                txs_out, f"Saídas - {contexto_tabela}", tx_type_hint="SAÍDA",
+                force_cong_id=parent_cong_obj.id, force_sub_cong_id=target_sub_cong_id_expander
+            )
 
 
-            # ... (demais seções permanecem iguais)
-
-
-            # (O restante da página com as tabelas de Dizimistas e Saídas permanece igual)
-            # ...
-
+            
 # ===================== PAGE: RELATÓRIO DE SAÍDA =====================
 def page_relatorio_saida(user: "User"):
     ensure_seed()
@@ -4916,12 +6244,12 @@ def page_relatorio_missoes(user: "User"):
 def page_relatorio_missoes_congregacao(user: "User"):
     """
     Relatório de Missões para login de congregação (TESOUREIRO):
-    - Adiciona tabela EDITÁVEL de ENTRADAS de Missões por culto (Data do Culto, Oferta de Missões).
-    - Mantém o restante das funcionalidades do app inalteradas.
+    - Adiciona tabela EDITÁVEL de ENTRADAS de Missões por culto.
+    - Adiciona VISUALIZAÇÃO de SAÍDAS e SALDO de Missões da sua unidade.
     """
     ensure_seed()
     with SessionLocal() as db:
-        st.markdown("<h1 class='page-title'>Relatório de Missões</h1>", unsafe_allow_html=True)
+        st.markdown("<h1 class='page-title'>Gestão Missões</h1>", unsafe_allow_html=True)
 
         # Seleção de mês
         ref = get_month_selector("Mês de referência")
@@ -4936,24 +6264,78 @@ def page_relatorio_missoes_congregacao(user: "User"):
 
         # Seleciona unidade (Principal ou Sub)
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id)).all()
-        contexto = f"{parent_cong_obj.name} (Principal)"
+        
         target_sub_cong_id = None
+        contexto = f"{parent_cong_obj.name} (Principal)"
+
         if sub_congs:
             opcoes = {f"{parent_cong_obj.name} (Principal)": None}
             for sub in sub_congs:
                 opcoes[sub.name] = sub.id
-            contexto = st.selectbox("Unidade", list(opcoes.keys()), key="missoes_unidade_cong")
+            
+            # Se houver mais de uma opção, exibe o seletor
+            contexto = st.selectbox("Unidade para Lançamento:", list(opcoes.keys()), key="missoes_unidade_cong")
             target_sub_cong_id = opcoes[contexto]
-
+        
+        # Se não houver sub-congregações, exibe apenas a unidade principal
         st.info(f"Unidade selecionada: **{contexto}**")
 
-        # ===== NOVO: Tabela editável de ENTRADAS de Missões (por culto) =====
+        # ==================== 1. EDIÇÃO DE ENTRADAS ====================
+        st.markdown("---")
+        st.subheader("1. Lançar/Editar Entradas de Missões")
+        
         _editor_missions_entries_unit(
             cong_id=parent_cong_obj.id,
             sub_cong_id=target_sub_cong_id,
             start=start, end=end,
             titulo=f"Entradas de Missões — {ref.strftime('%B/%Y')}"
         )
+        
+        # ==================== 2. VISUALIZAÇÃO DOS FLUXOS (Para Dirigente) ====================
+        st.markdown("---")
+        st.subheader("2. Histórico de Saídas e Saldo (Visualização)")
+        
+        # Coleta de dados (ENTRADAS e SAÍDAS de Missões da unidade)
+        entradas_missoes, saidas_missoes = _collect_missions_data(db, start, end, only_cong_id=parent_cong_obj.id)
+        
+        # --- FILTRO POR SUB-UNIDADE (apenas para Saídas e Saldo) ---
+        # Filtra as transações de Saída para mostrar apenas as da sub-unidade selecionada (se não for a principal)
+        if target_sub_cong_id is not None:
+             saidas_missoes = [t for t in saidas_missoes if t.sub_congregation_id == target_sub_cong_id]
+             entradas_missoes = [t for t in entradas_missoes if t.sub_congregation_id == target_sub_cong_id]
+        elif sub_congs:
+             # Se for a Principal, remove os lançamentos das Subs (se existirem)
+             saidas_missoes = [t for t in saidas_missoes if t.sub_congregation_id is None]
+             entradas_missoes = [t for t in entradas_missoes if t.sub_congregation_id is None]
+        # Se sub_congs não existir, os dados já são apenas da unidade principal.
+
+
+        total_entradas_missions = sum(float(t.amount) for t in entradas_missoes)
+        total_saidas_missions = sum(float(t.amount) for t in saidas_missoes)
+        saldo_missions = total_entradas_missions - total_saidas_missions
+
+        # --- Tabela de Saídas ---
+        st.markdown("##### Saídas de Missões (Despesas)")
+        if saidas_missoes:
+            saidas_rows = [
+                {"Data": t.date.strftime("%d/%m/%Y"), "Descrição": t.description or "—", "Valor": float(t.amount)}
+                for t in saidas_missoes
+            ]
+            df_saidas = pd.DataFrame(saidas_rows)
+            st.dataframe(df_saidas.style.format({"Valor": format_currency}), use_container_width=True, hide_index=True)
+        else:
+            st.caption("Nenhuma saída de missões registrada para esta unidade no período.")
+
+        st.divider()
+        
+        # --- Resumo Saldo ---
+        st.markdown("##### Saldo de Missões no Mês")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total Entradas", format_currency(total_entradas_missions))
+        c2.metric("Total Saídas", format_currency(total_saidas_missions), delta_color="inverse")
+        c3.metric("Saldo do Mês", format_currency(saldo_missions))
+
+        # (Adicione aqui quaisquer outras visualizações ou exportações que o Tesoureiro precise)
 
         # (Se você tinha outras seções específicas aqui, mantenha abaixo sem alterações.)
         # Ex.: visualizações, exportações, etc.
@@ -5506,99 +6888,447 @@ def display_entry_hierarchy(user: "User", congs_all: List[Congregation], start: 
 
 # ===================== PAGE: RELATÓRIO DE ENTRADA =====================
 def page_relatorio_entrada(user: "User"):
+    """
+    Relatório de Entrada — versão fiel ao seu fluxo original
+    + Aviso fixo de Missões
+    + Banner de divergência (Resumo x Nominal) abaixo dos filtros.
+    """
     ensure_seed()
     with SessionLocal() as db:
+        from sqlalchemy import select, func
+
         st.markdown("<h1 class='page-title'>Relatório de Entrada</h1>", unsafe_allow_html=True)
+
+        # Período
         ref = get_month_selector()
         start, end = month_bounds(ref)
 
+        # Escopo (SEDE: escolha de congregação/hierarquia; demais: congregação do usuário)
         parent_cong_obj = None
-        
         if user.role == "SEDE":
             congs_all = order_congs_sede_first(cong_options_for(user, db))
             escopo_opts = ["-- Relatório Hierárquico (Edição) --"] + [c.name for c in congs_all]
-            
-            escopo_selecionado = st.selectbox("Selecione o escopo do relatório:", escopo_opts, key="re_sede_escopo")
-            
+
+            escopo_selecionado = st.selectbox(
+                "Selecione o escopo do relatório:",
+                escopo_opts,
+                key="re_sede_escopo"
+            )
+
             if escopo_selecionado == "-- Relatório Hierárquico (Edição) --":
+                # Mantém a sua visão hierárquica original
                 display_entry_hierarchy(user, congs_all, start, end, db)
                 return
             else:
                 parent_cong_obj = next((c for c in congs_all if c.name == escopo_selecionado), None)
-        else: # TESOUREIRO
+        else:  # TESOREIRO
             parent_cong_obj = db.get(Congregation, user.congregation_id)
 
         if not parent_cong_obj:
-            st.info("Nenhuma congregação para analisar."); return
+            st.info("Nenhuma congregação para analisar.")
+            return
 
         st.divider()
         st.markdown(f"### Detalhes de: {parent_cong_obj.name.upper()}")
 
-        sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent_cong_obj.id).order_by(SubCongregation.name)).all()
-        
-        target_sub_cong_id_or_all = None
+        # Seleção de unidade (Principal / Subs / Todas)
+        sub_congs = db.scalars(
+            select(SubCongregation)
+            .where(SubCongregation.congregation_id == parent_cong_obj.id)
+            .order_by(SubCongregation.name)
+        ).all()
+
+        target_sub_cong_id_or_all = None  # None = Principal; id = Sub; "ALL" = Todas
         contexto_selecionado = parent_cong_obj.name
-        
+
         if sub_congs:
             opcoes = {"-- Todas (Principal + Subs) --": "ALL", f"{parent_cong_obj.name} (Principal)": None}
             for sub in sub_congs:
                 opcoes[sub.name] = sub.id
-            contexto_selecionado = st.selectbox("Filtrar por unidade:", list(opcoes.keys()), key="re_sub_sel_unified")
+
+            contexto_selecionado = st.selectbox(
+                "Filtrar por unidade:",
+                list(opcoes.keys()),
+                key="re_sub_sel_unified"
+            )
             target_sub_cong_id_or_all = opcoes[contexto_selecionado]
-        
+
         st.info(f"Exibindo dados para: **{contexto_selecionado}**")
 
+        # ---------------- AVISOS ABAIXO DOS FILTROS ----------------
+
+        # Aviso fixo de Missões
+        def _render_missoes_notice():
+            st.markdown(
+                """
+                <div style="
+                    background:#fff7e6;             /* amarelo suave */
+                    border:1px solid #ffd59e;       /* borda âmbar */
+                    color:#7a4b00;                  /* texto âmbar escuro */
+                    border-radius:12px;
+                    padding:10px 14px;
+                    margin: 6px 0 10px 0;
+                    font-size:0.95rem;">
+                  <strong>Atenção:</strong> As ofertas do <strong>Culto de Missões</strong> são lançadas
+                  automaticamente no menu <strong>Relatório de Missões</strong> ao lado.
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        _render_missoes_notice()
+
+        # Banner de divergência (Resumo x Nominal) — respeita período e unidade
+        def _render_divergence_banner(total_resumo: float, total_nominal: float):
+            if round(total_resumo, 2) == round(total_nominal, 2):
+                return
+            diff = total_nominal - total_resumo
+            st.markdown(
+                f"""
+                <div style="
+                    background:#fdecec; border:1px solid #f3b4b6; color:#7a1c1c;
+                    border-radius:12px; padding:10px 14px; font-weight:600; margin-bottom:8px;">
+                  <strong>Divergência de Dízimos no período</strong>
+                  — Declarado no resumo: <span style="font-weight:800;">{format_currency(total_resumo)}</span>
+                  • Nominal (dizimistas): <span style="font-weight:800;">{format_currency(total_nominal)}</span>
+                  • Diferença: <span style="font-weight:800;">{format_currency(diff)}</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        # Calcula os totais para o banner (sem interferir no restante do relatório)
+        sl_conditions = [
+            ServiceLog.congregation_id == parent_cong_obj.id,
+            ServiceLog.date >= start,
+            ServiceLog.date < end,
+        ]
+        tt_conditions = [
+            Tithe.congregation_id == parent_cong_obj.id,
+            Tithe.date >= start,
+            Tithe.date < end,
+        ]
+
         if target_sub_cong_id_or_all == "ALL":
+            # todas as unidades (sem filtro adicional)
+            pass
+        elif target_sub_cong_id_or_all is None:
+            # somente Principal
+            sl_conditions.append(ServiceLog.sub_congregation_id.is_(None))
+            tt_conditions.append(Tithe.sub_congregation_id.is_(None))
+        else:
+            # uma Sub específica
+            sl_conditions.append(ServiceLog.sub_congregation_id == target_sub_cong_id_or_all)
+            tt_conditions.append(Tithe.sub_congregation_id == target_sub_cong_id_or_all)
+
+        total_resumo = float(
+            db.scalar(select(func.coalesce(func.sum(ServiceLog.dizimo), 0.0)).where(*sl_conditions)) or 0.0
+        )
+        total_nominal = float(
+            db.scalar(select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(*tt_conditions)) or 0.0
+        )
+
+        _render_divergence_banner(total_resumo, total_nominal)
+
+        # ---------------- RESTO DO RELATÓRIO (INALTERADO) ----------------
+
+        if target_sub_cong_id_or_all == "ALL":
+            # Visão agregada por unidade (Principal + cada Sub)
             all_units_data = []
+
             df_principal = _load_service_logs(parent_cong_obj.id, start, end, sub_cong_id=None)
-            all_units_data.append({"Unidade": f"{parent_cong_obj.name} (Principal)", "Total Entradas": df_principal['Total'].sum()})
+            total_principal = float(df_principal['Total'].sum()) if not df_principal.empty else 0.0
+            all_units_data.append({
+                "Unidade": f"{parent_cong_obj.name} (Principal)",
+                "Total Entradas": total_principal
+            })
+
             for sub in sub_congs:
                 df_sub = _load_service_logs(parent_cong_obj.id, start, end, sub_cong_id=sub.id)
-                all_units_data.append({"Unidade": f"↳ {sub.name}", "Total Entradas": df_sub['Total'].sum()})
-            
+                total_sub = float(df_sub['Total'].sum()) if not df_sub.empty else 0.0
+                all_units_data.append({"Unidade": f"↳ {sub.name}", "Total Entradas": total_sub})
+
             df_agg = pd.DataFrame(all_units_data)
-            st.dataframe(df_agg.style.format({"Total Entradas": format_currency}), use_container_width=True, hide_index=True)
-            total_geral = df_agg["Total Entradas"].sum()
+            st.dataframe(
+                df_agg.style.format({"Total Entradas": format_currency}),
+                use_container_width=True,
+                hide_index=True
+            )
+            total_geral = float(df_agg["Total Entradas"].sum()) if not df_agg.empty else 0.0
             st.metric("Total Geral da Congregação", format_currency(total_geral))
+
         else:
+            # Relatório detalhado da unidade selecionada
             report_df = _load_service_logs(parent_cong_obj.id, start, end, sub_cong_id=target_sub_cong_id_or_all)
-            
+
             st.dataframe(
                 report_df.style.format({
-                    "Data do Culto": "{:%d/%m/%Y}", "Dízimo": format_currency,
-                    "Oferta": format_currency, "Total": format_currency
+                    "Data do Culto": "{:%d/%m/%Y}",
+                    "Dízimo": format_currency,
+                    "Oferta": format_currency,
+                    "Total": format_currency,
                 }),
-                use_container_width=True, hide_index=True,
+                use_container_width=True,
+                hide_index=True,
                 column_order=["Data do Culto", "Tipo de Culto", "Dízimo", "Oferta", "Total"]
             )
-            
-            # ===== NOVO BLOCO DE MÉTRICAS PARA TESOUREIRO =====
+
+            # Métricas rápidas
             st.divider()
             try:
-                total_dizimo, total_oferta, total_geral = 0.0, 0.0, 0.0
-                if not report_df.empty:
-                    total_dizimo = report_df["Dízimo"].sum()
-                    total_oferta = report_df["Oferta"].sum()
-                    total_geral = report_df["Total"].sum()
-                
+                if report_df.empty:
+                    total_dizimo = total_oferta = total_geral = 0.0
+                else:
+                    total_dizimo = float(report_df["Dízimo"].sum())
+                    total_oferta = float(report_df["Oferta"].sum())
+                    total_geral = float(report_df["Total"].sum())
+
                 col1, col2, col3 = st.columns(3)
                 col1.metric("Total de Dízimos", format_currency(total_dizimo))
                 col2.metric("Total de Ofertas", format_currency(total_oferta))
                 col3.metric("Total Geral Entradas", format_currency(total_geral))
             except Exception:
                 st.caption("Calculando totais...")
-            
+
+
+def _render_missoes_notice():
+    """Banner informativo: ofertas de Culto de Missões são lançadas no Relatório de Missões."""
+    st.markdown(
+        """
+        <div style="
+            margin: 8px 0 16px 0;
+            padding: 10px 12px;
+            border-radius: 10px;
+            background: #fff7ed;               /* laranja bem claro */
+            border: 1px solid #fdba74;         /* laranja */
+            color: #7c2d12;                    /* marrom/laranja escuro */
+            font-weight: 600;">
+            ⚠️ Atenção: Ao lançar as ofertas do <strong>Culto de Missões</strong>, ela estará visivel no menu
+            <strong>Gestão Missões, ao lado</strong>.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+def _render_divergence_banner(total_resumo: float, total_nominal: float):
+    """Banner vermelho de divergência de dízimos (resumo vs nominal)."""
+    diff = round(total_resumo - total_nominal, 2)
+    if abs(diff) < 0.01:
+        return
+    st.markdown(
+        f"""
+        <div style="
+            margin: 8px 0 16px 0;
+            padding: 10px 12px;
+            border-radius: 10px;
+            background: #fdecec;               /* vermelho bem claro */
+            border: 1px solid #f5a6a6;         /* vermelho */
+            color: #7f1d1d;                    /* vinho */
+            font-weight: 700;">
+            Divergência de Dízimos no período — Declarado no resumo: <strong>R$ {total_resumo:,.2f}</strong>
+            • Nominal (dizimistas): <strong>R$ {total_nominal:,.2f}</strong>
+            • Diferença: <strong>R$ {diff:,.2f}</strong>
+        </div>
+        """.replace(",", "X").replace(".", ",").replace("X", "."),
+        unsafe_allow_html=True,
+    )
+def _build_resumo_por_unidade(parent: Optional[Congregation], sub_id: Optional[Union[int, str]], start: date, end: date, db: Session) -> pd.DataFrame:
+    """
+    Monta um DataFrame com resumo de entradas (Dízimo, Oferta, Total) por unidade.
+    
+    CORREÇÃO GARANTIDA: Arredonda todos os valores para duas casas decimais (round(..., 2))
+    e usa o st.cache_data para garantir a performance após a primeira execução.
+    """
+    import pandas as pd
+    from sqlalchemy import select, func, and_
+
+    # NOTA: O decorador @st.cache_data DEVE estar acima desta função no seu código!
+
+    rows = []
+
+    def _sum_for(congregation_id, sub_congregation_id):
+        cond = [
+            ServiceLog.congregation_id == congregation_id,
+            ServiceLog.date >= start,
+            ServiceLog.date < end,
+            # CONDIÇÃO CRÍTICA: EXCLUI LOGS DE MISSÕES DO FLUXO OPERACIONAL
+            ServiceLog.service_type != "Culto de Missões",
+        ]
+        
+        # Lógica de filtro para sub-congregação
+        if sub_congregation_id == "ALL":
+            pass # Sem filtro de sub_congregation_id
+        elif sub_congregation_id is None:
+            cond.append(ServiceLog.sub_congregation_id.is_(None))
+        elif isinstance(sub_congregation_id, int):
+            cond.append(ServiceLog.sub_congregation_id == sub_congregation_id)
+
+        diz = float(db.scalar(select(func.coalesce(func.sum(ServiceLog.dizimo), 0.0)).where(and_(*cond))) or 0.0)
+        ofe = float(db.scalar(select(func.coalesce(func.sum(ServiceLog.oferta), 0.0)).where(and_(*cond))) or 0.0)
+        return diz, ofe, diz + ofe
+
+    # Caso 1: Toda a Rede (parent = None) -> lista por congregação (sem detalhar sub)
+    if parent is None:
+        congs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
+        for c in congs:
+            diz, ofe, tot = _sum_for(c.id, "ALL") 
+            rows.append({
+                "Unidade": c.name,
+                "Dízimos": round(diz, 2),
+                "Ofertas": round(ofe, 2),
+                "Total Entradas": round(tot, 2),
+            })
+        df = pd.DataFrame(rows)
+        if not df.empty:
+            df = df.sort_values("Total Entradas", ascending=False).reset_index(drop=True)
+        return df
+
+    # Caso 2: Há congregação selecionada (parent != None)
+    if sub_id == "ALL":
+        # Principal
+        diz, ofe, tot = _sum_for(parent.id, None)
+        rows.append({
+            "Unidade": f"{parent.name} (Principal)",
+            "Dízimos": round(diz, 2),
+            "Ofertas": round(ofe, 2),
+            "Total Entradas": round(tot, 2),
+        })
+        # Cada Sub
+        subs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent.id).order_by(SubCongregation.name)).all()
+        for s in subs:
+            diz, ofe, tot = _sum_for(parent.id, s.id)
+            rows.append({
+                "Unidade": f"↳ {s.name}",
+                "Dízimos": round(diz, 2),
+                "Ofertas": round(ofe, 2),
+                "Total Entradas": round(tot, 2),
+            })
+    elif sub_id is None:
+        # Somente Principal
+        diz, ofe, tot = _sum_for(parent.id, None)
+        rows.append({
+            "Unidade": f"{parent.name} (Principal)",
+            "Dízimos": round(diz, 2),
+            "Ofertas": round(ofe, 2),
+            "Total Entradas": round(tot, 2),
+        })
+    elif isinstance(sub_id, int):
+        # Sub específica
+        sub = db.get(SubCongregation, sub_id)
+        name = sub.name if sub else "Sub Desconhecida"
+        diz, ofe, tot = _sum_for(parent.id, sub_id)
+        rows.append({
+            "Unidade": f"{name}",
+            "Dízimos": round(diz, 2),
+            "Ofertas": round(ofe, 2),
+            "Total Entradas": round(tot, 2),
+        })
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df = df.sort_values(["Unidade"]).reset_index(drop=True)
+    return df   
+
+
+def _ultimos_movimentos(parent, sub_id, start, end, db, limit: int = 12):
+    """
+    Retorna um DataFrame com os movimentos (entradas/saídas) mais recentes do período:
+    Colunas: Data | Tipo | Valor | Descrição | Unidade
+    - parent: Congregation ou None (None = Toda a Rede)
+    - sub_id: None (Principal) | int (Sub específica) | "ALL" (todas as unidades da congregação)
+    - start, end: intervalo [start, end)
+    - limit: quantidade máxima de registros (default 12)
+    """
+    import pandas as pd
+    from sqlalchemy import select
+    from sqlalchemy.orm import joinedload
+
+    cond = [
+        Transaction.date >= start,
+        Transaction.date < end,
+    ]
+    if parent:
+        cond.append(Transaction.congregation_id == parent.id)
+
+    if sub_id == "ALL":
+        # pega principal + todas as subs da congregação
+        pass
+    elif sub_id is None:
+        cond.append(Transaction.sub_congregation_id.is_(None))
+    else:
+        cond.append(Transaction.sub_congregation_id == sub_id)
+
+    q = (
+        select(Transaction)
+        .options(
+            joinedload(Transaction.category),
+            joinedload(Transaction.congregation),
+            joinedload(Transaction.sub_congregation),
+        )
+        .where(*cond)
+        .order_by(Transaction.date.desc(), Transaction.id.desc())
+        .limit(limit)
+    )
+
+    txs = db.scalars(q).all()
+    rows = []
+    for t in txs:
+        # Unidade: mostra Sub se houver; senão, Principal (nome da congregação)
+        if getattr(t, "sub_congregation_id", None):
+            unidade = getattr(t.sub_congregation, "name", "Sub")
+        else:
+            unidade = getattr(t.congregation, "name", "Principal")
+
+        tipo = getattr(t, "type", "") or ""
+        cat  = getattr(getattr(t, "category", None), "name", "")
+        desc = t.description or cat or ""
+
+        rows.append({
+            "Data":  t.date,
+            "Tipo":  tipo,                     # geralmente "ENTRADA" / "SAÍDA"
+            "Valor": float(t.amount or 0.0),
+            "Descrição": desc,
+            "Unidade": unidade,
+        })
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df = df.sort_values("Data", ascending=False).reset_index(drop=True)
+    return df
+
+def _goto(page_name: str, session_key: str = "nav"):
+    """
+    Navega para uma página do menu da sidebar.
+    - page_name: rótulo exatamente igual ao que aparece no st.radio do menu.
+    - session_key: chave usada no st.radio (no seu caso, "nav").
+    """
+    try:
+        st.session_state[session_key] = page_name
+    except Exception:
+        # garante que a chave exista
+        st.session_state[session_key] = page_name
+    # força a troca imediata
+    st.rerun()
+
             # REMOVIDO: Botão de salvar e toda a sua lógica
 # ===================== MAIN =====================
+# ===================== MAIN =====================
+# ===================== MAIN =====================
+# ===================== MAIN =====================
 def main():
+    # Importação garantida para o bloco try/except
+    import streamlit as st 
+    
     try:
         ensure_seed()
 
-        # Tenta carregar o usuário a partir da sessão ou dos cookies
         user = current_user()
+
+        # === BLOCO DE RECUPERAÇÃO DE SESSÃO (ROBUSTO) ===
+        # Tenta carregar o usuário a partir do token de cookie se não estiver logado na sessão
         if not user:
             try:
-                cm = get_cookie_manager()
+                import extra_streamlit_components as stx
+                cm = stx.CookieManager()
                 tok = cm.get(COOKIE_NAME)
                 data = _read_token(tok)
                 if data:
@@ -5606,54 +7336,64 @@ def main():
                         u = db.get(User, int(data["uid"]))
                         if u:
                             st.session_state.uid = u.id
-                            st.rerun()
+                            st.rerun() # Reruns para carregar o usuário na sessão
             except Exception:
-                # Ignora erros do cookie manager se ele não estiver instalado
                 pass
+        # === FIM BLOCO DE RECUPERAÇÃO DE SESSÃO ===
 
-        # Estrutura Lógica Principal: OU mostra o login, OU mostra o app.
         if 'uid' not in st.session_state or not st.session_state.uid:
-            # ESTADO DESLOGADO: Mostra apenas a UI de login
+            # ESTADO DESLOGADO: Mostra a UI de login
             login_ui()
         else:
             # ESTADO LOGADO: Carrega o usuário e mostra a interface principal
             user = current_user()
             if user:
+                
+                # === LOGO GLOBAL ===
+                LOGO_PATH = "images/logo_igreja.png" 
+                try:
+                    st.logo(LOGO_PATH, size="large") 
+                except Exception:
+                    pass 
+                # === FIM LOGO GLOBAL ===
+                
                 page = sidebar_common(user)
 
-                # Roteamento de páginas
-                if page == "Lançamentos":
+                # >>> ROTEAMENTO SIMPLIFICADO E RESTRITO <<<
+                if page == "Painel Principal":
+                    page_inicio(user)
+                elif page == "Lançamentos":
                     page_lancamentos(user)
-                elif page == "Relatório de Entrada":
-                    page_relatorio_entrada(user)
-                elif page == "Relatório de Saída":
-                    page_relatorio_saida(user)
-                elif page == "Relatório de Dizimistas":
-                    page_relatorio_dizimistas(user)
-                elif page == "Relatório de Missões":
-                    if getattr(user, "role", "") == "TESOUREIRO":
-                        page_relatorio_missoes_congregacao(user)
-                    else:
+                elif page == "Relatórios Financeiros":
+                    page_relatorios_unificados(user) 
+                elif page == "Gestão Missões":
+                    if getattr(user, "role", "") == "TESOUREIRO MISSIONÁRIO":
                         page_relatorio_missoes(user)
-                elif page == "Visão Geral":
-                    page_visao_geral(user)
-                elif page == "Cadastro":
+                    else:
+                        page_relatorio_missoes_congregacao(user)
+                elif page == "Configurações":
                     page_cadastro(user)
                 
-                # --- INÍCIO DA ALTERAÇÃO ---
+                # --- LÓGICA DE RESTRIÇÃO DA IA ---
                 elif page == "Assistente IA":
-                    page_assistente_ia(user)
-                # --- FIM DA ALTERAÇÃO ---
-
+                    if getattr(user, "role", "") == "SEDE":
+                        page_assistente_ia(user)
+                    else:
+                        st.error("Acesso Negado: O assistente de IA é exclusivo para o perfil SEDE.")
+                        page_inicio(user) 
+                # --- FIM RESTRIÇÃO DA IA ---
+                        
                 else:
-                    page_visao_geral(user)
+                    page_inicio(user) 
             else:
-                # Caso raro: UID na sessão mas usuário não encontrado no DB. Força logout.
                 logout()
 
     except Exception as e:
-        st.error("Ocorreu um erro crítico na aplicação.")
+        # st está garantido por estar definido localmente no início da função.
+        st.error("Ocorreu un erro crítico na aplicação.")
         st.exception(e)
+
+
 
         # ===================== PAGE: ASSISTENTE IA ========================
 # ===================== PAGE: ASSISTENTE IA (COM RESUMO RÁPIDO E ANÁLISE LIVRE) =====================
