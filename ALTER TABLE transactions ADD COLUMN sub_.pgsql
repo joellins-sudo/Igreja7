@@ -1,0 +1,1 @@
+ALTER TABLE transactions ADD COLUMN sub_congregation_id INTEGER REFERENCES sub_congregations(id);

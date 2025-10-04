@@ -132,27 +132,21 @@ def render_ai_context_selector(user, db, key_prefix: str = "ai"):
 
 
 def _build_common_date_and_congreg_filters(model, start_date, end_date, cong_id=None, sub_cong_id=None):
-    """
-    Gera a lista de condições (WHERE) para as queries, suportando:
-      - cong_id is None => NÃO filtra por congregation (todas)
-      - sub_cong_id == SUB_ALL => NÃO filtra por sub (inclui todos)
-      - sub_cong_id is None => filtra sub_congregation_id IS NULL (comportamento antigo)
-      - sub_cong_id == <id> => filtra por esse sub
-    """
     conds = [model.date >= start_date, model.date < end_date]
     if cong_id is not None:
         conds.append(model.congregation_id == cong_id)
 
-    if hasattr(model, "sub_congregation_id"):
+    # Só filtra por sub se a coluna existir no BANCO
+    if hasattr(model, "sub_congregation_id") and _db_has_column(model.__tablename__, "sub_congregation_id"):
         if sub_cong_id == SUB_ALL:
-            # não adiciona filtro por sub -> incluir todos
-            pass
+            pass  # NÃO filtra por sub
         elif sub_cong_id is None:
             conds.append(model.sub_congregation_id.is_(None))
         else:
             conds.append(model.sub_congregation_id == sub_cong_id)
 
     return conds
+
 
 
 from sqlalchemy import select, func
@@ -1354,7 +1348,31 @@ def today_bahia():
     return now_bahia().date()
 
 # NOVO HELPER: Função genérica para limpar campos
-# NOVO HELPER:
+# NOVO HELPER: INICIO
+
+# ==== Normalizador de sub_congregação ====
+# Use a MESMA string que você já usa na UI ("ALL").
+SUB_ALL = "ALL"
+
+def _norm_sub_id(raw):
+    """
+    Converte a seleção da UI para o que a query espera:
+      - "ALL"  -> sentinel que significa 'não filtrar por sub'
+      - None   -> filtra 'IS NULL'
+      - int/str numérico -> inteiro (filtra por esse id)
+    """
+    if raw == SUB_ALL:
+        return SUB_ALL
+    if raw is None or raw == "":
+        return None
+    try:
+        return int(raw)
+    except Exception:
+        # Se vier qualquer coisa inesperada, não filtra
+        return SUB_ALL
+
+
+# HELPER FIM
 
 def _process_dizimos_lote_callback(
     dizimos_texto: str, 
@@ -2594,8 +2612,15 @@ def page_inicio(user: "User"):
         with col_cong:
             if user.role == "SEDE":
                 cong_names = [c.name for c in congs_all] or ["—"]
-                cong_sel = st.selectbox("Congregação (Escopo)", cong_names + ["Toda a Rede"])
-                is_all_network = (cong_sel == "Toda a Rede")
+                escopo_opts = cong_names + ["Todas as congregações"]
+                default_index = escopo_opts.index("Todas as congregações")
+                
+                cong_sel = st.selectbox(
+                    "Congregação (Escopo)", 
+                    escopo_opts,
+                    index=default_index
+                )
+                is_all_network = (cong_sel == "Todas as congregações")
                 if not is_all_network:
                     parent_cong_obj = next((c for c in congs_all if c.name == cong_sel), None)
             else:
@@ -2631,151 +2656,136 @@ def page_inicio(user: "User"):
 
         # --- FIM BLOCO DE FILTROS ---
 
-        # 2) KPIs (entradas/saídas/saldo)
+        # 2) KPIs (entradas/saídas/saldo) e Avisos
         if is_all_network:
-            st.info("KPIs desabilitados para 'Toda a Rede'. Use a tabela abaixo.")
-            entradas = saidas = saldo = 0.0
+            # A visualização de KPIs individuais não se aplica à visão de "Todas as congregações".
+            # A tabela de resumo abaixo já fornece os dados agregados.
+            pass
         else:
-            # === LÓGICA CORRIGIDA: FILTRANDO MISSÕES PARA FLUXO DE CAIXA OPERACIONAL ===
+            # Cálculos para os KPIs (usando lógica operacional que exclui missões)
+            total_dizimo_resumo_op = _sum_dizimo_resumo(parent_cong_obj, sub_id, start, end, db, exclude_missions=True)
+            total_dizimo_nominal_op = _sum_dizimo_nominal(parent_cong_obj, sub_id, start, end, db, exclude_missions=True)
+            dizimo_final = max(total_dizimo_resumo_op, total_dizimo_nominal_op)
             
-            # --- Configuração dos Filtros de Exclusão ---
-            # Assume que sub_id 'None' ou 'int' significa a unidade selecionada.
-            sub_filter = [ServiceLog.sub_congregation_id == sub_id] if isinstance(sub_id, int) else [ServiceLog.sub_congregation_id.is_(None)]
-            tx_sub_filter = [Transaction.sub_congregation_id == sub_id] if isinstance(sub_id, int) else [Transaction.sub_congregation_id.is_(None)]
-            tithe_sub_filter = [Tithe.sub_congregation_id == sub_id] if isinstance(sub_id, int) else [Tithe.sub_congregation_id.is_(None)]
+            total_oferta_resumo_op = _sum_oferta_resumo(parent_cong_obj, sub_id, start, end, db) # Esta função já exclui missões
             
-            # Condição para ignorar Missões no ServiceLog (Culto)
-            missao_sl_filter = ServiceLog.service_type != "Culto de Missões"
-            
-            # Condição para ignorar Missões/Dízimos/Ofertas em Transações para o cálculo de 'Outras Entradas'
-            cat_miss = db.scalar(select(Category).where(func.lower(Category.name).in_(("missões","missoes")), Category.type == TYPE_IN))
-            cat_diz = db.scalar(select(Category).where(func.lower(Category.name).in_(("dízimo","dizimo")), Category.type == TYPE_IN))
             cat_ofe = db.scalar(select(Category).where(func.lower(Category.name) == "oferta", Category.type == TYPE_IN))
-            exclude_cat_ids = [c.id for c in [cat_miss, cat_diz, cat_ofe] if c]
             
-            # --- CÁLCULO DAS FONTES (Dízimo e Oferta) SEM MISSÕES ---
-            
-            # Dízimo do Resumo (ServiceLog) - APENAS não-Missões (CORREÇÃO APLICADA)
-            # ESTE VALOR VEM DA FUNÇÃO AUXILIAR CORRIGIDA (_sum_dizimo_resumo)
-            total_dizimo_resumo = _sum_dizimo_resumo(parent_cong_obj, sub_id, start, end, db)
+            tx_sub_filter_op = []
+            if sub_id == "ALL": pass
+            elif sub_id is None: tx_sub_filter_op = [Transaction.sub_congregation_id.is_(None)]
+            else: tx_sub_filter_op = [Transaction.sub_congregation_id == sub_id]
 
-            # Dízimo Nominal (Tithe) - Assume que a função _sum_dizimo_nominal está corrigida para filtrar
-            total_dizimo_nominal = _sum_dizimo_nominal(parent_cong_obj, sub_id, start, end, db)
-            
-            # Dízimo FINAL (para o KPI): Regra de equivalência (max)
-            dizimo_final = max(total_dizimo_resumo, total_dizimo_nominal)
-            
-            # Oferta do Resumo (ServiceLog) - APENAS não-Missões (CORREÇÃO APLICADA)
-            # ESTE VALOR VEM DA FUNÇÃO AUXILIAR CORRIGIDA (_sum_oferta_resumo)
-            total_oferta_resumo = _sum_oferta_resumo(parent_cong_obj, sub_id, start, end, db)
-            
-            # Oferta de Transações (Categoria 'Oferta')
-            total_oferta_tx = float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+            total_oferta_tx_op = float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
                 Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start, Transaction.date < end,
-                *tx_sub_filter, Transaction.type == TYPE_IN, Transaction.category_id == cat_ofe.id if cat_ofe else Transaction.id < 0
+                *tx_sub_filter_op, Transaction.type == TYPE_IN, Transaction.category_id == cat_ofe.id if cat_ofe else Transaction.id < 0
             )) or 0.0)
             
-            # Oferta FINAL (para o KPI): Regra de equivalência (max)
-            oferta_final = max(total_oferta_resumo, total_oferta_tx)
+            oferta_final = max(total_oferta_resumo_op, total_oferta_tx_op)
             
-            # Outras Entradas (Transactions que não são Dizimo, Oferta ou Missões)
+            cat_miss = db.scalar(select(Category).where(func.lower(Category.name).in_(("missões","missoes")), Category.type == TYPE_IN))
+            cat_diz = db.scalar(select(Category).where(func.lower(Category.name).in_(("dízimo","dizimo")), Category.type == TYPE_IN))
+            exclude_cat_ids = [c.id for c in [cat_miss, cat_diz, cat_ofe] if c]
+
             total_outras_entradas = float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
                 Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start, Transaction.date < end,
-                *tx_sub_filter, Transaction.type == TYPE_IN, 
+                *tx_sub_filter_op, Transaction.type == TYPE_IN, 
                 Transaction.category_id.notin_(exclude_cat_ids) if exclude_cat_ids else Transaction.id > 0
             )) or 0.0)
             
-            # Total de Saídas (KPI)
             saidas = _sum_saidas(parent_cong_obj, sub_id, start, end, db) 
-            
-            # Entrada Total do KPI
             entradas = dizimo_final + oferta_final + total_outras_entradas
-            saldo    = entradas - saidas
+            saldo = entradas - saidas
 
-            # --- EXIBIÇÃO DOS KPIS CORRIGIDOS ---
+            # Exibição dos KPIs
             c1,c2,c3 = st.columns(3)
             c1.metric("Entradas (Dízimo/Oferta)", format_currency(entradas))
             c2.metric("Saídas (Despesas)", format_currency(saidas))
             c3.metric("Saldo Final", format_currency(saldo), delta=(saldo))
 
-            # 3) Avisos (mantidos)
+            # 3) Avisos e Banner de Divergência
             _render_missoes_notice()
-            
-            # Chamada das funções originais (agora corrigidas no back-end)
-            total_resumo_for_banner = total_dizimo_resumo
-            total_nominal_for_banner = _sum_dizimo_nominal(parent_cong_obj, sub_id, start, end, db)
-            
-            _render_divergence_banner(total_resumo_for_banner, total_nominal_for_banner)
 
+            # --- Lógica do Banner de Divergência ---
+            sl_conditions = [
+                ServiceLog.congregation_id == parent_cong_obj.id,
+                ServiceLog.date >= start,
+                ServiceLog.date < end,
+            ]
+            tt_conditions = [
+                Tithe.congregation_id == parent_cong_obj.id,
+                Tithe.date >= start,
+                Tithe.date < end,
+            ]
 
-        # 4) ATALHOS RÁPIDOS (Garantindo estética uniforme)
+            if sub_id == "ALL":
+                pass
+            elif sub_id is None:
+                sl_conditions.append(ServiceLog.sub_congregation_id.is_(None))
+                tt_conditions.append(Tithe.sub_congregation_id.is_(None))
+            else: 
+                sl_conditions.append(ServiceLog.sub_congregation_id == sub_id)
+                tt_conditions.append(Tithe.sub_congregation_id == sub_id)
+
+            total_resumo_bruto = float(
+                db.scalar(select(func.coalesce(func.sum(ServiceLog.dizimo), 0.0)).where(*sl_conditions)) or 0.0
+            )
+            total_nominal_bruto = float(
+                db.scalar(select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(*tt_conditions)) or 0.0
+            )
+            _render_divergence_banner(total_resumo_bruto, total_nominal_bruto)
+            # --- Fim da Lógica do Banner ---
+
+        # 4) ATALHOS RÁPIDOS
         st.markdown("#### Ações Rápidas")
         a1, a2, a3 = st.columns(3)
 
-        # Botões de Lançamento (usando use_container_width=True)
-        a1.button("Lançar Ofertas/Culto ➕", 
-                  on_click=lambda: _goto("Lançamentos"), 
-                  use_container_width=True, 
-                  key="btn_atalho_oferta")
-                  
-        a2.button("Lançar Dízimo Rápido 🤲", 
-                  on_click=lambda: _goto("Lançamentos"), 
-                  use_container_width=True, 
-                  key="btn_atalho_dizimo")
-                  
-        a3.button("Lançar Despesa Rápida 💳",
-                  on_click=lambda: _goto("Lançamentos"), 
-                  use_container_width=True, 
-                  key="btn_atalho_despesa")
+        a1.button("Lançar Ofertas/Culto ➕", on_click=lambda: _goto("Lançamentos"), use_container_width=True, key="btn_atalho_oferta")
+        a2.button("Lançar Dízimo Rápido 🤲", on_click=lambda: _goto("Lançamentos"), use_container_width=True, key="btn_atalho_dizimo")
+        a3.button("Lançar Despesa Rápida 💳", on_click=lambda: _goto("Lançamentos"), use_container_width=True, key="btn_atalho_despesa")
         
-        # Botão de Configurações (Se for SEDE, fica em uma linha separada para melhor layout)
         if user.role == "SEDE":
             st.markdown("---")
-            st.button("Configurações", 
-                      on_click=lambda: _goto("Configurações"),
-                      use_container_width=True,
-                      key="btn_atalho_config")
+            st.button("Configurações", on_click=lambda: _goto("Configurações"), use_container_width=True, key="btn_atalho_config")
         
         st.markdown("---")
-
 
         # 5) TABELAS DE RESUMO
         st.markdown("#### Resumo Mensal")
         
-        # df é calculado com os valores arredondados (round(..., 2)) na função _build_resumo_por_unidade
         df = _build_resumo_por_unidade(parent_cong_obj, sub_id, start, end, db)
         
-        # --- TABELA DE RESUMO CORRIGIDA ---
-        st.markdown("##### Resumo de Entradas por Unidade")
+        st.markdown("##### Resumo por Unidade")
+
+        colunas_para_exibir = ["Unidade", "Dízimos", "Ofertas", "Total Entradas", "Saídas", "Saldo"]
         
-        # Aplicação da formatação BRL (format_currency)
-        st.dataframe(df.style.format({
+        if not df.empty and all(col in df.columns for col in colunas_para_exibir):
+            df_display = df[colunas_para_exibir]
+        else:
+            df_display = pd.DataFrame(columns=colunas_para_exibir)
+
+        st.dataframe(df_display.style.format({
             "Dízimos": format_currency, 
             "Ofertas": format_currency,
-            "Total Entradas": format_currency
+            "Total Entradas": format_currency,
+            "Saídas": format_currency,
+            "Saldo": format_currency
         }), use_container_width=True, hide_index=True)
         
-        # --- MOVIMENTO RECENTE (Antiga aba 2) ---
-        st.markdown("---")
-        st.markdown("##### Últimas Ações (Movimento Recente)")
-        df_recent = _ultimos_movimentos(parent_cong_obj, sub_id, start, end, db)
-        st.dataframe(df_recent.style.format({"Valor": format_currency}), use_container_width=True, hide_index=True)
-
-
-        # --- EXPORTAÇÃO (Antiga aba 3) ---
+        # --- EXPORTAÇÃO
         st.markdown("---")
         st.markdown("##### ⬇️ Downloads")
         b1, b2, b3 = st.columns(3)
         
-        # Lógica de download
         b1.caption("Exportar Mês (CSV) [Em Breve]")
         b2.caption("Exportar Mês (Excel) [Em Breve]")
         
-        # Rodapé
         ambiente_status = "Ambiente: DESENVOLVIMENTO" if not os.environ.get("DATABASE_URL") else "Ambiente: Produção"
         
         b3.caption(f"Período: {ref.strftime('%B de %Y')}")
         b3.caption(f"Versão do sistema: 1.0 • {ambiente_status}")
+        
+        
 def display_finance_hierarchy_aggregated(congs_all: list, start: date, end: date, db: Session):
     """
     Gera as duas tabelas (Entrada Total e Saída Total) de toda a rede
@@ -2792,6 +2802,7 @@ def display_finance_hierarchy_aggregated(congs_all: list, start: date, end: date
     
     rows_entrada = []
     for c in congs_all:
+        # Usamos "ALL" para totalizar principal + subs de cada congregação
         totals = _collect_month_data(c.id, start, end, sub_cong_id="ALL")["totals"] 
         rows_entrada.append({
             "Congregação": c.name,
@@ -2804,7 +2815,6 @@ def display_finance_hierarchy_aggregated(congs_all: list, start: date, end: date
         total_geral_entrada = df_entrada["Total_Entrada"].sum()
         df_entrada["Entrada (R$)"] = df_entrada["Total_Entrada"].apply(format_currency)
         
-        # === CORREÇÃO: Ordena o DF completo ANTES de projetar a visualização ===
         df_sorted_entrada = df_entrada.sort_values("Total_Entrada", ascending=False)
         
         st.dataframe(
@@ -2822,6 +2832,7 @@ def display_finance_hierarchy_aggregated(congs_all: list, start: date, end: date
     
     rows_saida = []
     for c in congs_all:
+        # Usamos "ALL" para totalizar principal + subs de cada congregação
         totals = _collect_month_data(c.id, start, end, sub_cong_id="ALL")["totals"] 
         rows_saida.append({
             "Congregação": c.name,
@@ -2834,7 +2845,6 @@ def display_finance_hierarchy_aggregated(congs_all: list, start: date, end: date
         total_geral_saida = df_saida["Total_Saida"].sum()
         df_saida["Saída (R$)"] = df_saida["Total_Saida"].apply(format_currency)
         
-        # === CORREÇÃO: Ordena o DF completo ANTES de projetar a visualização ===
         df_sorted_saida = df_saida.sort_values("Total_Saida", ascending=False)
 
         st.dataframe(
@@ -2845,6 +2855,21 @@ def display_finance_hierarchy_aggregated(congs_all: list, start: date, end: date
         st.metric("Total Geral de Saídas da Rede", format_currency(total_geral_saida))
     else:
         st.info("Nenhuma saída encontrada para o período em toda a rede.")
+
+    # --- 3. BOTÃO DE DOWNLOAD (ADICIONADO AQUI) ---
+    st.divider()
+    st.markdown("##### 🖨️ Download")
+    
+    # O 'ref' é a data de início do mês, que é o 'start' que a função recebe
+    ref = start
+
+    st.download_button(
+        "⬇️ Baixar Relatório Geral Consolidado (PDF)",
+        data=build_consolidated_pdf(congs_all, ref, db), 
+        file_name=f"relatorio_geral_consolidado_{ref.strftime('%Y-%m')}.pdf",
+        mime="application/pdf",
+        key="dl_pdf_geral_consolidado_agregado"
+    )
 
 def page_relatorios_unificados(user: "User"):
     ensure_seed()
@@ -2884,7 +2909,6 @@ def page_relatorios_unificados(user: "User"):
         
         with col_cong:
             if user.role == "SEDE":
-                # === LÓGICA DE ESCOPO SEDE COM VISÃO HIERÁRQUICA ===
                 HIERARCHY_OPTION = "-- RELATÓRIO HIERÁRQUICO (TODAS AS CONGREGAÇÕES) --"
                 cong_names = [c.name for c in congs_all]
                 escopo_opts = [HIERARCHY_OPTION] + cong_names
@@ -2897,7 +2921,6 @@ def page_relatorios_unificados(user: "User"):
                 else:
                     parent_cong_obj = next((c for c in congs_all if c.name == escopo_selecionado), None)
             else:
-                # Perfil não-SEDE: Trava na congregação do usuário (lógica original)
                 parent_cong_obj = db.get(Congregation, user.congregation_id)
                 st.text_input("Congregação (Escopo)", parent_cong_obj.name if parent_cong_obj else "N/A", disabled=True)
                 
@@ -2907,68 +2930,49 @@ def page_relatorios_unificados(user: "User"):
         
         st.divider()
 
-        # =========================================================================
-        # LÓGICA DE EXIBIÇÃO: VISÃO AGREGADA TOTAL (SEDE)
-        # =========================================================================
         if is_aggregated_view:
-            # É ESSENCIAL que 'display_finance_hierarchy_aggregated' esteja definida
             display_finance_hierarchy_aggregated(congs_all, start, end, db)
             return
 
-        # Verifica se há congregação selecionada para continuar com as ABAS
         if not parent_cong_obj:
             st.warning("Selecione uma congregação válida no filtro acima.")
             return
 
-        # --- Variáveis de suporte para as abas (lógica original) ---
         target_cong_id = parent_cong_obj.id
         
         sub_congs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == target_cong_id)).all()
         opcoes_unidade = {"-- Todas (Principal + Subs) --": "ALL", f"{parent_cong_obj.name} (Principal)": None}
         for sub in sub_congs:
              opcoes_unidade[sub.name] = sub.id
-
-        # =========================================================================
-        # OTIMIZAÇÃO MOBILE: ST.RADIO NA ORDEM SOLICITADA
-        # =========================================================================
         
         secao_selecionada = st.radio(
             "Visualizar Seção:",
             options=[
-                "📖 Entradas (Culto/Resumo)",     # 1º
-                "🤲 Dízimos (Nominal)",          # 2º
-                "💳 Saídas (Despesas)",          # 3º
-                "🏆 Painel (Visão Geral)",       # 4º
+                "📖 Entradas (Culto/Resumo)",
+                "🤲 Dízimos (Nominal)",
+                "💳 Saídas (Despesas)",
+                "🏆 Painel (Visão Geral)",
             ],
             key="report_tab_mobile",
-            index=0 # Inicia na primeira opção ("Entradas")
+            index=0
         )
         st.divider()
 
-        # --- Variável para controle de filtros de Sub-Unidade (reutilizado em todas as seções) ---
         target_sub_id_unif = None
         target_sub_name = f"{parent_cong_obj.name} (Principal)"
         
         if sub_congs:
-            # Se a congregação tem sub-unidades, exibe o filtro uma única vez no escopo das abas
             target_sub_name_sel = st.selectbox("Filtrar Unidade:", list(opcoes_unidade.keys()), key="unif_sub_context")
             target_sub_id_unif = opcoes_unidade[target_sub_name_sel]
             if target_sub_id_unif != "ALL":
                 target_sub_name = target_sub_name_sel
 
-        # =========================================================================
-        # 1. SEÇÃO: ENTRADAS (Culto/Resumo) - Antiga TAB 1
-        # =========================================================================
         if secao_selecionada == "📖 Entradas (Culto/Resumo)":
             with st.container():
                 st.subheader("📖 Resumo Diário de Entradas (Cultos)")
-                
                 if target_cong_id:
                     st.info(f"Exibindo resumos de culto para: **{target_sub_name}**")
-                    
-                    # Usa target_sub_id_unif (ALL, None ou ID)
                     report_df = _load_service_logs(target_cong_id, start, end, sub_cong_id=target_sub_id_unif)
-                    
                     if not report_df.empty:
                         st.dataframe(
                             report_df.style.format({"Data do Culto": "{:%d/%m/%Y}", "Dízimo": format_currency, "Oferta": format_currency, "Total": format_currency}),
@@ -2977,25 +2981,17 @@ def page_relatorios_unificados(user: "User"):
                         st.metric("Total Geral de Entradas no Culto", format_currency(report_df["Total"].sum()))
                     else:
                         st.caption("Nenhum resumo de culto encontrado para este período.")
-
-
-        # =========================================================================
-        # 2. SEÇÃO: DÍZIMOS (Nominal) - Antiga TAB 2
-        # =========================================================================
         elif secao_selecionada == "🤲 Dízimos (Nominal)":
             with st.container():
                 st.subheader("🤲 Dízimos Nominais (Por Pessoa)")
-                
                 if target_cong_id:
                     st.info(f"Exibindo dízimos nominais para: **{target_sub_name}**")
-                    
                     tithes_q = select(Tithe).where(
                         Tithe.congregation_id == target_cong_id,
                         Tithe.date >= start, Tithe.date < end,
-                        Tithe.sub_congregation_id == target_sub_id_unif # Usa o filtro de unidade/None/ALL
+                        Tithe.sub_congregation_id == target_sub_id_unif
                     )
                     tithes = db.scalars(tithes_q.order_by(Tithe.tither_name)).all()
-                    
                     if tithes:
                         rows = [{"Data": t.date, "Dizimista": t.tither_name, "Valor": float(t.amount), "Forma": t.payment_method or "—"} for t in tithes]
                         df = pd.DataFrame(rows)
@@ -3003,18 +2999,11 @@ def page_relatorios_unificados(user: "User"):
                         st.metric("Total Dízimos Nominais", format_currency(df["Valor"].sum()))
                     else:
                         st.caption("Nenhum dízimo nominal encontrado.")
-        
-        
-        # =========================================================================
-        # 3. SEÇÃO: SAÍDAS (Despesas) - Antiga TAB 3
-        # =========================================================================
         elif secao_selecionada == "💳 Saídas (Despesas)":
             with st.container():
                 st.subheader("💳 Saídas (Transações de Despesas)")
-                
                 if target_cong_id:
                     st.info(f"Exibindo saídas para: **{target_sub_name}**")
-                    
                     txs_out_query = select(Transaction).options(joinedload(Transaction.category)).where(
                         Transaction.congregation_id == target_cong_id, 
                         Transaction.date >= start, Transaction.date < end, 
@@ -3022,7 +3011,6 @@ def page_relatorios_unificados(user: "User"):
                         Transaction.sub_congregation_id == target_sub_id_unif
                     )
                     txs_out = db.scalars(txs_out_query.order_by(Transaction.date)).all()
-                    
                     if txs_out:
                         rows_out = [{"Data": t.date, "Categoria": t.category.name if t.category else "", "Valor": t.amount, "Descrição": t.description or ""} for t in txs_out]
                         df_saidas = pd.DataFrame(rows_out)
@@ -3030,77 +3018,43 @@ def page_relatorios_unificados(user: "User"):
                         st.metric("Total de Saídas no Período", format_currency(df_saidas["Valor"].sum()))
                     else:
                         st.caption("Nenhuma saída registrada neste período.")
-
-
-        # =========================================================================
-        # 4. SEÇÃO: PAINEL (Visão Geral) - Antiga TAB 4
-        # =========================================================================
         elif secao_selecionada == "🏆 Painel (Visão Geral)":
             with st.container():
-                # Envolve o conteúdo em um container com a classe CSS de destaque
                 st.markdown('<div class="panel-destaque-fundo">', unsafe_allow_html=True)
-                
                 st.subheader("🏆 Painel de Indicadores e Saldo")
-                
                 if not parent_cong_obj:
                     st.warning("Selecione uma congregação válida no filtro acima.")
                 else:
-                    
-                    # --- Cálculo dos KPIS (Lógica de Missões já corrigida nas funções auxiliares) ---
-                    sub_id = None # KPI é sempre para a Congregação Principal (target_cong_id)
-                    
-                    # Configuração dos Filtros de Exclusão (Para Outras Entradas)
+                    sub_id = None
                     cat_miss = db.scalar(select(Category).where(func.lower(Category.name).in_(("missões","missoes")), Category.type == TYPE_IN))
                     cat_diz = db.scalar(select(Category).where(func.lower(Category.name).in_(("dízimo","dizimo")), Category.type == TYPE_IN))
                     cat_ofe = db.scalar(select(Category).where(func.lower(Category.name) == "oferta", Category.type == TYPE_IN))
                     exclude_cat_ids = [c.id for c in [cat_miss, cat_diz, cat_ofe] if c]
-
-                    # Dízimo Final (Usando as funções auxiliares corrigidas)
                     total_dizimo_resumo = _sum_dizimo_resumo(parent_cong_obj, sub_id, start, end, db)
                     total_dizimo_nominal = _sum_dizimo_nominal(parent_cong_obj, sub_id, start, end, db)
                     dizimo_final = max(total_dizimo_resumo, total_dizimo_nominal)
-
-                    # Oferta Final (Usando as funções auxiliares corrigidas)
                     total_oferta_resumo = _sum_oferta_resumo(parent_cong_obj, sub_id, start, end, db)
                     total_oferta_tx = float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
                         Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start, Transaction.date < end,
                         Transaction.type == TYPE_IN, Transaction.category_id == cat_ofe.id if cat_ofe else Transaction.id < 0
                     )) or 0.0)
                     oferta_final = max(total_oferta_resumo, total_oferta_tx)
-                    
-                    # Outras Entradas
                     total_outras_entradas = float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
                         Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start, Transaction.date < end,
                         Transaction.type == TYPE_IN, 
                         Transaction.category_id.notin_(exclude_cat_ids) if exclude_cat_ids else Transaction.id > 0
                     )) or 0.0)
-                    
-                    # Saídas
                     saidas = _sum_saidas(parent_cong_obj, sub_id, start, end, db)
-                    
-                    # Totais
                     entradas = dizimo_final + oferta_final + total_outras_entradas
                     saldo = entradas - saidas
-
-                    # EXIBIÇÃO DOS KPIS
                     c1,c2,c3 = st.columns(3)
                     c1.metric("Entradas (Dízimo/Oferta)", format_currency(entradas))
                     c2.metric("Saídas (Despesas)", format_currency(saidas))
                     c3.metric("Saldo Final", format_currency(saldo), delta=(saldo))
-
                     st.divider()
-
                     st.markdown("##### 🖨️ Download de Relatórios")
                     
-                    # Download (Consolidado + Individual)
-                    if user.role == "SEDE":
-                        st.download_button(
-                            "⬇️ Baixar Relatório Geral Consolidado (PDF)",
-                            data=build_consolidated_pdf(congs_all, ref, db), 
-                            file_name=f"relatorio_geral_consolidado_{ref.strftime('%Y-%m')}.pdf",
-                            mime="application/pdf",
-                            key="dl_pdf_geral_consolidado"
-                        )
+                    # BOTÃO REMOVIDO DESTA SEÇÃO
                     
                     st.markdown("---")
                     st.markdown("##### Relatórios Individuais por Congregação")
@@ -3113,26 +3067,20 @@ def page_relatorios_unificados(user: "User"):
                         congs_download_names,
                         key="sel_cong_pdf_download"
                     )
-                    
                     selected_cong_obj = next((c for c in congs_download_list if c.name == sel_cong_pdf_name), None)
-
                     if selected_cong_obj:
-                        # Funções de construção de PDF (assumidas no escopo)
                         pdf_data_unit = build_single_unit_report_pdf(
                             selected_cong_obj.id, None, selected_cong_obj.name, ref, db
                         )
-                        
-                        def _norm(name):
+                        def _norm_filename(name):
                             return name.lower().replace(" ", "_").replace("ã", "a").replace("ç", "c")
-                            
                         st.download_button(
                             f"⬇️ Baixar PDF de {selected_cong_obj.name}",
                             data=pdf_data_unit,
-                            file_name=f"prestacao_{_norm(selected_cong_obj.name)}_{ref.strftime('%Y-%m')}.pdf",
+                            file_name=f"prestacao_{_norm_filename(selected_cong_obj.name)}_{ref.strftime('%Y-%m')}.pdf",
                             mime="application/pdf",
                             key=f"dl_pdf_unit_{selected_cong_obj.id}"
                         )
-                
                 st.markdown('</div>', unsafe_allow_html=True) # Fechamento do div de destaque # Fechamento do div de destaque
 
 
@@ -3163,10 +3111,10 @@ def _sum_saidas(parent, sub_id, start, end, db):
         
     return float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(*cond)) or 0.0)
 
-def _sum_dizimo_resumo(parent, sub_id, start, end, db):
+def _sum_dizimo_resumo(parent, sub_id, start, end, db, exclude_missions: bool = True):
     """
-    Soma o total de dízimos declarados no resumo de culto (ServiceLog),
-    excluindo o tipo 'Culto de Missões' (caixa segregado).
+    Soma o total de dízimos declarados no resumo de culto (ServiceLog).
+    Pode opcionalmente excluir o tipo 'Culto de Missões'.
     """
     cond = [ServiceLog.date >= start, ServiceLog.date < end]
     if parent: cond.append(ServiceLog.congregation_id == parent.id)
@@ -3174,14 +3122,16 @@ def _sum_dizimo_resumo(parent, sub_id, start, end, db):
     elif sub_id is None: cond.append(ServiceLog.sub_congregation_id.is_(None))
     else: cond.append(ServiceLog.sub_congregation_id == sub_id)
     
-    # FILTRO CRÍTICO: Excluir logs de 'Culto de Missões'
-    cond.append(ServiceLog.service_type != "Culto de Missões") 
+    # Filtra missões apenas se solicitado
+    if exclude_missions:
+        cond.append(ServiceLog.service_type != "Culto de Missões") 
     
     return float(db.scalar(select(func.coalesce(func.sum(ServiceLog.dizimo), 0.0)).where(*cond)) or 0.0)
 
-def _sum_dizimo_nominal(parent, sub_id, start, end, db):
+def _sum_dizimo_nominal(parent, sub_id, start, end, db, exclude_missions: bool = True):
     """
-    Soma os dízimos nominais (Tithe), excluindo registros de Missões.
+    Soma os dízimos nominais (Tithe).
+    Pode opcionalmente excluir dízimos lançados para Missões.
     """
     cond = [Tithe.date >= start, Tithe.date < end]
     if parent: cond.append(Tithe.congregation_id == parent.id)
@@ -3189,8 +3139,9 @@ def _sum_dizimo_nominal(parent, sub_id, start, end, db):
     elif sub_id is None: cond.append(Tithe.sub_congregation_id.is_(None))
     else: cond.append(Tithe.sub_congregation_id == sub_id)
         
-    # FILTRO CRÍTICO: Excluir dízimos lançados para Missões ou com nome de Missão
-    cond.append(func.lower(Tithe.tither_name).notin_(["missoes", "missões", "oferta de missoes", "oferta de missões"]))
+    # Filtra missões apenas se solicitado
+    if exclude_missions:
+        cond.append(func.lower(Tithe.tither_name).notin_(["missoes", "missões", "oferta de missoes", "oferta de missões"]))
     
     return float(db.scalar(select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(*cond)) or 0.0)
 
@@ -3648,7 +3599,10 @@ def _editor_lancamentos(
     else:
         rows = [{"ID": None, "Data": today_bahia(), "Categoria": (cat_names[0] if cat_names else ""), "Valor": 0.0, "Descrição": "", "_cong_id": int(force_cong_id or 0)}]
 
+    # Converte o valor para string formatada em BRL para exibição/edição
     df_full = pd.DataFrame(rows)
+    df_full["Valor"] = df_full["Valor"].apply(lambda x: f'{x:.2f}'.replace('.', ','))
+    
     df_view = df_full.drop(columns=["_cong_id"])
 
     st.markdown(f"**{titulo}**")
@@ -3658,7 +3612,8 @@ def _editor_lancamentos(
             "ID": st.column_config.Column("ID", disabled=True),
             "Data": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
             "Categoria": st.column_config.SelectboxColumn("Categoria", options=cat_names, required=True),
-            "Valor": st.column_config.NumberColumn("Valor (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
+            # --- ALTERAÇÃO AQUI ---
+            "Valor": st.column_config.TextColumn("Valor (R$)", help="Use vírgula para centavos (ex: 150,50)"),
             "Descrição": st.column_config.TextColumn("Descrição", max_chars=200),
         },
         key=f"tx_editor_{titulo.replace(' ', '_')}_{force_cong_id}_{force_sub_cong_id}",
@@ -3691,7 +3646,10 @@ def _editor_dizimos(tithes: List["Tithe"], titulo: str, force_cong_id: Optional[
     else:
         rows = [{"ID": None, "Data": today_bahia(), "Dizimista": "", "Valor": 0.0, "Forma de Pagamento": "", "_cong_id": int(force_cong_id or 0)}]
 
+    # Converte o valor para string formatada em BRL para exibição/edição
     df_full = pd.DataFrame(rows)
+    df_full["Valor"] = df_full["Valor"].apply(lambda x: f'{x:.2f}'.replace('.', ','))
+    
     df_view = df_full.drop(columns=["_cong_id"])
 
     st.markdown(f"**{titulo}**")
@@ -3701,7 +3659,8 @@ def _editor_dizimos(tithes: List["Tithe"], titulo: str, force_cong_id: Optional[
             "ID": st.column_config.Column("ID", disabled=True),
             "Data": st.column_config.DateColumn("Data", required=True, format="DD/MM/YYYY"),
             "Dizimista": st.column_config.TextColumn("Dizimista", max_chars=120, required=True),
-            "Valor": st.column_config.NumberColumn("Valor (R$)", min_value=0.0, step=1.0, format="R$ %.2f"),
+            # --- ALTERAÇÃO AQUI ---
+            "Valor": st.column_config.TextColumn("Valor (R$)", help="Use vírgula para centavos (ex: 150,50)"),
             "Forma de Pagamento": st.column_config.SelectboxColumn("Forma de Pagamento", options=["Dinheiro", "PIX", "Cartão", "Transferência", ""], required=False),
         },
         key=f"tithe_editor_{titulo.replace(' ', '_')}_{force_cong_id}_{force_sub_cong_id}",
@@ -4196,7 +4155,7 @@ def get_dashboard_summary(cong_id: int, start: date, end: date):
 
 @st.cache_data
 # 1. O parâmetro 'db' foi REMOVIDO daqui
-def _collect_month_data(cong_id: int, start: date, end: date, sub_cong_id: Optional[int] = None):
+def _collect_month_data(cong_id: int, start: date, end: date, sub_cong_id: Optional[str | int] = None):
     # 2. Adicionamos esta linha para criar a conexão DENTRO da função
     with SessionLocal() as db:
         # 3. Todo o código original foi recuado para ficar dentro do 'with'
@@ -4221,13 +4180,20 @@ def _collect_month_data(cong_id: int, start: date, end: date, sub_cong_id: Optio
             ServiceLog.date >= start, ServiceLog.date < end,
             ServiceLog.congregation_id == cong_id
         )
-
-        if sub_cong_id is not None:
+        
+        # --- LÓGICA CORRIGIDA AQUI ---
+        if sub_cong_id == "ALL":
+            # Se for "ALL", não adicionamos nenhum filtro para sub_congregation_id.
+            # Isso inclui tanto a principal (NULL) quanto todas as subs.
+            pass
+        elif sub_cong_id is not None:
+            # Se for um ID de inteiro, filtramos por ele.
             tx_in_query = tx_in_query.where(Transaction.sub_congregation_id == sub_cong_id)
             tithes_query = tithes_query.where(Tithe.sub_congregation_id == sub_cong_id)
             tx_out_query = tx_out_query.where(Transaction.sub_congregation_id == sub_cong_id)
             sl_query = sl_query.where(ServiceLog.sub_congregation_id == sub_cong_id)
-        else:
+        else: # sub_cong_id is None
+            # Se for None, filtramos apenas a congregação principal (onde o ID da sub é nulo).
             tx_in_query = tx_in_query.where(Transaction.sub_congregation_id.is_(None))
             tithes_query = tithes_query.where(Tithe.sub_congregation_id.is_(None))
             tx_out_query = tx_out_query.where(Transaction.sub_congregation_id.is_(None))
@@ -4634,18 +4600,23 @@ def page_lancamentos(user: "User"):
 
                 # Segunda linha: Dízimo e Oferta
                 c1, c2 = st.columns(2)
-                ent_dizimo = c1.number_input(
-                    "Total Dízimo (Culto)", min_value=0.0, value=0.0, format="%.2f",
-                    key="rap_ent_diz"
-                )
-                ent_oferta = c2.number_input(
-                    "Total Oferta (Culto)", min_value=0.0, value=0.0, format="%.2f",
-                    key="rap_ent_ofe"
-                )
+                with c1:
+                    ent_dizimo_str = st.text_input(
+                        "Total Dízimo (Culto)", value="0,00", key="rap_ent_diz_str"
+                    )
+                with c2:
+                    ent_oferta_str = st.text_input(
+                        "Total Oferta (Culto)", value="0,00", key="rap_ent_ofe_str"
+                    )
 
                 # Botão Salvar (AZUL)
                 if _submit_btn("Salvar Ofertas e Resumo do Culto",
                                key_suffix="salvar_ofe_rapida", theme="entrada"):
+                    
+                    # Converte os valores de string para float, aceitando vírgula
+                    ent_dizimo = _to_float_brl(ent_dizimo_str)
+                    ent_oferta = _to_float_brl(ent_oferta_str)
+
                     if ent_dizimo <= 0 and ent_oferta <= 0:
                         st.session_state.status_message = ("warning", "Nenhum valor foi inserido.")
                     else:
@@ -6215,11 +6186,26 @@ def page_relatorio_missoes(user: "User"):
             st.subheader("Análise de Contribuições de Missões")
             
             c1, c2 = st.columns(2)
+            today = today_bahia() # Pega a data atual
             with c1:
-                ano_pesq = st.number_input("Ano da Pesquisa", value=today_bahia().year, step=1, format="%d", key="missions_search_year")
+                ano_pesq = st.number_input(
+                    "Ano da Pesquisa", 
+                    value=today.year, # Padrão: ano atual
+                    step=1, 
+                    format="%d", 
+                    key="missions_search_year"
+                )
             with c2:
                 mes_opt = ["Todos"] + MONTHS
-                mes_sel = st.selectbox("Mês da Pesquisa", mes_opt, index=0, key="missions_search_month")
+                # O índice no selectbox corresponde ao número do mês, pois "Todos" está na posição 0.
+                default_month_index = today.month
+
+                mes_sel = st.selectbox(
+                    "Mês da Pesquisa", 
+                    mes_opt, 
+                    index=default_month_index, # <-- CORREÇÃO APLICADA AQUI
+                    key="missions_search_month"
+                )
 
             # --- CORREÇÃO DE ORDEM ---
             # PRIMEIRO, a linha que cria a variável df_search
@@ -7004,7 +6990,7 @@ def page_relatorio_entrada(user: "User"):
                     margin: 6px 0 10px 0;
                     font-size:0.95rem;">
                   <strong>Atenção:</strong> As ofertas do <strong>Culto de Missões</strong> são lançadas
-                  automaticamente no menu <strong>Relatório de Missões</strong> ao lado.
+                  automaticamente no menu <strong>Gestão Missões</strong> ao lado.
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -7014,18 +7000,47 @@ def page_relatorio_entrada(user: "User"):
 
         # Banner de divergência (Resumo x Nominal) — respeita período e unidade
         def _render_divergence_banner(total_resumo: float, total_nominal: float):
-            if round(total_resumo, 2) == round(total_nominal, 2):
-                return
+            """Banner de divergência de dízimos (resumo vs nominal) com cores dinâmicas."""
             diff = total_nominal - total_resumo
+            
+            # Se a diferença for insignificante (menor que 1 centavo), não mostra o banner.
+            if abs(diff) < 0.01:
+                return
+
+            # Define a cor e o título do aviso com base na diferença
+            if diff < 0:
+                # Faltam lançamentos nominais ou o resumo está maior
+                cor_fundo = "#fdecec"  # Vermelho claro
+                cor_borda = "#f5a6a6"  # Vermelho
+                cor_texto = "#7f1d1d"  # Vinho
+                titulo = "Atenção: Dízimo Nominal Menor que o Resumo do Culto"
+            else:
+                # Lançamentos nominais excedem o valor do resumo
+                cor_fundo = "#fff7ed"  # Laranja claro
+                cor_borda = "#fdba74"  # Laranja
+                cor_texto = "#7c2d12"  # Marrom/Laranja escuro
+                titulo = "Aviso: Dízimo Nominal Maior que o Resumo do Culto"
+
+            # Formata os valores como moeda brasileira
+            f_resumo = format_currency(total_resumo)
+            f_nominal = format_currency(total_nominal)
+            f_diff = format_currency(diff)
+
             st.markdown(
                 f"""
                 <div style="
-                    background:#fdecec; border:1px solid #f3b4b6; color:#7a1c1c;
-                    border-radius:12px; padding:10px 14px; font-weight:600; margin-bottom:8px;">
-                  <strong>Divergência de Dízimos no período</strong>
-                  — Declarado no resumo: <span style="font-weight:800;">{format_currency(total_resumo)}</span>
-                  • Nominal (dizimistas): <span style="font-weight:800;">{format_currency(total_nominal)}</span>
-                  • Diferença: <span style="font-weight:800;">{format_currency(diff)}</span>
+                    margin: 8px 0 16px 0;
+                    padding: 10px 14px;
+                    border-radius: 10px;
+                    background: {cor_fundo};
+                    border: 1px solid {cor_borda};
+                    color: {cor_texto};">
+                    <strong style="display: block; margin-bottom: 5px;">{titulo}</strong>
+                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.95rem;">
+                        <span>Resumo do Culto: <strong>{f_resumo}</strong></span>
+                        <span>Nominal (Dizimistas): <strong>{f_nominal}</strong></span>
+                        <span>Diferença: <strong style="font-size: 1.05rem;">{f_diff}</strong></span>
+                    </div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -7167,99 +7182,78 @@ def _render_divergence_banner(total_resumo: float, total_nominal: float):
     )
 def _build_resumo_por_unidade(parent: Optional[Congregation], sub_id: Optional[Union[int, str]], start: date, end: date, db: Session) -> pd.DataFrame:
     """
-    Monta um DataFrame com resumo de entradas (Dízimo, Oferta, Total) por unidade.
-    
-    CORREÇÃO GARANTIDA: Arredonda todos os valores para duas casas decimais (round(..., 2))
-    e usa o st.cache_data para garantir a performance após a primeira execução.
+    Monta um DataFrame com resumo completo (Dízimos, Ofertas, Outras Entradas, Saídas, Saldo) por unidade,
+    usando a mesma lógica dos KPIs.
     """
     import pandas as pd
-    from sqlalchemy import select, func, and_
-
-    # NOTA: O decorador @st.cache_data DEVE estar acima desta função no seu código!
 
     rows = []
-
-    def _sum_for(congregation_id, sub_congregation_id):
-        cond = [
-            ServiceLog.congregation_id == congregation_id,
-            ServiceLog.date >= start,
-            ServiceLog.date < end,
-            # CONDIÇÃO CRÍTICA: EXCLUI LOGS DE MISSÕES DO FLUXO OPERACIONAL
-            ServiceLog.service_type != "Culto de Missões",
-        ]
-        
-        # Lógica de filtro para sub-congregação
-        if sub_congregation_id == "ALL":
-            pass # Sem filtro de sub_congregation_id
-        elif sub_congregation_id is None:
-            cond.append(ServiceLog.sub_congregation_id.is_(None))
-        elif isinstance(sub_congregation_id, int):
-            cond.append(ServiceLog.sub_congregation_id == sub_congregation_id)
-
-        diz = float(db.scalar(select(func.coalesce(func.sum(ServiceLog.dizimo), 0.0)).where(and_(*cond))) or 0.0)
-        ofe = float(db.scalar(select(func.coalesce(func.sum(ServiceLog.oferta), 0.0)).where(and_(*cond))) or 0.0)
-        return diz, ofe, diz + ofe
-
-    # Caso 1: Toda a Rede (parent = None) -> lista por congregação (sem detalhar sub)
-    if parent is None:
-        congs = db.scalars(select(Congregation).order_by(Congregation.name)).all()
-        for c in congs:
-            diz, ofe, tot = _sum_for(c.id, "ALL") 
-            rows.append({
-                "Unidade": c.name,
-                "Dízimos": round(diz, 2),
-                "Ofertas": round(ofe, 2),
-                "Total Entradas": round(tot, 2),
-            })
-        df = pd.DataFrame(rows)
-        if not df.empty:
-            df = df.sort_values("Total Entradas", ascending=False).reset_index(drop=True)
-        return df
-
-    # Caso 2: Há congregação selecionada (parent != None)
-    if sub_id == "ALL":
-        # Principal
-        diz, ofe, tot = _sum_for(parent.id, None)
-        rows.append({
-            "Unidade": f"{parent.name} (Principal)",
-            "Dízimos": round(diz, 2),
-            "Ofertas": round(ofe, 2),
-            "Total Entradas": round(tot, 2),
-        })
-        # Cada Sub
+    
+    units_to_process = []
+    # Define quais unidades serão processadas
+    if parent is None: # "Todas as congregações"
+        units_to_process = [(c, "ALL", c.name) for c in db.scalars(select(Congregation).order_by(Congregation.name)).all()]
+    elif sub_id == "ALL": # Congregação específica, todas as unidades
+        units_to_process.append((parent, None, f"{parent.name} (Principal)"))
         subs = db.scalars(select(SubCongregation).where(SubCongregation.congregation_id == parent.id).order_by(SubCongregation.name)).all()
         for s in subs:
-            diz, ofe, tot = _sum_for(parent.id, s.id)
-            rows.append({
-                "Unidade": f"↳ {s.name}",
-                "Dízimos": round(diz, 2),
-                "Ofertas": round(ofe, 2),
-                "Total Entradas": round(tot, 2),
-            })
-    elif sub_id is None:
-        # Somente Principal
-        diz, ofe, tot = _sum_for(parent.id, None)
+            units_to_process.append((parent, s.id, f"↳ {s.name}"))
+    else: # Apenas uma unidade (principal ou sub)
+        unit_name = f"{parent.name} (Principal)"
+        if isinstance(sub_id, int):
+            sub_obj = db.get(SubCongregation, sub_id)
+            if sub_obj:
+                unit_name = sub_obj.name
+        units_to_process.append((parent, sub_id, unit_name))
+
+    # Itera sobre as unidades e calcula os totais para cada uma
+    for p_cong, s_id, unit_name in units_to_process:
+        # Lógica de cálculo idêntica à dos KPIs
+        diz_resumo = _sum_dizimo_resumo(p_cong, s_id, start, end, db)
+        diz_nominal = _sum_dizimo_nominal(p_cong, s_id, start, end, db)
+        dizimo_final = max(diz_resumo, diz_nominal)
+
+        oferta_resumo = _sum_oferta_resumo(p_cong, s_id, start, end, db)
+        
+        cat_ofe = db.scalar(select(Category).where(func.lower(Category.name) == "oferta", Category.type == TYPE_IN))
+        
+        tx_sub_filter = []
+        if s_id == "ALL": pass
+        elif s_id is None: tx_sub_filter = [Transaction.sub_congregation_id.is_(None)]
+        else: tx_sub_filter = [Transaction.sub_congregation_id == s_id]
+
+        oferta_tx = float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+            Transaction.congregation_id == p_cong.id, Transaction.date >= start, Transaction.date < end,
+            *tx_sub_filter, Transaction.type == TYPE_IN, Transaction.category_id == cat_ofe.id if cat_ofe else Transaction.id < 0
+        )) or 0.0)
+        oferta_final = max(oferta_resumo, oferta_tx)
+
+        cat_miss = db.scalar(select(Category).where(func.lower(Category.name).in_(("missões","missoes")), Category.type == TYPE_IN))
+        cat_diz = db.scalar(select(Category).where(func.lower(Category.name).in_(("dízimo","dizimo")), Category.type == TYPE_IN))
+        exclude_cat_ids = [c.id for c in [cat_miss, cat_diz, cat_ofe] if c]
+
+        outras_entradas = float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+            Transaction.congregation_id == p_cong.id, Transaction.date >= start, Transaction.date < end,
+            *tx_sub_filter, Transaction.type == TYPE_IN, 
+            Transaction.category_id.notin_(exclude_cat_ids) if exclude_cat_ids else Transaction.id > 0
+        )) or 0.0)
+        
+        saidas = _sum_saidas(p_cong, s_id, start, end, db)
+        
+        total_entradas = dizimo_final + oferta_final + outras_entradas
+        saldo = total_entradas - saidas
+
         rows.append({
-            "Unidade": f"{parent.name} (Principal)",
-            "Dízimos": round(diz, 2),
-            "Ofertas": round(ofe, 2),
-            "Total Entradas": round(tot, 2),
-        })
-    elif isinstance(sub_id, int):
-        # Sub específica
-        sub = db.get(SubCongregation, sub_id)
-        name = sub.name if sub else "Sub Desconhecida"
-        diz, ofe, tot = _sum_for(parent.id, sub_id)
-        rows.append({
-            "Unidade": f"{name}",
-            "Dízimos": round(diz, 2),
-            "Ofertas": round(ofe, 2),
-            "Total Entradas": round(tot, 2),
+            "Unidade": unit_name,
+            "Dízimos": round(dizimo_final, 2),
+            "Ofertas": round(oferta_final, 2),
+            "Outras Entradas": round(outras_entradas, 2),
+            "Total Entradas": round(total_entradas, 2),
+            "Saídas": round(saidas, 2),
+            "Saldo": round(saldo, 2),
         })
 
     df = pd.DataFrame(rows)
-    if not df.empty:
-        df = df.sort_values(["Unidade"]).reset_index(drop=True)
     return df   
 
 
