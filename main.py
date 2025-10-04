@@ -320,7 +320,7 @@ ADRF_LOGIN_CSS = """
 html, body { background: var(--adrf-bg) !important; }
 .block-container { padding-top: 1.25rem; }
 
-/* ---------- LOGO IADRF! ---------- */
+/* ---------- LOGO IEADRF! ---------- */
 .adrf-logo{
   width:100%;
   display:flex; justify-content:center; align-items:flex-end; gap:.1rem;
@@ -465,7 +465,7 @@ input::placeholder { font-size: 0.98rem !important; }      /* aumenta o placehol
   font-size: 0.98rem !important;                            /* aumenta o texto dentro das tabelas */
 }
 
-/* ===== Logo do login (IADRF!) ===== */
+/* ===== Logo do login (IEADRF!) ===== */
 .adrf-logo {                                               /* título grande do login */
   font-size: clamp(38px, 7vw, 64px) !important;            /* aumenta os limites mínimo/máximo do logo */
 }
@@ -1884,7 +1884,7 @@ def login_ui():
         st.markdown(ADRF_LOGIN_CSS, unsafe_allow_html=True)
     except NameError:
         pass
-    st.markdown('<div class="adrf-logo">IADRF<span class="bang">!</span></div>', unsafe_allow_html=True)
+    st.markdown('<div class="adrf-logo">IEADRF<span class="bang">!</span></div>', unsafe_allow_html=True)
     st.markdown('<div class="adrf-logo-sep"></div>', unsafe_allow_html=True)
 
     # Evita colisão de chaves com outros inputs da página
@@ -2786,90 +2786,146 @@ def page_inicio(user: "User"):
         b3.caption(f"Versão do sistema: 1.0 • {ambiente_status}")
         
         
-def display_finance_hierarchy_aggregated(congs_all: list, start: date, end: date, db: Session):
+def display_finance_hierarchy_aggregated(user: User, congs_all: list, start: date, end: date, db: Session):
     """
-    Gera as duas tabelas (Entrada Total e Saída Total) de toda a rede
-    agregadas por Congregação (Visão Nível 1 Agregada).
+    Gera uma tabela única de resumo para todas as congregações e adiciona a pesquisa de dizimistas.
     """
-    import pandas as pd
-    from sqlalchemy import select, func
-    
-    st.markdown("## Visão Agregada Total da Rede")
+    # 1. TÍTULO DA PÁGINA
+    st.markdown("## Visão Geral todas as congregações")
     st.caption(f"Dados agregados de todas as congregações no período: {start.strftime('%d/%m/%Y')} a {end.strftime('%d/%m/%Y')}.")
 
-    # --- 1. TABELA DE ENTRADAS (Entrada Total) ---
-    st.markdown("### 📈 Entradas (Total por Congregação)")
-    
-    rows_entrada = []
-    for c in congs_all:
-        # Usamos "ALL" para totalizar principal + subs de cada congregação
-        totals = _collect_month_data(c.id, start, end, sub_cong_id="ALL")["totals"] 
-        rows_entrada.append({
-            "Congregação": c.name,
-            "Total_Entrada": totals["entradas_total_sem_missoes"]
-        })
-    
-    df_entrada = pd.DataFrame(rows_entrada)
-    
-    if not df_entrada.empty:
-        total_geral_entrada = df_entrada["Total_Entrada"].sum()
-        df_entrada["Entrada (R$)"] = df_entrada["Total_Entrada"].apply(format_currency)
-        
-        df_sorted_entrada = df_entrada.sort_values("Total_Entrada", ascending=False)
-        
-        st.dataframe(
-            df_sorted_entrada[["Congregação", "Entrada (R$)"]],
-            use_container_width=True,
-            hide_index=True
-        )
-        st.metric("Total Geral de Entradas da Rede", format_currency(total_geral_entrada))
+    # 2. GERA A TABELA UNIFICADA
+    df_summary = _build_resumo_por_unidade(None, "ALL", start, end, db)
+
+    # 3. EXIBE A TABELA ÚNICA
+    st.markdown("### Resumo por Congregação")
+    if not df_summary.empty:
+        colunas_para_exibir = ["Unidade", "Dízimos", "Ofertas", "Total Entradas", "Saídas", "Saldo"]
+        st.dataframe(df_summary[colunas_para_exibir].style.format({
+            "Dízimos": format_currency, "Ofertas": format_currency,
+            "Total Entradas": format_currency, "Saídas": format_currency,
+            "Saldo": format_currency
+        }), use_container_width=True, hide_index=True)
     else:
-        st.info("Nenhuma entrada encontrada para o período em toda a rede.")
+        st.info("Nenhum dado encontrado para o período.")
 
-
-    # --- 2. TABELA DE SAÍDAS (Saída Total) ---
-    st.markdown("### 📉 Saídas (Total por Congregação)")
-    
-    rows_saida = []
-    for c in congs_all:
-        # Usamos "ALL" para totalizar principal + subs de cada congregação
-        totals = _collect_month_data(c.id, start, end, sub_cong_id="ALL")["totals"] 
-        rows_saida.append({
-            "Congregação": c.name,
-            "Total_Saida": totals["saidas_total"]
-        })
-        
-    df_saida = pd.DataFrame(rows_saida)
-    
-    if not df_saida.empty:
-        total_geral_saida = df_saida["Total_Saida"].sum()
-        df_saida["Saída (R$)"] = df_saida["Total_Saida"].apply(format_currency)
-        
-        df_sorted_saida = df_saida.sort_values("Total_Saida", ascending=False)
-
-        st.dataframe(
-            df_sorted_saida[["Congregação", "Saída (R$)"]],
-            use_container_width=True,
-            hide_index=True
-        )
-        st.metric("Total Geral de Saídas da Rede", format_currency(total_geral_saida))
-    else:
-        st.info("Nenhuma saída encontrada para o período em toda a rede.")
-
-    # --- 3. BOTÃO DE DOWNLOAD (ADICIONADO AQUI) ---
+    # 4. EXIBE OS TOTAIS GERAIS
     st.divider()
-    st.markdown("##### 🖨️ Download")
-    
-    # O 'ref' é a data de início do mês, que é o 'start' que a função recebe
-    ref = start
+    st.markdown("#### Totais Gerais da Rede")
+    if not df_summary.empty:
+        total_geral_entrada = df_summary["Total Entradas"].sum()
+        total_geral_saida = df_summary["Saídas"].sum()
+        saldo_geral = df_summary["Saldo"].sum()
+    else:
+        total_geral_entrada = total_geral_saida = saldo_geral = 0.0
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Geral de Entradas", format_currency(total_geral_entrada))
+    c2.metric("Total Geral de Saídas", format_currency(total_geral_saida))
+    c3.metric("Saldo Geral", format_currency(saldo_geral))
 
+    # 5. MANTÉM O BOTÃO DE DOWNLOAD
+    st.divider()
+    st.markdown("##### 🖨️ Download Relatório Consolidado")
+    ref = start
     st.download_button(
         "⬇️ Baixar Relatório Geral Consolidado (PDF)",
-        data=build_consolidated_pdf(congs_all, ref, db), 
+        data=build_consolidated_pdf(congs_all, ref, db),
         file_name=f"relatorio_geral_consolidado_{ref.strftime('%Y-%m')}.pdf",
         mime="application/pdf",
         key="dl_pdf_geral_consolidado_agregado"
     )
+
+    # 6. SEÇÃO DE PESQUISA DE DIZIMISTAS (ADICIONADA AQUI)
+    st.divider()
+    st.subheader("Pesquisa de Dizimistas (por Ano)")
+    
+    # A variável 'congs_all' já está disponível nesta função
+    congs = congs_all
+    
+    c1, c2, c3, c4, c5 = st.columns([1.2, 1.8, 1.4, 2.2, 1.6])
+    with c1:
+        ano_pesq = st.number_input("Ano", value=today_bahia().year, step=1, format="%d", key="srch_year_agg")
+    with c2:
+        # A lógica de seleção de congregação é copiada da página de dizimistas
+        cong_opts = ["Todas"] + [c.name for c in order_congs_sede_first(congs)]
+        cong_sel = st.selectbox("Congregação", cong_opts, key="srch_cong_agg")
+    with c3:
+        mes_opt = ["Todos"] + MONTHS
+        mes_sel = st.selectbox("Mês", mes_opt, index=0, key="srch_month_agg")
+    with c4:
+        nome_q = st.text_input("Nome do dizimista (contém)", key="srch_name_agg")
+    with c5:
+        only_pix = st.checkbox("Somente PIX", value=False, key="srch_only_pix_agg")
+
+    year_start = date(int(ano_pesq), 1, 1)
+    year_end = date(int(ano_pesq)+1, 1, 1)
+    q = select(Tithe).options(joinedload(Tithe.congregation)).where(Tithe.date >= year_start, Tithe.date < year_end)
+
+    if cong_sel != "Todas":
+        cong_id_sel = next((c.id for c in congs if c.name == cong_sel), None)
+        if cong_id_sel:
+            q = q.where(Tithe.congregation_id == cong_id_sel)
+    
+    # Usamos uma nova sessão de DB para esta pesquisa isolada
+    with SessionLocal() as db2:
+        t_list = db2.scalars(q.order_by(Tithe.tither_name, Tithe.date)).all()
+
+    if (nome_q or "").strip():
+        nneedle = _norm(nome_q)
+        t_list = [t for t in t_list if nneedle in _norm(t.tither_name)]
+
+    if only_pix:
+        t_list = [t for t in t_list if (t.payment_method or "").strip().upper() == "PIX"]
+
+    agg = {}
+    for t in t_list:
+        key = (_norm(t.tither_name), t.congregation_id)
+        if key not in agg:
+            agg[key] = {"nome_display": t.tither_name, "congregacao": t.congregation.name if t.congregation else "—",
+                        "total_ano": 0.0, "meses": set(), "primeiro": t.date, "ultimo": t.date}
+        agg[key]["total_ano"] += float(t.amount)
+        agg[key]["meses"].add(t.date.month)
+        if t.date < agg[key]["primeiro"]: agg[key]["primeiro"] = t.date
+        if t.date > agg[key]["ultimo"]: agg[key]["ultimo"] = t.date
+
+    rows = []
+    for info in agg.values():
+        meses_sorted = sorted(list(info["meses"]))
+        rows.append({
+            "Dizimista": info["nome_display"],
+            "Congregação": info["congregacao"],
+            "Qtde de meses no ano": len(meses_sorted),
+            "Meses": ", ".join(MONTHS_SHORT[m-1] for m in meses_sorted) if meses_sorted else "—",
+            "Total no ano (R$)": info["total_ano"],
+            "Primeiro dízimo": format_date(info["primeiro"]) if info["primeiro"] else "—",
+            "Último dízimo": format_date(info["ultimo"]) if info["ultimo"] else "—",
+        })
+
+    df_pesq = pd.DataFrame(rows)
+    if not df_pesq.empty:
+        df_show = df_pesq.sort_values(["Qtde de meses no ano","Dizimista"], ascending=[False, True]).reset_index(drop=True)
+        
+        df_display = df_show.copy()
+        df_display["Total no ano (R$)"] = df_display["Total no ano (R$)"].map(format_currency)
+
+        st.dataframe(df_display, use_container_width=True, hide_index=True, height=320)
+        
+        tot_reg = len(df_show)
+        tot_val = float(df_show["Total no ano (R$)"].sum())
+        cA, cB, cC = st.columns(3)
+        cA.metric("Dizimistas encontrados", f"{tot_reg}")
+        cB.metric("Total geral da pesquisa", format_currency(tot_val))
+
+        pix_names = sorted({t.tither_name for t in t_list if (t.payment_method or "").strip().upper() == "PIX"})
+        cC.metric("Dizimaram por PIX (únicos)", f"{len(pix_names)}")
+        
+        csv = df_show.to_csv(index=False).encode("utf-8-sig")
+        st.download_button("⬇️ Baixar CSV da pesquisa", data=csv, file_name=f"pesquisa_dizimistas_{ano_pesq}.csv", mime="text/csv", key="dl_csv_agg")
+        
+        pdf_data = build_dizimista_search_pdf(df_show, ano_pesq, cong_sel, mes_sel, nome_q)
+        st.download_button("⬇️ Baixar PDF da pesquisa", data=pdf_data, file_name=f"pesquisa_dizimistas_{ano_pesq}.pdf", mime="application/pdf", key="dl_pdf_agg")
+    else:
+        st.caption("Nenhum resultado para os filtros informados.")
 
 def page_relatorios_unificados(user: "User"):
     ensure_seed()
@@ -2909,7 +2965,7 @@ def page_relatorios_unificados(user: "User"):
         
         with col_cong:
             if user.role == "SEDE":
-                HIERARCHY_OPTION = "-- RELATÓRIO HIERÁRQUICO (TODAS AS CONGREGAÇÕES) --"
+                HIERARCHY_OPTION = "-- Visão Geral todas as congregações --" # Nome atualizado
                 cong_names = [c.name for c in congs_all]
                 escopo_opts = [HIERARCHY_OPTION] + cong_names
                 
@@ -2917,7 +2973,6 @@ def page_relatorios_unificados(user: "User"):
                 
                 if escopo_selecionado == HIERARCHY_OPTION:
                     is_aggregated_view = True
-                    st.caption("Exibindo Entradas e Saídas de TODA a rede.")
                 else:
                     parent_cong_obj = next((c for c in congs_all if c.name == escopo_selecionado), None)
             else:
@@ -2931,7 +2986,8 @@ def page_relatorios_unificados(user: "User"):
         st.divider()
 
         if is_aggregated_view:
-            display_finance_hierarchy_aggregated(congs_all, start, end, db)
+            # Passa o 'user' para a função
+            display_finance_hierarchy_aggregated(user, congs_all, start, end, db)
             return
 
         if not parent_cong_obj:
@@ -2951,7 +3007,7 @@ def page_relatorios_unificados(user: "User"):
                 "📖 Entradas (Culto/Resumo)",
                 "🤲 Dízimos (Nominal)",
                 "💳 Saídas (Despesas)",
-                "🏆 Painel (Visão Geral)",
+                "🏆 Painel de Indicadores e Saldo",
             ],
             key="report_tab_mobile",
             index=0
@@ -3018,46 +3074,49 @@ def page_relatorios_unificados(user: "User"):
                         st.metric("Total de Saídas no Período", format_currency(df_saidas["Valor"].sum()))
                     else:
                         st.caption("Nenhuma saída registrada neste período.")
-        elif secao_selecionada == "🏆 Painel (Visão Geral)":
+        
+        elif secao_selecionada == "🏆 Painel de Indicadores e Saldo":
             with st.container():
                 st.markdown('<div class="panel-destaque-fundo">', unsafe_allow_html=True)
+                
                 st.subheader("🏆 Painel de Indicadores e Saldo")
+                
                 if not parent_cong_obj:
                     st.warning("Selecione uma congregação válida no filtro acima.")
                 else:
-                    sub_id = None
-                    cat_miss = db.scalar(select(Category).where(func.lower(Category.name).in_(("missões","missoes")), Category.type == TYPE_IN))
-                    cat_diz = db.scalar(select(Category).where(func.lower(Category.name).in_(("dízimo","dizimo")), Category.type == TYPE_IN))
+                    sub_id_para_calculo = target_sub_id_unif
+
+                    diz_resumo = _sum_dizimo_resumo(parent_cong_obj, sub_id_para_calculo, start, end, db)
+                    diz_nominal = _sum_dizimo_nominal(parent_cong_obj, sub_id_para_calculo, start, end, db)
+                    dizimo_final = max(diz_resumo, diz_nominal)
+
+                    oferta_resumo = _sum_oferta_resumo(parent_cong_obj, sub_id_para_calculo, start, end, db)
                     cat_ofe = db.scalar(select(Category).where(func.lower(Category.name) == "oferta", Category.type == TYPE_IN))
-                    exclude_cat_ids = [c.id for c in [cat_miss, cat_diz, cat_ofe] if c]
-                    total_dizimo_resumo = _sum_dizimo_resumo(parent_cong_obj, sub_id, start, end, db)
-                    total_dizimo_nominal = _sum_dizimo_nominal(parent_cong_obj, sub_id, start, end, db)
-                    dizimo_final = max(total_dizimo_resumo, total_dizimo_nominal)
-                    total_oferta_resumo = _sum_oferta_resumo(parent_cong_obj, sub_id, start, end, db)
-                    total_oferta_tx = float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
+                    
+                    tx_sub_filter = []
+                    if sub_id_para_calculo == "ALL": pass
+                    elif sub_id_para_calculo is None: tx_sub_filter.append(Transaction.sub_congregation_id.is_(None))
+                    else: tx_sub_filter.append(Transaction.sub_congregation_id == sub_id_para_calculo)
+
+                    oferta_tx = float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
                         Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start, Transaction.date < end,
-                        Transaction.type == TYPE_IN, Transaction.category_id == cat_ofe.id if cat_ofe else Transaction.id < 0
+                        Transaction.type == TYPE_IN, *tx_sub_filter,
+                        Transaction.category_id == cat_ofe.id if cat_ofe else Transaction.id < 0
                     )) or 0.0)
-                    oferta_final = max(total_oferta_resumo, total_oferta_tx)
-                    total_outras_entradas = float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
-                        Transaction.congregation_id == parent_cong_obj.id, Transaction.date >= start, Transaction.date < end,
-                        Transaction.type == TYPE_IN, 
-                        Transaction.category_id.notin_(exclude_cat_ids) if exclude_cat_ids else Transaction.id > 0
-                    )) or 0.0)
-                    saidas = _sum_saidas(parent_cong_obj, sub_id, start, end, db)
-                    entradas = dizimo_final + oferta_final + total_outras_entradas
-                    saldo = entradas - saidas
-                    c1,c2,c3 = st.columns(3)
-                    c1.metric("Entradas (Dízimo/Oferta)", format_currency(entradas))
-                    c2.metric("Saídas (Despesas)", format_currency(saidas))
-                    c3.metric("Saldo Final", format_currency(saldo), delta=(saldo))
+                    oferta_final = max(oferta_resumo, oferta_tx)
+                    
+                    saidas = _sum_saidas(parent_cong_obj, sub_id_para_calculo, start, end, db)
+                    saldo = dizimo_final + oferta_final - saidas
+
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("Total Dízimos", format_currency(dizimo_final))
+                    c2.metric("Total Ofertas", format_currency(oferta_final))
+                    c3.metric("Total Saídas", format_currency(saidas))
+                    c4.metric("Saldo", format_currency(saldo))
+
                     st.divider()
-                    st.markdown("##### 🖨️ Download de Relatórios")
-                    
-                    # BOTÃO REMOVIDO DESTA SEÇÃO
-                    
-                    st.markdown("---")
-                    st.markdown("##### Relatórios Individuais por Congregação")
+
+                    st.markdown("##### 🖨️ Download de Relatórios Individuais")
                     
                     congs_download_list = order_congs_sede_first(cong_options_for(user, db))
                     congs_download_names = [c.name for c in congs_download_list]
@@ -3067,20 +3126,21 @@ def page_relatorios_unificados(user: "User"):
                         congs_download_names,
                         key="sel_cong_pdf_download"
                     )
+                    
                     selected_cong_obj = next((c for c in congs_download_list if c.name == sel_cong_pdf_name), None)
+
                     if selected_cong_obj:
-                        pdf_data_unit = build_single_unit_report_pdf(
-                            selected_cong_obj.id, None, selected_cong_obj.name, ref, db
-                        )
                         def _norm_filename(name):
                             return name.lower().replace(" ", "_").replace("ã", "a").replace("ç", "c")
+                            
                         st.download_button(
                             f"⬇️ Baixar PDF de {selected_cong_obj.name}",
-                            data=pdf_data_unit,
+                            data=build_single_unit_report_pdf(selected_cong_obj.id, None, selected_cong_obj.name, ref, db),
                             file_name=f"prestacao_{_norm_filename(selected_cong_obj.name)}_{ref.strftime('%Y-%m')}.pdf",
                             mime="application/pdf",
                             key=f"dl_pdf_unit_{selected_cong_obj.id}"
                         )
+                
                 st.markdown('</div>', unsafe_allow_html=True) # Fechamento do div de destaque # Fechamento do div de destaque
 
 
@@ -7672,10 +7732,9 @@ def page_assistente_ia(user: "User"):
         analyze_btn = st.button("Analisar com IA")
 
         # ----------------- filtros auxiliares -----------------
-        def _cong_filter(col, target_id):
-            return [] if target_id is None else [col == target_id]
+        def _cong_filter(model, target_id):
+            return [] if target_id is None else [model.congregation_id == target_id]
 
-        # casar congregação pelo texto normalizado (para RF e para resolver nome dentro da pergunta)
         def _match_cong_by_norm(name_norm: str):
             for c in congs_all:
                 if _norm(c.name) == name_norm:
@@ -7698,49 +7757,37 @@ def page_assistente_ia(user: "User"):
                     best_len = len(cn)
             return best
 
-        # ----------------- detecção de nomes na pergunta -----------------
         def _name_hits_in_text(prompt_text: str, cong_id: int | None) -> set[str]:
-            """
-            Detecta nomes citados na pergunta e cruza com os dizimistas existentes no período.
-            Retorna um set com os nomes originais tal como estão lançados.
-            """
             nt = _norm(prompt_text or "")
             if not nt:
                 return set()
-
-            # lista distinta de nomes no período/escopo
             q = (
                 select(Tithe.tither_name)
-                .where(Tithe.date >= start_tab, Tithe.date < end_tab, *(_cong_filter(Tithe.congregation_id, cong_id)))
+                .where(Tithe.date >= start_tab, Tithe.date < end_tab, *(_cong_filter(Tithe, cong_id)))
                 .distinct()
             )
             names = [(n or "").strip() for (n,) in db.execute(q).all() if (n or "").strip()]
-
-            # normalizado -> originais
             norm_map: dict[str, set[str]] = {}
             for nm in names:
                 key = _norm(nm)
                 if not key:
                     continue
                 norm_map.setdefault(key, set()).add(nm)
-
             hits: set[str] = set()
             for key, originals in norm_map.items():
                 if key and key in nt:
                     hits.update(originals)
-
             if not hits:
                 tokens = nt.split()
                 for key, originals in norm_map.items():
                     parts = key.split()
                     if len(parts) >= 2 and all(p in tokens for p in parts[:2]):
                         hits.update(originals)
-
             return hits
 
         # ----------------- consultas que as tabelas usam -----------------
         def query_tithes(cong_id: int | None, method: str | None = None, only_names: set[str] | None = None):
-            wh = [Tithe.date >= start_tab, Tithe.date < end_tab, *_cong_filter(Tithe.congregation_id, cong_id)]
+            wh = [Tithe.date >= start_tab, Tithe.date < end_tab, *_cong_filter(Tithe, cong_id)]
             if method:
                 wh.append(func.lower(Tithe.payment_method) == method.lower())
             if only_names:
@@ -7749,20 +7796,12 @@ def page_assistente_ia(user: "User"):
             return db.scalars(q).all()
 
         def query_mission_offers_transactions(cong_id: int | None):
-            # Category 'Missões' (Entrada)
-            cat_id = db.scalar(
-                select(Category.id).where(
-                    func.lower(Category.name) == "missões",
-                    Category.type == TYPE_IN
-                )
-            )
-            if not cat_id:
-                return []
+            cat_id = db.scalar(select(Category.id).where(func.lower(Category.name) == "missões", Category.type == TYPE_IN))
+            if not cat_id: return []
             q = select(Transaction).where(
                 Transaction.date >= start_tab, Transaction.date < end_tab,
-                Transaction.type == TYPE_IN,
-                Transaction.category_id == cat_id,
-                *_cong_filter(Transaction.congregation_id, cong_id)
+                Transaction.type == TYPE_IN, Transaction.category_id == cat_id,
+                *_cong_filter(Transaction, cong_id)
             ).order_by(Transaction.date)
             return db.scalars(q).all()
 
@@ -7770,7 +7809,7 @@ def page_assistente_ia(user: "User"):
             q = select(ServiceLog).where(
                 ServiceLog.date >= start_tab, ServiceLog.date < end_tab,
                 func.lower(ServiceLog.service_type).in_(["culto de missões", "culto de missoes"]),
-                *_cong_filter(ServiceLog.congregation_id, cong_id)
+                *_cong_filter(ServiceLog, cong_id)
             ).order_by(ServiceLog.date)
             return db.scalars(q).all()
 
@@ -7778,7 +7817,7 @@ def page_assistente_ia(user: "User"):
             q = select(ServiceLog).where(
                 ServiceLog.date >= start_tab, ServiceLog.date < end_tab,
                 func.lower(ServiceLog.service_type).notin_(["culto de missões", "culto de missoes"]),
-                *_cong_filter(ServiceLog.congregation_id, cong_id)
+                *_cong_filter(ServiceLog, cong_id)
             ).order_by(ServiceLog.date)
             return db.scalars(q).all()
 
@@ -7789,122 +7828,59 @@ def page_assistente_ia(user: "User"):
                 .where(
                     Transaction.date >= start_tab, Transaction.date < end_tab,
                     Transaction.type == TYPE_OUT,
-                    *_cong_filter(Transaction.congregation_id, cong_id)
+                    *_cong_filter(Transaction, cong_id)
                 )
                 .order_by(Transaction.date)
             )
             return db.execute(q).all()
 
         def query_transactions_by_category_name(name_lower: str, tx_type: str, cong_id: int | None):
-            cat_id = db.scalar(
-                select(Category.id).where(
-                    func.lower(Category.name) == name_lower,
-                    Category.type == tx_type
-                )
-            )
-            if not cat_id:
-                return []
+            cat_id = db.scalar(select(Category.id).where(func.lower(Category.name) == name_lower, Category.type == tx_type))
+            if not cat_id: return []
             q = select(Transaction).where(
                 Transaction.date >= start_tab, Transaction.date < end_tab,
-                Transaction.type == tx_type,
-                Transaction.category_id == cat_id,
-                *_cong_filter(Transaction.congregation_id, cong_id)
+                Transaction.type == tx_type, Transaction.category_id == cat_id,
+                *_cong_filter(Transaction, cong_id)
             ).order_by(Transaction.date)
             return db.scalars(q).all()
 
-        # ----------------- respostas curtas (modo livre) -----------------
-                # ----------------- respostas curtas (modo livre) -----------------
+        # --- FUNÇÃO DE INTERPRETAÇÃO DE TEXTO (LÓGICA COMPLETA RESTAURADA) ---
         def interpret_and_answer(prompt: str, cong_id: int | None) -> str:
-            """
-            Se o usuário digitar um NOME, retorna uma linha POR LANÇAMENTO no mês:
-            **Nome, dizimou R$ X,XX, na congregação Y, na data DD/MM/AAAA, através de PIX/DINHEIRO.**
-            Mantém os demais comportamentos para outras perguntas.
-            """
             txt = _norm(prompt or "")
             parts: list[str] = []
-
-            # Palavras-chave que indicam que NÃO é só busca por nome
-            keywords = (
-                "dizim", "ofert", "miss", "culto", "saída", "saida", "despesa", "gasto", "rf",
-                "tabela", "planilha", "excel", "csv", "total", "pix", "dinheiro", "qtd", "quant"
-            )
+            keywords = ("dizim", "ofert", "miss", "culto", "saída", "saida", "despesa", "gasto", "rf", "tabela", "planilha", "excel", "csv", "total", "pix", "dinheiro", "qtd", "quant")
             looks_like_name = txt and all(k not in txt for k in keywords)
-
-            # nomes existentes no período que apareçam na pergunta
             name_hits = _name_hits_in_text(prompt, cong_id)
 
-            # ===== 1) MODO NOME → uma linha por lançamento =====
             if looks_like_name or name_hits:
-                # usa catálogo quando disponível; senão faz like pelo texto digitado
                 name_to_search = (prompt or "").strip()
-                name_condition = []
-                if name_hits:
-                    name_condition.append(Tithe.tither_name.in_(list(name_hits)))
-                else:
-                    name_condition.append(func.lower(Tithe.tither_name).like(f"%{name_to_search.lower()}%"))
-
+                name_condition = [Tithe.tither_name.in_(list(name_hits))] if name_hits else [func.lower(Tithe.tither_name).like(f"%{name_to_search.lower()}%")]
                 q_lines = (
-                    select(
-                        Tithe.tither_name, Tithe.date, Tithe.amount, Tithe.payment_method,
-                        Congregation.name
-                    )
+                    select(Tithe.tither_name, Tithe.date, Tithe.amount, Tithe.payment_method, Congregation.name)
                     .join(Congregation, Congregation.id == Tithe.congregation_id, isouter=True)
-                    .where(
-                        Tithe.date >= start_tab, Tithe.date < end_tab,
-                        *_cong_filter(Tithe.congregation_id, cong_id),
-                        *name_condition
-                    )
+                    .where(Tithe.date >= start_tab, Tithe.date < end_tab, *_cong_filter(Tithe, cong_id), *name_condition)
                     .order_by(Tithe.date)
                 )
                 rows = db.execute(q_lines).all()
-
                 if rows:
-                    lines_md: list[str] = []
-                    for nm, d, amt, method, cong_name in rows:
-                        mth = (method or "—").strip().upper()
-                        if mth.lower() == "pix":
-                            mth = "PIX"
-                        elif mth.lower() == "dinheiro":
-                            mth = "DINHEIRO"
-
-                        # cada lançamento em NEGRITO, um por linha (parágrafo separado)
-                        lines_md.append(
-                            f"**{(nm or '').strip()}, dizimou {_fmt_brl(float(amt or 0.0))}, "
-                            f"na congregação {cong_name or '—'}, na data {_fmt_date(d)}, "
-                            f"através de {mth}.**"
-                        )
-                    # quebra de linha entre lançamentos
-                    return "\n\n".join(lines_md)
+                    return "\n\n".join([
+                        f"**{(nm or '').strip()}, dizimou {_fmt_brl(float(amt or 0.0))}, "
+                        f"na congregação {cong_name or '—'}, na data {_fmt_date(d)}, "
+                        f"através de {(method or '—').strip().upper()}.**"
+                        for nm, d, amt, method, cong_name in rows
+                    ])
                 else:
-                    # nenhum lançamento no mês para o nome pesquisado
-                    return f"**{name_to_search}, dizimou {_fmt_brl(0.0)} no período selecionado.**"
+                    return f"Nenhum dízimo encontrado para '{name_to_search}' no período selecionado."
 
-            # ===== 2) Demais perguntas (mantém comportamentos existentes) =====
-
-            # Dízimos – total (quando explicitamente pedido)
             if ("dizim" in txt or "dízim" in txt) and ("total" in txt or "som" in txt):
-                q = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
-                    Tithe.date >= start_tab, Tithe.date < end_tab, *_cong_filter(Tithe.congregation_id, cong_id)
-                )
+                q = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(Tithe.date >= start_tab, Tithe.date < end_tab, *_cong_filter(Tithe, cong_id))
                 parts.append(f"Total Dízimos: {_fmt_brl(float(db.scalar(q) or 0.0))}")
-
-            # Dízimos por método
             if "pix" in txt:
-                q = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
-                    Tithe.date >= start_tab, Tithe.date < end_tab,
-                    func.lower(Tithe.payment_method) == "pix",
-                    *_cong_filter(Tithe.congregation_id, cong_id)
-                )
+                q = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(Tithe.date >= start_tab, Tithe.date < end_tab, func.lower(Tithe.payment_method) == "pix", *_cong_filter(Tithe, cong_id))
                 parts.append(f"Dízimos (PIX): {_fmt_brl(float(db.scalar(q) or 0.0))}")
             if "dinheiro" in txt:
-                q = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
-                    Tithe.date >= start_tab, Tithe.date < end_tab,
-                    func.lower(Tithe.payment_method) == "dinheiro",
-                    *_cong_filter(Tithe.congregation_id, cong_id)
-                )
+                q = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(Tithe.date >= start_tab, Tithe.date < end_tab, func.lower(Tithe.payment_method) == "dinheiro", *_cong_filter(Tithe, cong_id))
                 parts.append(f"Dízimos (Dinheiro): {_fmt_brl(float(db.scalar(q) or 0.0))}")
-
-            # Ofertas (cultos x missões)
             if "oferta" in txt and "miss" in txt:
                 txs = query_mission_offers_transactions(cong_id)
                 tot = sum(float(tx.amount or 0) for tx in txs)
@@ -7915,27 +7891,16 @@ def page_assistente_ia(user: "User"):
             elif "oferta" in txt:
                 tot = sum(float(sv.oferta or 0) for sv in query_service_offers_cultos(cong_id))
                 parts.append(f"Ofertas (Cultos): {_fmt_brl(tot)}")
-
-            # Saídas
             if any(k in txt for k in ["saída", "saida", "despesa", "gasto"]):
-                q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
-                    Transaction.date >= start_tab, Transaction.date < end_tab,
-                    Transaction.type == TYPE_OUT, *_cong_filter(Transaction.congregation_id, cong_id)
-                )
+                q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_OUT, *_cong_filter(Transaction, cong_id))
                 parts.append(f"Total Saídas: {_fmt_brl(float(db.scalar(q) or 0.0))}")
-
             return " • ".join(parts) if parts else ""
 
-
-        # ===========================
-        # TABELAS (quando pedir tabela/planilha/csv/excel)
-        # ===========================
         def build_table_from_prompt(prompt: str, cong_id: int | None):
             text = _norm(prompt or "")
             wants_table = any(k in text for k in ["tabela", "planilha", "excel", "csv", "lista", "detalhe", "detalhes"])
             if not wants_table:
                 return pd.DataFrame(), ""
-
             is_diz = "dizim" in text or "dízim" in text or "dizimista" in text
             is_saida = any(k in text for k in ["saída", "saida", "despesa", "gasto"])
             is_oferta = "oferta" in text or "ofertas" in text
@@ -7944,95 +7909,40 @@ def page_assistente_ia(user: "User"):
             filt_pix = "pix" in text
             filt_din = "dinheiro" in text or "cash" in text
             resumo_por_nome = any(k in text for k in ["por nome", "por pessoa", "resumo", "agrupado", "somado"])
-
-            # nomes citados (para filtrar a tabela quando fizer sentido)
             name_hits = _name_hits_in_text(prompt, cong_id)
-
-            # DÍZIMOS
             if is_diz:
-                rows = query_tithes(
-                    cong_id,
-                    method=("pix" if filt_pix else ("dinheiro" if filt_din else None)),
-                    only_names=(name_hits if name_hits else None)
-                )
-                if not rows:
-                    return pd.DataFrame(), "Dízimos — sem registros."
-
-                data = [{
-                    "Data": _fmt_date(t.date),
-                    "Dizimista": t.tither_name or "",
-                    "Forma": (t.payment_method or "").upper(),
-                    "Valor": float(t.amount or 0.0),
-                } for t in rows]
+                rows = query_tithes(cong_id, method=("pix" if filt_pix else ("dinheiro" if filt_din else None)), only_names=(name_hits if name_hits else None))
+                if not rows: return pd.DataFrame(), "Dízimos — sem registros."
+                data = [{"Data": _fmt_date(t.date), "Dizimista": t.tither_name or "", "Forma": (t.payment_method or "").upper(), "Valor": float(t.amount or 0.0)} for t in rows]
                 df = pd.DataFrame(data)
-
                 if resumo_por_nome or name_hits:
-                    df = df.groupby(["Dizimista", "Forma"], dropna=False, as_index=False).agg(
-                        Quantidade=("Valor", "count"),
-                        Total=("Valor", "sum"),
-                    ).sort_values(["Total", "Dizimista"], ascending=[False, True])
-
+                    df = df.groupby(["Dizimista", "Forma"], dropna=False, as_index=False).agg(Quantidade=("Valor", "count"), Total=("Valor", "sum")).sort_values(["Total", "Dizimista"], ascending=[False, True])
                 return df, "Dízimos"
-
-            # MISSÕES (transações) com fallback no ServiceLog
             if is_oferta and is_missoes and not is_culto:
                 txs = query_mission_offers_transactions(cong_id)
-                data = [{
-                    "Data": _fmt_date(tx.date),
-                    "Descrição": tx.description or "",
-                    "Valor": float(tx.amount or 0.0),
-                } for tx in txs]
+                data = [{"Data": _fmt_date(tx.date), "Descrição": tx.description or "", "Valor": float(tx.amount or 0.0)} for tx in txs]
                 if not data:
                     sl = query_mission_offers_fallback_servicelog(cong_id)
-                    data = [{
-                        "Data": _fmt_date(sv.date),
-                        "Origem": "Culto de Missões",
-                        "Valor": float(sv.oferta or 0.0),
-                    } for sv in sl]
+                    data = [{"Data": _fmt_date(sv.date), "Origem": "Culto de Missões", "Valor": float(sv.oferta or 0.0)} for sv in sl]
                 return (pd.DataFrame(data) if data else pd.DataFrame()), "Ofertas de Missões"
-
-            # OFERTAS CULTO
             if (is_oferta and is_culto) or (is_oferta and not is_missoes):
                 rows = query_service_offers_cultos(cong_id)
-                if not rows:
-                    return pd.DataFrame(), "Ofertas do Culto — sem registros."
-                data = [{
-                    "Data": _fmt_date(sv.date),
-                    "Tipo de Culto": sv.service_type,
-                    "Oferta": float(sv.oferta or 0.0),
-                } for sv in rows]
+                if not rows: return pd.DataFrame(), "Ofertas do Culto — sem registros."
+                data = [{"Data": _fmt_date(sv.date), "Tipo de Culto": sv.service_type, "Oferta": float(sv.oferta or 0.0)} for sv in rows]
                 return pd.DataFrame(data), "Ofertas do Culto"
-
-            # SAÍDAS
             if is_saida:
                 rows = query_outgoings(cong_id)
-                if not rows:
-                    return pd.DataFrame(), "Saídas — sem registros."
-                data = [{
-                    "Data": _fmt_date(tx.date),
-                    "Categoria": cat,
-                    "Descrição": tx.description or "",
-                    "Valor": float(tx.amount or 0.0),
-                } for tx, cat in rows]
+                if not rows: return pd.DataFrame(), "Saídas — sem registros."
+                data = [{"Data": _fmt_date(tx.date), "Categoria": cat, "Descrição": tx.description or "", "Valor": float(tx.amount or 0.0)} for tx, cat in rows]
                 df = pd.DataFrame(data)
                 if resumo_por_nome:
-                    df = df.groupby(["Categoria"], as_index=False)\
-                           .agg(Total=("Valor", "sum"))\
-                           .sort_values("Total", ascending=False)
+                    df = df.groupby(["Categoria"], as_index=False).agg(Total=("Valor", "sum")).sort_values("Total", ascending=False)
                 return df, "Saídas"
-
-            # CATEGORIA 'OFERTA' (transação ENTRADA)
             if is_oferta and ("categoria" in text or "transa" in text):
                 rows = query_transactions_by_category_name("oferta", TYPE_IN, cong_id)
-                if not rows:
-                    return pd.DataFrame(), "Transações — categoria 'Oferta' sem registros."
-                data = [{
-                    "Data": _fmt_date(tx.date),
-                    "Descrição": tx.description or "",
-                    "Valor": float(tx.amount or 0.0),
-                } for tx in rows]
+                if not rows: return pd.DataFrame(), "Transações — categoria 'Oferta' sem registros."
+                data = [{"Data": _fmt_date(tx.date), "Descrição": tx.description or "", "Valor": float(tx.amount or 0.0)} for tx in rows]
                 return pd.DataFrame(data), "Transações — Categoria 'Oferta' (Entrada)"
-
             return pd.DataFrame(), ""
 
         # ----------------- Execução -----------------
@@ -8042,164 +7952,76 @@ def page_assistente_ia(user: "User"):
                 st.warning("Digite a pergunta.")
                 return
 
-            # “Todas as Congregações” + possível nome citado na pergunta
             target_cong_id = selected_cong_id
             if target_cong_id is None:
                 resolved = resolve_congregation_from_text(qtext)
                 if resolved:
                     target_cong_id = resolved.id
-
-            # ---------------------- COMANDO "RF" ----------------------
+            
             nt = _norm(qtext)
             m = re.search(r"(.+?)\s+rf\b$", nt)
             if m:
                 cong_txt_norm = m.group(1).strip()
+                parent_cong_obj_rf = None
+                rf_cong_titulo = ""
+                rf_cong_id = None
+
                 if cong_txt_norm in ("todas as congregacoes", "todas as congregações", "todas"):
-                    rf_cong_id = None
                     rf_cong_titulo = "Todas as Congregações"
+                    # Lógica para "Todas as congregações"
+                    diz_resumo = float(db.scalar(select(func.coalesce(func.sum(ServiceLog.dizimo), 0.0)).where(ServiceLog.date >= start_tab, ServiceLog.date < end_tab)) or 0.0)
+                    diz_nominal = float(db.scalar(select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(Tithe.date >= start_tab, Tithe.date < end_tab)) or 0.0)
+                    dizimo_final = max(diz_resumo, diz_nominal)
+                    
+                    oferta_resumo = float(db.scalar(select(func.coalesce(func.sum(ServiceLog.oferta), 0.0)).where(ServiceLog.date >= start_tab, ServiceLog.date < end_tab, ServiceLog.service_type != "Culto de Missões")) or 0.0)
+                    oferta_tx_q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).join(Category).where(Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_IN, func.lower(Category.name) == 'oferta')
+                    oferta_tx = float(db.scalar(oferta_tx_q) or 0.0)
+                    oferta_final = max(oferta_resumo, oferta_tx)
+
+                    saidas_total = float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_OUT)) or 0.0)
                 else:
                     cong_match = _match_cong_by_norm(cong_txt_norm)
                     if not cong_match:
-                        st.error("Não encontrei essa congregação para o comando RF.")
+                        st.error(f"Não encontrei a congregação '{cong_txt_norm}' para o comando RF.")
                         return
+                    parent_cong_obj_rf = cong_match
                     rf_cong_id = cong_match.id
                     rf_cong_titulo = cong_match.name
+                    dizimo_final = max(_sum_dizimo_resumo(parent_cong_obj_rf, "ALL", start_tab, end_tab, db), _sum_dizimo_nominal(parent_cong_obj_rf, "ALL", start_tab, end_tab, db))
+                    oferta_resumo = _sum_oferta_resumo(parent_cong_obj_rf, "ALL", start_tab, end_tab, db)
+                    cat_ofe = db.scalar(select(Category).where(func.lower(Category.name) == "oferta", Category.type == TYPE_IN))
+                    oferta_tx = float(db.scalar(select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(Transaction.congregation_id == rf_cong_id, Transaction.date >= start_tab, Transaction.date < end_tab, Transaction.type == TYPE_IN, Transaction.category_id == cat_ofe.id if cat_ofe else Transaction.id < 0)) or 0.0)
+                    oferta_final = max(oferta_resumo, oferta_tx)
+                    saidas_total = _sum_saidas(parent_cong_obj_rf, "ALL", start_tab, end_tab, db)
 
-                diz_total = float(db.scalar(
-                    select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
-                        Tithe.date >= start_tab, Tithe.date < end_tab,
-                        *_cong_filter(Tithe.congregation_id, rf_cong_id)
-                    )
-                ) or 0.0)
-
-                ofertas_culto = float(db.scalar(
-                    select(func.coalesce(func.sum(ServiceLog.oferta), 0.0)).where(
-                        ServiceLog.date >= start_tab, ServiceLog.date < end_tab,
-                        func.lower(ServiceLog.service_type).notin_(["culto de missoes", "culto de missões"]),
-                        *_cong_filter(ServiceLog.congregation_id, rf_cong_id)
-                    )
-                ) or 0.0)
-
-                saidas_total = float(db.scalar(
-                    select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
-                        Transaction.date >= start_tab, Transaction.date < end_tab,
-                        Transaction.type == TYPE_OUT,
-                        *_cong_filter(Transaction.congregation_id, rf_cong_id)
-                    )
-                ) or 0.0)
-
-                saldo = diz_total + ofertas_culto - saidas_total
-
-                df_rf = pd.DataFrame([{
-                    "Dízimos (Entradas)": diz_total,
-                    "Ofertas do Culto (Entradas)": ofertas_culto,
-                    "Saídas (Totais)": saidas_total,
-                    "Saldo": saldo,
-                }])
-
+                saldo = dizimo_final + oferta_final - saidas_total
+                df_rf = pd.DataFrame([{"Dízimos": dizimo_final, "Ofertas": oferta_final, "Saídas": saidas_total, "Saldo": saldo}])
                 df_show = df_rf.copy()
-                for ccol in df_show.columns:
-                    df_show[ccol] = df_show[ccol].map(_fmt_brl)
-
-                st.markdown(f"**Relatório Financeiro — {rf_cong_titulo} — {ref_tab.strftime('%m/%Y')}**")
-                st.dataframe(df_show, use_container_width=True)
-
-                # downloads
+                for ccol in df_show.columns: df_show[ccol] = df_show[ccol].map(_fmt_brl)
+                
+                st.markdown(f"**Relatório Financeiro — {rf_cong_titulo} — {ref_tab.strftime('%B de %Y')}**")
+                st.dataframe(df_show, use_container_width=True, hide_index=True)
                 csv_bytes = df_rf.to_csv(index=False).encode("utf-8")
-                st.download_button(
-                    "Baixar CSV",
-                    data=csv_bytes,
-                    file_name=f"rf_{_norm(rf_cong_titulo)}_{ref_tab.strftime('%Y_%m')}.csv",
-                    mime="text/csv",
-                )
-
-                excel_ok = False
-                for eng, module in (("xlsxwriter", "xlsxwriter"), ("openpyxl", "openpyxl")):
-                    try:
-                        __import__(module)
-                        buf = io.BytesIO()
-                        with pd.ExcelWriter(buf, engine=eng) as writer:
-                            df_rf.to_excel(writer, sheet_name="RF", index=False)
-                        st.download_button(
-                            "Baixar Excel",
-                            data=buf.getvalue(),
-                            file_name=f"rf_{_norm(rf_cong_titulo)}_{ref_tab.strftime('%Y_%m')}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        )
-                        excel_ok = True
-                        break
-                    except Exception:
-                        continue
-                if not excel_ok:
-                    st.caption("Para Excel, instale 'xlsxwriter' ou 'openpyxl'. Use o CSV por enquanto.")
+                st.download_button("Baixar CSV", data=csv_bytes, file_name=f"rf_{_norm(rf_cong_titulo)}_{ref_tab.strftime('%Y_%m')}.csv", mime="text/csv")
                 return
-            # -------------------- FIM COMANDO "RF" --------------------
 
-            # Se pediu lista/tabela/planilha/detalhes -> DataFrame
             df, titulo = build_table_from_prompt(qtext, target_cong_id)
             if not df.empty:
                 st.markdown(f"**{titulo}**")
-                st.dataframe(df, use_container_width=True)
-
-                # ---- Downloads: CSV (sempre) + Excel (xlsxwriter → openpyxl) ----
+                formatters = {}
+                for col in df.columns:
+                    if 'valor' in col.lower() or 'total' in col.lower():
+                        formatters[col] = format_currency
+                st.dataframe(df.style.format(formatters, na_rep='-'), use_container_width=True, hide_index=True)
                 csv_bytes = df.to_csv(index=False).encode("utf-8")
-                st.download_button("Baixar CSV", data=csv_bytes,
-                                   file_name=f"{_norm(titulo or 'dados')}.csv", mime="text/csv")
-
-                excel_done = False
-                excel_filename = f"{_norm(titulo or 'dados')}.xlsx"
-                excel_mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                for eng, module in (("xlsxwriter", "xlsxwriter"), ("openpyxl", "openpyxl")):
-                    try:
-                        __import__(module)
-                        buf = io.BytesIO()
-                        with pd.ExcelWriter(buf, engine=eng) as writer:
-                            df.to_excel(writer, sheet_name="Dados", index=False)
-                        st.download_button("Baixar Excel", data=buf.getvalue(),
-                                           file_name=excel_filename, mime=excel_mime)
-                        excel_done = True
-                        break
-                    except Exception:
-                        continue
-                if not excel_done:
-                    st.caption("Para exportar em Excel, instale 'xlsxwriter' ou 'openpyxl'. Use o CSV por enquanto.")
-
-                # resumo curto para não poluir
-                resumo = interpret_and_answer(qtext, target_cong_id)
-                if resumo:
-                    st.caption(resumo)
+                st.download_button("Baixar CSV", data=csv_bytes, file_name=f"{_norm(titulo or 'dados')}.csv", mime="text/csv", key=f"dl_csv_{_norm(titulo)}")
                 return
 
-            # Caso não tenha pedido tabela/planilha, responde conciso (modo livre)
             answer = interpret_and_answer(qtext, target_cong_id)
 
-            # Fallback amplo (sem alterar funcionalidades já existentes)
-            if not answer or answer.strip() == "Sem dados para a sua pergunta no período.":
-                parts = []
-                txt2 = _norm(qtext)
-                if "dizim" in txt2 or "dízim" in txt2 or "dizimista" in txt2:
-                    q = select(func.coalesce(func.sum(Tithe.amount), 0.0)).where(
-                        Tithe.date >= start_tab, Tithe.date < end_tab, *_cong_filter(Tithe.congregation_id, target_cong_id)
-                    )
-                    parts.append(f"Total Dízimos: {_fmt_brl(float(db.scalar(q) or 0.0))}")
-                if "miss" in txt2 or ("oferta" in txt2 and "miss" in txt2):
-                    txs = query_mission_offers_transactions(target_cong_id)
-                    tot = sum(tx.amount or 0 for tx in txs)
-                    if tot == 0:
-                        sl = query_mission_offers_fallback_servicelog(target_cong_id)
-                        tot = sum(s.oferta or 0 for s in sl)
-                    parts.append(f"Ofertas (Missões): {_fmt_brl(tot)}")
-                if "oferta" in txt2 and ("culto" in txt2 or "miss" not in txt2):
-                    parts.append(f"Ofertas (Cultos): {_fmt_brl(sum(sv.oferta or 0 for sv in query_service_offers_cultos(target_cong_id)))}")
-                if any(k in txt2 for k in ["saída", "saida", "despesa", "gasto"]):
-                    q = select(func.coalesce(func.sum(Transaction.amount), 0.0)).where(
-                        Transaction.date >= start_tab, Transaction.date < end_tab,
-                        Transaction.type == TYPE_OUT, *_cong_filter(Transaction.congregation_id, target_cong_id)
-                    )
-                    parts.append(f"Total Saídas: {_fmt_brl(float(db.scalar(q) or 0.0))}")
-
-                answer = " • ".join(parts) if parts else "Sem dados para a sua pergunta no período."
-
+            if not answer.strip():
+                answer = "Não entendi a pergunta ou não encontrei dados. Tente perguntar sobre 'total de dízimos', 'ofertas', 'saídas', ou o nome de um dizimista."
+            
             st.markdown(answer)
 
  
